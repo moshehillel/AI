@@ -108,6 +108,10 @@ When Clerk / Cursor / GitHub are ready:
 3. Redeploy web + worker
 4. Follow [runbooks.md](./runbooks.md) production wiring checklist
 
+### GitHub App (one-click)
+
+See [github-app-setup.md](./github-app-setup.md). On Railway, set `RAILWAY_API_TOKEN` and `RAILWAY_WORKER_SERVICE_ID` on the **web** service, then open Admin → **Register GitHub App (one-time)** while logged into GitHub.
+
 ## Local Docker smoke test
 
 ```bash

@@ -2,6 +2,8 @@
 
 Automation Studio needs one GitHub App per deployment. Most fields are pre-filled via the **manifest flow** — you only need a single GitHub login + confirmation.
 
+> **NetFree / cloud agent blocked?** The cloud agent’s `gh` CLI **cannot** create a GitHub App by itself (integration token, no create-app API). Use the copy-paste manual guide: **[github-app-manual-netfree.md](./github-app-manual-netfree.md)** — github.com only, no HTML file, no Railway visit.
+
 ## Option A — NetFree / no Railway URL (recommended when Railway is blocked)
 
 You never visit your Railway domain. Only **github.com** is opened in the browser.
@@ -67,6 +69,8 @@ Opens `http://127.0.0.1:8765/start` — callback stays on localhost; only github
 ## Option D — Manual dashboard (copy-paste fallback)
 
 Use this when NetFree blocks the HTML form POST or the file opens as raw HTML text.
+
+**Full step-by-step (recommended):** [github-app-manual-netfree.md](./github-app-manual-netfree.md)
 
 1. Open https://github.com/organizations/moshehillel/settings/apps/new (must be signed in as a **moshehillel org owner**).
 2. Fill in every field exactly as below (replace `{APP_URL}` with your deployment URL, e.g. `https://web-production-98ce0.up.railway.app`):
@@ -156,7 +160,16 @@ Optional env:
 
 ## gh CLI reference
 
-Manifest conversion (unauthenticated — `code` is the secret):
+### What works in the cloud agent today
+
+| Check | Typical result |
+|---|---|
+| `gh auth status` | Logged in as **`cursor[bot]`** (Cursor integration token) |
+| `gh api user` | **403** — integration cannot impersonate you |
+| `gh api orgs/moshehillel` | **404/403** — no org admin access |
+| `gh api -X POST app-manifests/{code}/conversions` | Works **only** after you paste a valid one-time `code` from github.com |
+
+### Manifest conversion (unauthenticated — `code` is the secret)
 
 ```bash
 gh api -X POST "app-manifests/CODE/conversions" \
@@ -166,4 +179,10 @@ gh api -X POST "app-manifests/CODE/conversions" \
 
 Returns `id`, `slug`, `client_id`, `client_secret`, `webhook_secret`, `pem`.
 
-A PAT cannot create apps via API without the manifest flow — org owners must click **Create** on github.com.
+### What does **not** exist
+
+- No REST/GraphQL endpoint to create a GitHub App from scratch (no PAT, no `gh` flag skips the browser)
+- No `gh extension` for app registration
+- `gh auth login` with your account helps run **other** `gh` commands — it still cannot click **Create GitHub App** for you
+
+Org owners must click **Create** on github.com (manifest flow or [manual form](./github-app-manual-netfree.md)).

@@ -1,0 +1,17 @@
+node_modules
+dist
+.next
+.turbo
+.env
+.env.local
+.env*.local
+*.log
+coverage
+.DS_Store
+*.tsbuildinfo
+.prisma
+apps/web/.next
+workers/runner/dist
+packages/*/dist
+.vercel
+docker-data

@@ -1,0 +1,433 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MembershipRole {
+  EMPLOYEE
+  DEVELOPER
+  ADMIN
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum ChangeClassification {
+  SIMPLE
+  NORMAL
+  COMPLEX
+  HIGH_RISK
+}
+
+enum ChangeRequestStatus {
+  DRAFT
+  ANALYZING
+  PLANNING
+  AWAITING_PLAN_APPROVAL
+  AWAITING_HIGH_RISK_APPROVAL
+  IMPLEMENTING
+  TESTING
+  PREVIEW_READY
+  CHANGES_REQUESTED
+  READY_FOR_REVIEW
+  DEVELOPER_REVIEW
+  APPROVED
+  MERGED
+  DEPLOYED
+  REJECTED
+  FAILED
+  CANCELLED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+enum AgentRunMode {
+  PLAN
+  AGENT
+}
+
+enum AgentRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum PullRequestStatus {
+  OPEN
+  CLOSED
+  MERGED
+  DRAFT
+}
+
+enum PreviewStatus {
+  PENDING
+  READY
+  FAILED
+  DESTROYED
+}
+
+enum CiCheckStatus {
+  PENDING
+  SUCCESS
+  FAILURE
+  ERROR
+  CANCELLED
+}
+
+enum SecretPurpose {
+  PREVIEW
+  PLATFORM
+}
+
+enum SecretProvider {
+  ENV
+  VAULT
+}
+
+enum UsageProvider {
+  CURSOR
+  RAILWAY
+}
+
+model Company {
+  id         String   @id @default(cuid())
+  name       String
+  slug       String   @unique
+  clerkOrgId String?  @unique
+  settings   Json     @default("{}")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  memberships    CompanyMembership[]
+  projects       Project[]
+  changeRequests ChangeRequest[]
+  usageRecords   UsageRecord[]
+  secretRefs     SecretRef[]
+  auditEvents    AuditEvent[]
+}
+
+model User {
+  id          String   @id @default(cuid())
+  clerkUserId String   @unique
+  email       String
+  name        String?
+  slug        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memberships              CompanyMembership[]
+  projectMemberships       ProjectMember[]
+  createdChangeRequests    ChangeRequest[]           @relation("ChangeRequestCreator")
+  assignedChangeRequests   ChangeRequest[]           @relation("ChangeRequestAssignee")
+  messages                 ChangeRequestMessage[]
+  approvedPlans            Plan[]
+  statusEvents             ChangeRequestStatusEvent[]
+  auditEvents              AuditEvent[]
+  usageRecords             UsageRecord[]
+}
+
+model CompanyMembership {
+  id        String         @id @default(cuid())
+  companyId String
+  userId    String
+  role      MembershipRole @default(EMPLOYEE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, userId])
+  @@index([userId])
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  companyId   String
+  name        String
+  slug        String
+  description String?
+  status      ProjectStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  members        ProjectMember[]
+  repository     Repository?
+  changeRequests ChangeRequest[]
+  usageRecords   UsageRecord[]
+  secretRefs     SecretRef[]
+
+  @@unique([companyId, slug])
+  @@index([companyId])
+}
+
+model ProjectMember {
+  id        String   @id @default(cuid())
+  projectId String
+  userId    String
+  createdAt DateTime @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model Repository {
+  id                String   @id @default(cuid())
+  projectId         String   @unique
+  githubOwner       String
+  githubRepo        String
+  installationId    String?
+  defaultBranch     String   @default("main")
+  railwayProjectId  String?
+  previewBaseEnvId  String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([githubOwner, githubRepo])
+}
+
+model ChangeRequest {
+  id                  String               @id @default(cuid())
+  companyId           String
+  projectId           String
+  createdById         String
+  assignedDeveloperId String?
+  number              Int
+  title               String
+  description         String               @default("")
+  classification      ChangeClassification @default(NORMAL)
+  status              ChangeRequestStatus  @default(DRAFT)
+  branchName          String?
+  cursorAgentId       String?
+  shortDescription    String?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  company           Company                    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  project           Project                    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy         User                       @relation("ChangeRequestCreator", fields: [createdById], references: [id])
+  assignedDeveloper User?                      @relation("ChangeRequestAssignee", fields: [assignedDeveloperId], references: [id])
+  messages          ChangeRequestMessage[]
+  statusEvents      ChangeRequestStatusEvent[]
+  plans             Plan[]
+  agentRuns         AgentRun[]
+  pullRequests      PullRequest[]
+  previews          PreviewEnvironment[]
+  ciChecks          CiCheckSuite[]
+  usageRecords      UsageRecord[]
+
+  @@unique([projectId, number])
+  @@index([companyId, status])
+  @@index([projectId])
+  @@index([createdById])
+  @@index([cursorAgentId])
+}
+
+model ChangeRequestStatusEvent {
+  id              String              @id @default(cuid())
+  changeRequestId String
+  fromStatus      ChangeRequestStatus?
+  toStatus        ChangeRequestStatus
+  actorId         String?
+  reason          String?
+  createdAt       DateTime            @default(now())
+
+  changeRequest ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+  actor         User?         @relation(fields: [actorId], references: [id])
+
+  @@index([changeRequestId, createdAt])
+}
+
+model ChangeRequestMessage {
+  id              String      @id @default(cuid())
+  changeRequestId String
+  authorId        String?
+  role            MessageRole
+  content         String
+  cursorRunId     String?
+  model           String?
+  metadata        Json        @default("{}")
+  createdAt       DateTime    @default(now())
+
+  changeRequest ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+  author        User?         @relation(fields: [authorId], references: [id])
+
+  @@index([changeRequestId, createdAt])
+}
+
+model Plan {
+  id              String    @id @default(cuid())
+  changeRequestId String
+  content         String
+  contentJson     Json?
+  approvedAt      DateTime?
+  approvedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  changeRequest ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+  approvedBy    User?         @relation(fields: [approvedById], references: [id])
+
+  @@index([changeRequestId])
+}
+
+model AgentRun {
+  id              String         @id @default(cuid())
+  changeRequestId String
+  cursorAgentId   String
+  cursorRunId     String?
+  mode            AgentRunMode
+  status          AgentRunStatus @default(QUEUED)
+  error           String?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  changeRequest ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+  usageRecords  UsageRecord[]
+
+  @@index([changeRequestId])
+  @@index([cursorAgentId])
+  @@index([cursorRunId])
+}
+
+model UsageRecord {
+  id              String        @id @default(cuid())
+  companyId       String
+  userId          String?
+  projectId       String?
+  changeRequestId String?
+  agentRunId      String?
+  provider        UsageProvider
+  inputTokens     Int           @default(0)
+  outputTokens    Int           @default(0)
+  totalTokens     Int           @default(0)
+  billedCents     Int?
+  metadata        Json          @default("{}")
+  createdAt       DateTime      @default(now())
+
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user          User?          @relation(fields: [userId], references: [id])
+  project       Project?       @relation(fields: [projectId], references: [id])
+  changeRequest ChangeRequest? @relation(fields: [changeRequestId], references: [id])
+  agentRun      AgentRun?      @relation(fields: [agentRunId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([changeRequestId])
+}
+
+model PullRequest {
+  id              String            @id @default(cuid())
+  changeRequestId String
+  githubPrNumber  Int
+  url             String
+  status          PullRequestStatus @default(OPEN)
+  headSha         String?
+  baseSha         String?
+  title           String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  changeRequest ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+
+  @@unique([changeRequestId, githubPrNumber])
+  @@index([changeRequestId])
+}
+
+model PreviewEnvironment {
+  id              String        @id @default(cuid())
+  changeRequestId String
+  provider        String        @default("RAILWAY")
+  externalId      String?
+  url             String?
+  status          PreviewStatus @default(PENDING)
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  destroyedAt     DateTime?
+
+  changeRequest ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+
+  @@index([changeRequestId])
+}
+
+model CiCheckSuite {
+  id              String        @id @default(cuid())
+  changeRequestId String
+  provider        String        @default("GITHUB")
+  externalId      String?
+  status          CiCheckStatus @default(PENDING)
+  detailsUrl      String?
+  rawSummary      Json          @default("{}")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  changeRequest ChangeRequest @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
+
+  @@index([changeRequestId])
+}
+
+model SecretRef {
+  id          String         @id @default(cuid())
+  companyId   String
+  projectId   String?
+  purpose     SecretPurpose
+  provider    SecretProvider @default(ENV)
+  keyName     String
+  externalRef String
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, projectId, keyName, purpose])
+  @@index([companyId])
+}
+
+model AuditEvent {
+  id         String   @id @default(cuid())
+  companyId  String
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  actor   User?   @relation(fields: [actorId], references: [id])
+
+  @@index([companyId, createdAt])
+  @@index([entityType, entityId])
+}
+
+model GithubInstallation {
+  id             String   @id @default(cuid())
+  companyId      String
+  installationId String   @unique
+  accountLogin   String
+  accountType    String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([companyId])
+}

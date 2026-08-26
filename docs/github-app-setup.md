@@ -14,10 +14,12 @@ pnpm register:github-app
 
 Steps:
 
-1. Open the generated `register-github-app.html` in your browser (double-click or `file://`).
-2. Sign into GitHub as a **moshehillel org owner** if prompted; review the app and click **Create GitHub App**.
-3. GitHub redirects to `https://github.com/organizations/moshehillel/settings/apps?code=…` — copy the **`code`** query param from the address bar.
-4. Paste the code to the cloud agent, or exchange it locally:
+1. Save the generated file as **`register-github-app.html`** (not `.txt`).
+2. Right-click the file → **Open with** → Chrome or Edge (do not open in a plain-text editor).
+3. Click **Continue to GitHub** on the page (there is no auto-redirect — you must click the button).
+4. Sign into GitHub as a **moshehillel org owner** if prompted; review the app and click **Create GitHub App**.
+5. GitHub redirects to `https://github.com/organizations/moshehillel/settings/apps?code=…` — copy the **`code`** query param from the address bar.
+6. Paste the code to the cloud agent, or exchange it locally:
 
 ```bash
 APP_URL=https://web-production-98ce0.up.railway.app \
@@ -62,21 +64,67 @@ pnpm register:github-app -- --mode=local
 
 Opens `http://127.0.0.1:8765/start` — callback stays on localhost; only github.com is contacted for app creation.
 
-## Option D — Manual dashboard
+## Option D — Manual dashboard (copy-paste fallback)
 
-1. https://github.com/organizations/moshehillel/settings/apps/new
-2. Use the values in the table below.
-3. Generate a private key and set on Railway:
+Use this when NetFree blocks the HTML form POST or the file opens as raw HTML text.
+
+1. Open https://github.com/organizations/moshehillel/settings/apps/new (must be signed in as a **moshehillel org owner**).
+2. Fill in every field exactly as below (replace `{APP_URL}` with your deployment URL, e.g. `https://web-production-98ce0.up.railway.app`):
+
+| Field | Value |
+|---|---|
+| **GitHub App name** | `Automation Studio` |
+| **Description** | `Automation Studio — AI-assisted change requests with branch/PR workflows.` |
+| **Homepage URL** | `{APP_URL}` |
+| **Callback URL** | `{APP_URL}/api/github/install/callback` |
+| **Setup URL** | `{APP_URL}/api/github/install/callback` (optional; same as callback) |
+| **Webhook URL** | `{APP_URL}/api/webhooks/github` |
+| **Webhook secret** | *(leave blank — GitHub generates one; copy it after creation)* |
+| **Active** | ✓ checked |
+| **Request user authorization (OAuth) during installation** | unchecked |
+| **Expire user authorization tokens** | unchecked |
+| **Where can this GitHub App be installed?** | Only on this account |
+
+**Repository permissions**
+
+| Permission | Access |
+|---|---|
+| Contents | Read and write |
+| Pull requests | Read and write |
+| Commit statuses | Read-only |
+| Checks | Read-only |
+| Administration | Read-only |
+
+**Organization permissions** — leave all at No access.
+
+**Subscribe to events** — check all of:
+
+- `pull_request`
+- `check_suite`
+- `check_run`
+- `status`
+
+3. Click **Create GitHub App**.
+4. On the app settings page, click **Generate a private key** and download the `.pem` file.
+5. Note the **App ID** and **Client ID** from the app settings page.
+6. Set Railway variables on **web** and **worker** services:
 
 ```bash
-railway variable set --service web GITHUB_APP_ID="..."
-railway variable set --service web GITHUB_APP_SLUG="..."
-# repeat for worker; use --stdin for GITHUB_APP_PRIVATE_KEY PEM
+railway variable set --service web GITHUB_APP_ID="YOUR_APP_ID"
+railway variable set --service web GITHUB_APP_SLUG="automation-studio"   # slug from app URL
+railway variable set --service web GITHUB_APP_CLIENT_ID="YOUR_CLIENT_ID"
+railway variable set --service web GITHUB_APP_CLIENT_SECRET="YOUR_CLIENT_SECRET"
+railway variable set --service web GITHUB_APP_WEBHOOK_SECRET="YOUR_WEBHOOK_SECRET"
 railway variable set --service web GITHUB_MOCK=0
-railway variable set --service worker GITHUB_MOCK=0
+# repeat GITHUB_APP_* + GITHUB_MOCK for worker
+# private key (PEM) — paste file contents:
+railway variable set --service web GITHUB_APP_PRIVATE_KEY --stdin < downloaded-key.pem
+railway variable set --service worker GITHUB_APP_PRIVATE_KEY --stdin < downloaded-key.pem
 ```
 
-### Pre-filled app settings
+7. Install the app: `https://github.com/apps/<slug>/installations/new`
+
+### Pre-filled app settings (manifest reference)
 
 | Field | Value |
 |---|---|

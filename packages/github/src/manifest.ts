@@ -64,7 +64,14 @@ export function buildGitHubAppManifest(input: {
   };
 }
 
-/** Self-contained HTML that POSTs the manifest to GitHub (no Railway / localhost required). */
+function escapeHtmlAttr(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
+}
+
+/** Self-contained HTML that POSTs the manifest to GitHub (no Railway / localhost / JS required). */
 export function buildGitHubAppManifestStartHtml(input: {
   manifest: GitHubAppManifest;
   org?: string;
@@ -73,34 +80,43 @@ export function buildGitHubAppManifestStartHtml(input: {
   const action = getGitHubAppManifestFormAction(input.org);
   const state = input.state ?? "";
   const manifestJson = JSON.stringify(input.manifest);
+  const manifestValue = escapeHtmlAttr(manifestJson);
   const query = state ? `?state=${encodeURIComponent(state)}` : "";
+  const orgLabel = input.org ? `organization <strong>${input.org}</strong>` : "your GitHub account";
 
   return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
   <title>Register Automation Studio GitHub App</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
+    .steps { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }
+    .steps ol { margin: 0.5rem 0 0; padding-left: 1.25rem; }
     .muted { color: #666; }
     code { background: #f4f4f4; padding: 0.1rem 0.35rem; border-radius: 4px; }
+    button { font: inherit; font-weight: 600; background: #24292f; color: #fff; border: none; border-radius: 6px; padding: 0.65rem 1.25rem; cursor: pointer; margin-top: 0.5rem; }
+    button:hover { background: #32383f; }
   </style>
 </head>
 <body>
   <h1>Register GitHub App</h1>
-  <p class="muted">Redirecting to <strong>github.com</strong> to create the Automation Studio app with pre-filled permissions…</p>
-  <p class="muted">After you click <strong>Create GitHub App</strong>, GitHub redirects back with a one-time <code>code</code> in the address bar. Copy that value and paste it into the cloud agent (or run <code>pnpm register:github-app -- --code=…</code>).</p>
-  <form id="manifest-form" action="${action}${query}" method="post">
-    <input type="hidden" name="manifest" id="manifest" />
-    <noscript>
-      <p>JavaScript is required. Enable JS and reload, or create the app manually using docs/github-app-setup.md.</p>
-      <button type="submit">Continue to GitHub</button>
-    </noscript>
+  <div class="steps">
+    <strong>How to use this file</strong>
+    <ol>
+      <li>Save this file as <code>register-github-app.html</code> (not <code>.txt</code>).</li>
+      <li>Right-click the file → <strong>Open with</strong> → Chrome or Edge.</li>
+      <li>Click <strong>Continue to GitHub</strong> below (no auto-redirect — you must click).</li>
+      <li>Sign into GitHub as ${orgLabel} owner if prompted; review the app and click <strong>Create GitHub App</strong>.</li>
+      <li>Copy the one-time <code>code</code> from the redirect URL and paste it to the cloud agent (or run <code>pnpm register:github-app -- --code=…</code>).</li>
+    </ol>
+  </div>
+  <p class="muted">If the button does not work (NetFree blocks form POST), create the app manually — see <code>docs/github-app-setup.md</code> Option D.</p>
+  <form action="${action}${query}" method="post">
+    <input type="hidden" name="manifest" value="${manifestValue}" />
+    <button type="submit">Continue to GitHub</button>
   </form>
-  <script>
-    document.getElementById("manifest").value = ${JSON.stringify(manifestJson)};
-    document.getElementById("manifest-form").submit();
-  </script>
 </body>
 </html>`;
 }

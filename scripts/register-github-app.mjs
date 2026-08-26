@@ -133,13 +133,14 @@ function runGithubOnly() {
   console.log(`Post-create redirect: ${redirectUrl}?code=…&state=…`);
   console.log(`GitHub form target: ${formAction}\n`);
   console.log("Steps:");
-  console.log("  1. Open register-github-app.html in your browser (double-click or file://).");
-  console.log("     Only github.com is contacted — NetFree should allow it.");
-  console.log("  2. Sign into GitHub as an org owner (moshehillel) if prompted.");
-  console.log("  3. Review the pre-filled app and click Create GitHub App.");
-  console.log("  4. GitHub redirects to github.com/settings/apps?code=ONE_TIME_CODE&state=…");
+  console.log("  1. Save as register-github-app.html (not .txt).");
+  console.log("  2. Right-click → Open with → Chrome/Edge.");
+  console.log("  3. Click Continue to GitHub (no auto-redirect). Only github.com is contacted.");
+  console.log("  4. Sign into GitHub as an org owner (moshehillel) if prompted.");
+  console.log("  5. Review the pre-filled app and click Create GitHub App.");
+  console.log("  6. GitHub redirects to github.com/settings/apps?code=ONE_TIME_CODE&state=…");
   console.log("     Copy the code value from the address bar.");
-  console.log("  5. Paste the code to the cloud agent, or run:");
+  console.log("  7. Paste the code to the cloud agent, or run:");
   console.log(`     APP_URL=${APP_URL}${ORG ? ` GITHUB_APP_ORG=${ORG}` : ""} pnpm register:github-app -- --code=PASTE_CODE_HERE`);
   console.log(`\nWrote ${outPath}`);
 }

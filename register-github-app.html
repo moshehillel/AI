@@ -2,27 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
   <title>Register Automation Studio GitHub App</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
+    .steps { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }
+    .steps ol { margin: 0.5rem 0 0; padding-left: 1.25rem; }
     .muted { color: #666; }
     code { background: #f4f4f4; padding: 0.1rem 0.35rem; border-radius: 4px; }
+    button { font: inherit; font-weight: 600; background: #24292f; color: #fff; border: none; border-radius: 6px; padding: 0.65rem 1.25rem; cursor: pointer; margin-top: 0.5rem; }
+    button:hover { background: #32383f; }
   </style>
 </head>
 <body>
   <h1>Register GitHub App</h1>
-  <p class="muted">Redirecting to <strong>github.com</strong> to create the Automation Studio app with pre-filled permissions…</p>
-  <p class="muted">After you click <strong>Create GitHub App</strong>, GitHub redirects back with a one-time <code>code</code> in the address bar. Copy that value and paste it into the cloud agent (or run <code>pnpm register:github-app -- --code=…</code>).</p>
-  <form id="manifest-form" action="https://github.com/organizations/moshehillel/settings/apps/new?state=cfa5d77ba03e20b735b8786c2f820b75" method="post">
-    <input type="hidden" name="manifest" id="manifest" />
-    <noscript>
-      <p>JavaScript is required. Enable JS and reload, or create the app manually using docs/github-app-setup.md.</p>
-      <button type="submit">Continue to GitHub</button>
-    </noscript>
+  <div class="steps">
+    <strong>How to use this file</strong>
+    <ol>
+      <li>Save this file as <code>register-github-app.html</code> (not <code>.txt</code>).</li>
+      <li>Right-click the file → <strong>Open with</strong> → Chrome or Edge.</li>
+      <li>Click <strong>Continue to GitHub</strong> below (no auto-redirect — you must click).</li>
+      <li>Sign into GitHub as organization <strong>moshehillel</strong> owner if prompted; review the app and click <strong>Create GitHub App</strong>.</li>
+      <li>Copy the one-time <code>code</code> from the redirect URL and paste it to the cloud agent (or run <code>pnpm register:github-app -- --code=…</code>).</li>
+    </ol>
+  </div>
+  <p class="muted">If the button does not work (NetFree blocks form POST), create the app manually — see <code>docs/github-app-setup.md</code> Option D.</p>
+  <form action="https://github.com/organizations/moshehillel/settings/apps/new?state=bcb1e5350643dd2c4265a6a6f1896520" method="post">
+    <input type="hidden" name="manifest" value="{&quot;name&quot;:&quot;Automation Studio&quot;,&quot;url&quot;:&quot;https://web-production-98ce0.up.railway.app&quot;,&quot;description&quot;:&quot;Automation Studio — AI-assisted change requests with branch/PR workflows.&quot;,&quot;public&quot;:false,&quot;hook_attributes&quot;:{&quot;url&quot;:&quot;https://web-production-98ce0.up.railway.app/api/webhooks/github&quot;,&quot;active&quot;:true},&quot;redirect_url&quot;:&quot;https://github.com/organizations/moshehillel/settings/apps&quot;,&quot;callback_urls&quot;:[&quot;https://web-production-98ce0.up.railway.app/api/github/install/callback&quot;],&quot;setup_url&quot;:&quot;https://web-production-98ce0.up.railway.app/api/github/install/callback&quot;,&quot;default_permissions&quot;:{&quot;contents&quot;:&quot;write&quot;,&quot;pull_requests&quot;:&quot;write&quot;,&quot;statuses&quot;:&quot;read&quot;,&quot;checks&quot;:&quot;read&quot;,&quot;administration&quot;:&quot;read&quot;},&quot;default_events&quot;:[&quot;pull_request&quot;,&quot;check_suite&quot;,&quot;check_run&quot;,&quot;status&quot;]}" />
+    <button type="submit">Continue to GitHub</button>
   </form>
-  <script>
-    document.getElementById("manifest").value = "{\"name\":\"Automation Studio\",\"url\":\"https://web-production-98ce0.up.railway.app\",\"description\":\"Automation Studio — AI-assisted change requests with branch/PR workflows.\",\"public\":false,\"hook_attributes\":{\"url\":\"https://web-production-98ce0.up.railway.app/api/webhooks/github\",\"active\":true},\"redirect_url\":\"https://github.com/organizations/moshehillel/settings/apps\",\"callback_urls\":[\"https://web-production-98ce0.up.railway.app/api/github/install/callback\"],\"setup_url\":\"https://web-production-98ce0.up.railway.app/api/github/install/callback\",\"default_permissions\":{\"contents\":\"write\",\"pull_requests\":\"write\",\"statuses\":\"read\",\"checks\":\"read\",\"administration\":\"read\"},\"default_events\":[\"pull_request\",\"check_suite\",\"check_run\",\"status\"]}";
-    document.getElementById("manifest-form").submit();
-  </script>
 </body>
 </html>

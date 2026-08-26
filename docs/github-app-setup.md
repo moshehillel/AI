@@ -10,7 +10,6 @@ You never visit your Railway domain. Only **github.com** is opened in the browse
 
 ```bash
 APP_URL=https://web-production-98ce0.up.railway.app \
-GITHUB_APP_ORG=moshehillel \
 pnpm register:github-app
 ```
 
@@ -19,13 +18,12 @@ Steps:
 1. Save the generated file as **`register-github-app.html`** (not `.txt`).
 2. Right-click the file → **Open with** → Chrome or Edge (do not open in a plain-text editor).
 3. Click **Continue to GitHub** on the page (there is no auto-redirect — you must click the button).
-4. Sign into GitHub as a **moshehillel org owner** if prompted; review the app and click **Create GitHub App**.
-5. GitHub redirects to `https://github.com/organizations/moshehillel/settings/apps?code=…` — copy the **`code`** query param from the address bar.
+4. Sign into GitHub as **moshehillel** (user account); review the app and click **Create GitHub App**.
+5. GitHub redirects to `https://github.com/settings/apps?code=…` — copy the **`code`** query param from the address bar.
 6. Paste the code to the cloud agent, or exchange it locally:
 
 ```bash
 APP_URL=https://web-production-98ce0.up.railway.app \
-GITHUB_APP_ORG=moshehillel \
 pnpm register:github-app -- --code=PASTE_CODE_HERE
 ```
 
@@ -60,7 +58,6 @@ For developers with Railway CLI linked:
 
 ```bash
 APP_URL=https://web-production-98ce0.up.railway.app \
-GITHUB_APP_ORG=moshehillel \
 pnpm register:github-app -- --mode=local
 ```
 
@@ -72,7 +69,9 @@ Use this when NetFree blocks the HTML form POST or the file opens as raw HTML te
 
 **Full step-by-step (recommended):** [github-app-manual-netfree.md](./github-app-manual-netfree.md)
 
-1. Open https://github.com/organizations/moshehillel/settings/apps/new (must be signed in as a **moshehillel org owner**).
+1. Open https://github.com/settings/apps/new (signed in as **moshehillel** — a user account, not an org).
+
+   > For a GitHub **organization**, use `https://github.com/organizations/ORG_NAME/settings/apps/new` and set `GITHUB_APP_ORG=ORG_NAME`.
 2. Fill in every field exactly as below (replace `{APP_URL}` with your deployment URL, e.g. `https://web-production-98ce0.up.railway.app`):
 
 | Field | Value |
@@ -140,7 +139,7 @@ railway variable set --service worker GITHUB_APP_PRIVATE_KEY --stdin < downloade
 
 Optional env:
 
-- `GITHUB_APP_ORG` — register under an org (`moshehillel`) instead of your user account
+- `GITHUB_APP_ORG` — optional; set only when registering under a GitHub **organization** (not a user account like `moshehillel`)
 - `GITHUB_APP_NAME` — default `Automation Studio`
 
 ## Verify
@@ -166,7 +165,7 @@ Optional env:
 |---|---|
 | `gh auth status` | Logged in as **`cursor[bot]`** (Cursor integration token) |
 | `gh api user` | **403** — integration cannot impersonate you |
-| `gh api orgs/moshehillel` | **404/403** — no org admin access |
+| `gh api orgs/moshehillel` | **404** — `moshehillel` is a user account, not an org |
 | `gh api -X POST app-manifests/{code}/conversions` | Works **only** after you paste a valid one-time `code` from github.com |
 
 ### Manifest conversion (unauthenticated — `code` is the secret)
@@ -185,4 +184,4 @@ Returns `id`, `slug`, `client_id`, `client_secret`, `webhook_secret`, `pem`.
 - No `gh extension` for app registration
 - `gh auth login` with your account helps run **other** `gh` commands — it still cannot click **Create GitHub App** for you
 
-Org owners must click **Create** on github.com (manifest flow or [manual form](./github-app-manual-netfree.md)).
+Org owners must click **Create** on github.com (manifest flow or [manual form](./github-app-manual-netfree.md)). For user accounts, sign in as that user and use `https://github.com/settings/apps/new`.

@@ -13,10 +13,15 @@ Replace if your live URL differs (check Railway dashboard → web service → do
 
 ---
 
-## Step 1 — Open the org app creation form
+## Step 1 — Open the app creation form
 
-1. Sign in to GitHub as a **moshehillel organization owner**.
-2. Open: **https://github.com/organizations/moshehillel/settings/apps/new**
+`moshehillel` is a **GitHub user account**, not an organization — the org URL (`/organizations/moshehillel/…`) returns 404.
+
+1. Sign in to GitHub as **moshehillel** (or whichever account owns the app).
+2. Open: **https://github.com/settings/apps/new**
+
+> **If you use a real GitHub organization** (not a user account), use  
+> `https://github.com/organizations/ORG_NAME/settings/apps/new` instead, and set `GITHUB_APP_ORG=ORG_NAME` when using the manifest script.
 
 ---
 
@@ -81,7 +86,7 @@ Check **only** these four:
 
 ### Where can this GitHub App be installed?
 
-Select: **Only on this account** (moshehillel org only).
+Select: **Only on this account** (moshehillel user account only).
 
 ---
 
@@ -138,7 +143,7 @@ Open (replace `<slug>`):
 
 **https://github.com/apps/<slug>/installations/new**
 
-Choose **moshehillel** and select repositories (or all repos). Confirm install.
+Choose **moshehillel** (your user account) and select repositories (or all repos). Confirm install.
 
 ---
 
@@ -158,14 +163,14 @@ Choose **moshehillel** and select repositories (or all repos). Confirm install.
 |---|---|
 | `gh auth status` | Logged in as **`cursor[bot]`** — Cursor’s **integration** token (`ghs_…`), not your personal account |
 | `gh api user` | **403** — `Resource not accessible by integration` |
-| `gh api orgs/moshehillel` | **404** — integration has no org admin access |
+| `gh api orgs/moshehillel` | **404** — `moshehillel` is a user account, not an org |
 | `gh api user/orgs` | **403** — integration cannot list your orgs |
 | `gh api -X POST app-manifests/{code}/conversions` | Works **only** with a valid one-time `code` from a browser redirect after you click **Create GitHub App** |
 | Direct “create app” REST/GraphQL endpoint | **Does not exist** — GitHub has no API to register a new app without the manifest browser step |
 
 ### Plain-language reason
 
-GitHub treats **creating an App** like creating a sensitive integration: an **org owner must approve it in the browser**. There is no PAT scope, no `gh` subcommand, and no REST endpoint that skips that click. The cloud agent’s `gh` runs as **`cursor[bot]`**, a limited integration — it cannot act as you or as a moshehillel org admin.
+GitHub treats **creating an App** like creating a sensitive integration: the **account owner must approve it in the browser**. There is no PAT scope, no `gh` subcommand, and no REST endpoint that skips that click. The cloud agent’s `gh` runs as **`cursor[bot]`**, a limited integration — it cannot act as you or create apps on your behalf.
 
 The manifest flow (`register-github-app.html` → github.com → copy `code` → `gh api …/conversions`) still requires **you** to click **Create GitHub App** on github.com. The CLI only **exchanges** the one-time code afterward; it cannot obtain the code without your browser session.
 
@@ -191,9 +196,10 @@ If NetFree allows opening `register-github-app.html` in Chrome/Edge and POSTing 
 
 ```bash
 APP_URL=https://web-production-98ce0.up.railway.app \
-GITHUB_APP_ORG=moshehillel \
 pnpm register:github-app -- --code=PASTE_CODE_HERE
 ```
+
+(Omit `GITHUB_APP_ORG` for a user account. Set `GITHUB_APP_ORG=your-org-name` only when registering under a GitHub **organization**.)
 
 That calls `POST /app-manifests/{code}/conversions` (no auth; the code is the secret) and writes all `GITHUB_APP_*` vars to Railway.
 
@@ -204,7 +210,7 @@ If HTML/POST is blocked, use **this manual guide** instead — same end result, 
 ## Quick checklist (print-friendly)
 
 ```
-[ ] Open https://github.com/organizations/moshehillel/settings/apps/new
+[ ] Open https://github.com/settings/apps/new (user account — not /organizations/moshehillel/)
 [ ] App name: Automation Studio
 [ ] Homepage: https://web-production-98ce0.up.railway.app
 [ ] Callback: https://web-production-98ce0.up.railway.app/api/github/install/callback

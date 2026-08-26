@@ -4,7 +4,8 @@
  *
  * Usage:
  *   pnpm register:github-app
- *   APP_URL=https://web-production-98ce0.up.railway.app GITHUB_APP_ORG=moshehillel pnpm register:github-app
+ *   APP_URL=https://web-production-98ce0.up.railway.app pnpm register:github-app
+ *   APP_URL=… GITHUB_APP_ORG=my-org pnpm register:github-app   # only for GitHub organizations
  *   pnpm register:github-app -- --code=YOUR_ONE_TIME_CODE
  *   pnpm register:github-app -- --mode=local
  *
@@ -136,7 +137,7 @@ function runGithubOnly() {
   console.log("  1. Save as register-github-app.html (not .txt).");
   console.log("  2. Right-click → Open with → Chrome/Edge.");
   console.log("  3. Click Continue to GitHub (no auto-redirect). Only github.com is contacted.");
-  console.log("  4. Sign into GitHub as an org owner (moshehillel) if prompted.");
+  console.log("  4. Sign into GitHub as the account that will own the app if prompted.");
   console.log("  5. Review the pre-filled app and click Create GitHub App.");
   console.log("  6. GitHub redirects to github.com/settings/apps?code=ONE_TIME_CODE&state=…");
   console.log("     Copy the code value from the address bar.");

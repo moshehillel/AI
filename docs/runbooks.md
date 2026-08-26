@@ -13,9 +13,10 @@ cp .env.example .env
 
 # Start Postgres + Redis (docker compose or local services)
 pnpm install
-pnpm db:generate
+# postinstall runs db:generate + packages:build
 pnpm db:push   # or: pnpm db:migrate
 pnpm db:seed
+pnpm packages:build   # only needed if dist/ is missing
 pnpm dev:web
 pnpm dev:worker
 ```

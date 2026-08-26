@@ -37,15 +37,21 @@ cp .env.example .env
 
 docker compose up -d
 pnpm install
-pnpm db:generate
+# postinstall builds workspace packages (dist/) and generates Prisma client
 pnpm db:push
 pnpm db:seed
 
 # Terminal 1
-ALLOW_DEMO_AUTH=1 CURSOR_MOCK=1 GITHUB_MOCK=1 RAILWAY_MOCK=1 pnpm dev:web
+pnpm dev:web
 
 # Terminal 2
-ALLOW_DEMO_AUTH=1 CURSOR_MOCK=1 GITHUB_MOCK=1 RAILWAY_MOCK=1 pnpm dev:worker
+pnpm dev:worker
+```
+
+If the worker fails with `Cannot find module .../packages/*/dist/index.js`, rebuild packages:
+
+```bash
+pnpm packages:build
 ```
 
 Open http://localhost:3000

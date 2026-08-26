@@ -55,6 +55,12 @@ Useful env overrides:
 
 After bootstrap, open the printed **Live URL** (or `railway open`).
 
+Demo seed runs inside the web service over `railway ssh` (private `DATABASE_URL` is not reachable from the local agent). If seed was skipped:
+
+```bash
+railway ssh --service web -- pnpm db:seed:deploy
+```
+
 ## ENCRYPTION_KEY
 
 Generate a 32-byte hex secret (never commit it):

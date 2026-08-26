@@ -17,3 +17,4 @@ packages/*/dist
 docker-data
 dump.rdb
 *.rdb
+register-github-app.html

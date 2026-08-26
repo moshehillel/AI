@@ -3,8 +3,10 @@ import { Octokit } from "@octokit/rest";
 
 export {
   buildGitHubAppManifest,
+  buildGitHubAppManifestStartHtml,
   convertGitHubAppManifestCode,
   getGitHubAppManifestFormAction,
+  getGitHubAppManifestRedirectUrl,
   manifestToEnvVars,
   type GitHubAppManifest,
   type GitHubAppManifestConversion,

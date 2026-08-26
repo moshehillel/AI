@@ -24,10 +24,19 @@ export type GitHubAppManifestConversion = {
   html_url?: string;
 };
 
+export function getGitHubAppManifestRedirectUrl(org?: string) {
+  if (org) {
+    return `https://github.com/organizations/${encodeURIComponent(org)}/settings/apps`;
+  }
+  return "https://github.com/settings/apps";
+}
+
 export function buildGitHubAppManifest(input: {
   appUrl: string;
   appName?: string;
   org?: string;
+  /** Override post-create redirect. Use github.com URL for NetFree / no-callback flows. */
+  redirectUrl?: string;
 }): GitHubAppManifest {
   const base = input.appUrl.replace(/\/$/, "");
   return {
@@ -40,7 +49,8 @@ export function buildGitHubAppManifest(input: {
       url: `${base}/api/webhooks/github`,
       active: true,
     },
-    redirect_url: `${base}/api/github/app-manifest/callback`,
+    redirect_url:
+      input.redirectUrl ?? `${base}/api/github/app-manifest/callback`,
     callback_urls: [`${base}/api/github/install/callback`],
     setup_url: `${base}/api/github/install/callback`,
     default_permissions: {
@@ -52,6 +62,47 @@ export function buildGitHubAppManifest(input: {
     },
     default_events: ["pull_request", "check_suite", "check_run", "status"],
   };
+}
+
+/** Self-contained HTML that POSTs the manifest to GitHub (no Railway / localhost required). */
+export function buildGitHubAppManifestStartHtml(input: {
+  manifest: GitHubAppManifest;
+  org?: string;
+  state?: string;
+}) {
+  const action = getGitHubAppManifestFormAction(input.org);
+  const state = input.state ?? "";
+  const manifestJson = JSON.stringify(input.manifest);
+  const query = state ? `?state=${encodeURIComponent(state)}` : "";
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Register Automation Studio GitHub App</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; }
+    .muted { color: #666; }
+    code { background: #f4f4f4; padding: 0.1rem 0.35rem; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Register GitHub App</h1>
+  <p class="muted">Redirecting to <strong>github.com</strong> to create the Automation Studio app with pre-filled permissions…</p>
+  <p class="muted">After you click <strong>Create GitHub App</strong>, GitHub redirects back with a one-time <code>code</code> in the address bar. Copy that value and paste it into the cloud agent (or run <code>pnpm register:github-app -- --code=…</code>).</p>
+  <form id="manifest-form" action="${action}${query}" method="post">
+    <input type="hidden" name="manifest" id="manifest" />
+    <noscript>
+      <p>JavaScript is required. Enable JS and reload, or create the app manually using docs/github-app-setup.md.</p>
+      <button type="submit">Continue to GitHub</button>
+    </noscript>
+  </form>
+  <script>
+    document.getElementById("manifest").value = ${JSON.stringify(manifestJson)};
+    document.getElementById("manifest-form").submit();
+  </script>
+</body>
+</html>`;
 }
 
 export function getGitHubAppManifestFormAction(org?: string) {

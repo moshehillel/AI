@@ -94,6 +94,9 @@ export default async function AdminPage({
               First-time setup: click Register to create the GitHub App on your
               account (requires GitHub login). Credentials are saved to Railway
               automatically when <code>RAILWAY_API_TOKEN</code> is configured.
+              If Railway is blocked (NetFree), run{" "}
+              <code>pnpm register:github-app</code> locally — see{" "}
+              <code>docs/github-app-setup.md</code> (Option A).
             </p>
           ) : null}
           <ul className="mt-4 space-y-2 text-sm">

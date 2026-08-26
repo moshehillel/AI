@@ -15,8 +15,10 @@
     "build": "tsc -p tsconfig.json",
     "generate": "prisma generate",
     "migrate:dev": "dotenv -e ../../.env -- prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
     "push": "dotenv -e ../../.env -- prisma db push",
     "seed": "dotenv -e ../../.env -- tsx prisma/seed.ts",
+    "seed:deploy": "tsx prisma/seed.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'no lint configured'"
   },

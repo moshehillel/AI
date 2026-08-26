@@ -5,6 +5,7 @@ const nextConfig: NextConfig = {
     "@automation-studio/auth",
     "@automation-studio/db",
     "@automation-studio/domain",
+    "@automation-studio/github",
     "@automation-studio/jobs",
   ],
   experimental: {

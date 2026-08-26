@@ -9,7 +9,12 @@ async function main() {
     create: {
       name: "Demo Company",
       slug: "demo-co",
-      settings: { demo: true },
+      settings: {
+        demo: true,
+        usageSoftCapCents: 250000,
+        usageSoftCapTokens: 5_000_000,
+        allowAdminDeploy: false,
+      },
     },
   });
 

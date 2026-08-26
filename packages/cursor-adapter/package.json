@@ -16,13 +16,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "echo 'no lint configured'"
   },
-  "peerDependencies": {
-    "@cursor/sdk": ">=0.1.0"
-  },
-  "peerDependenciesMeta": {
-    "@cursor/sdk": {
-      "optional": true
-    }
+  "dependencies": {
+    "@cursor/sdk": "^1.0.28"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

@@ -22,6 +22,7 @@ const bodySchema = z.object({
     "reject",
     "merge",
     "cancel",
+    "retry",
   ]),
 });
 
@@ -114,6 +115,10 @@ export async function POST(
       }
       case "submit_review": {
         await requirePermission(ctx, "change_request:submit_review");
+        await enqueueJob("merge.prepare", {
+          changeRequestId: cr.id,
+          companyId: ctx.company.id,
+        });
         await transition(
           cr.id,
           ctx.company.id,
@@ -169,6 +174,10 @@ export async function POST(
       }
       case "merge": {
         await requirePermission(ctx, "change_request:merge");
+        await enqueueJob("merge.prepare", {
+          changeRequestId: cr.id,
+          companyId: ctx.company.id,
+        });
         const full = await db.changeRequest.findFirstOrThrow({
           where: { id: cr.id },
           include: {
@@ -190,26 +199,79 @@ export async function POST(
             data: { status: "MERGED" },
           });
         }
-        if (full.status !== "APPROVED") {
+        let from = full.status;
+        if (from !== "APPROVED") {
           await transition(
             cr.id,
             ctx.company.id,
-            full.status,
+            from,
             "APPROVED",
             ctx.user.id,
           );
+          from = "APPROVED";
         }
         await transition(
           cr.id,
           ctx.company.id,
-          "APPROVED",
+          from,
           "MERGED",
           ctx.user.id,
           "Merged to main",
         );
         break;
       }
+      case "retry": {
+        if (cr.status !== "FAILED") {
+          throw new AuthError("Only failed requests can be retried", 400);
+        }
+        await transition(
+          cr.id,
+          ctx.company.id,
+          cr.status,
+          "ANALYZING",
+          ctx.user.id,
+          "Retry requested",
+        );
+        await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            authorId: ctx.user.id,
+            content: "Retrying this change request…",
+          },
+        });
+        if (cr.branchName) {
+          await enqueueJob("cursor.start-agent", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+            mode:
+              cr.classification === "COMPLEX" || cr.classification === "HIGH_RISK"
+                ? "plan"
+                : "agent",
+            prompt: `${cr.title}\n\n${cr.description}`.trim(),
+          });
+        } else {
+          await enqueueJob("github.ensure-branch", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+          });
+        }
+        break;
+      }
       case "cancel": {
+        const latestRun = await db.agentRun.findFirst({
+          where: { changeRequestId: cr.id, status: "RUNNING" },
+          orderBy: { createdAt: "desc" },
+        });
+        if (latestRun || cr.cursorAgentId) {
+          await enqueueJob("cursor.cancel", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+            agentId: latestRun?.cursorAgentId ?? cr.cursorAgentId!,
+            runId: latestRun?.cursorRunId,
+            agentRunId: latestRun?.id,
+          });
+        }
         await transition(
           cr.id,
           ctx.company.id,

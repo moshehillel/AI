@@ -12,24 +12,40 @@ type Message = {
 export function ChatPanel({
   changeRequestId,
   initialMessages,
-  status,
+  status: initialStatus,
 }: {
   changeRequestId: string;
   initialMessages: Message[];
   status: string;
 }) {
   const [messages, setMessages] = useState(initialMessages);
+  const [status, setStatus] = useState(initialStatus);
   const [prompt, setPrompt] = useState("");
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
-    const timer = setInterval(async () => {
-      const response = await fetch(`/api/change-requests/${changeRequestId}`);
-      if (!response.ok) return;
-      const json = (await response.json()) as { messages: Message[] };
-      setMessages(json.messages);
-    }, 4000);
-    return () => clearInterval(timer);
+    const source = new EventSource(
+      `/api/change-requests/${changeRequestId}/events`,
+    );
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as {
+          type: string;
+          status?: string;
+          messages?: Message[];
+        };
+        if (data.type === "snapshot") {
+          if (data.status) setStatus(data.status);
+          if (data.messages) setMessages(data.messages);
+        }
+      } catch {
+        // ignore malformed events
+      }
+    };
+    source.onerror = () => {
+      // browser will retry EventSource automatically
+    };
+    return () => source.close();
   }, [changeRequestId]);
 
   return (
@@ -58,6 +74,11 @@ export function ChatPanel({
           status,
         ) ? (
           <p className="muted pulse-soft text-sm">Working on your request…</p>
+        ) : null}
+        {status === "FAILED" ? (
+          <p className="text-sm text-[var(--danger)]">
+            Something went wrong. Use Retry in the actions panel.
+          </p>
         ) : null}
       </div>
 

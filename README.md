@@ -69,7 +69,17 @@ See [docs/architecture.md](docs/architecture.md) and [docs/security.md](docs/sec
 - `pnpm typecheck` — TypeScript across packages
 - `pnpm test` — domain unit tests
 - `pnpm db:seed` — demo company + projects
+- `pnpm db:migrate` — apply Prisma migrations (`packages/db`)
 
-## MVP status
+## MVP phase completion
 
-Phases 0–4 foundations are implemented with mock providers so the full employee → AI → preview → developer review loop can be exercised locally before real Cursor/GitHub/Railway credentials are connected.
+| Phase | Coverage |
+|---|---|
+| 0 Foundations | Monorepo, Prisma + migration, Clerk/demo auth, docs |
+| 1 Change requests | Chat, FSM, SSE progress, retry/cancel |
+| 2 GitHub | App install flow, branch/PR helpers, protection verify |
+| 3 Cursor | `@cursor/sdk` adapter, plan/agent, cancel, usage capture |
+| 4 Preview/review | Railway sync retries, CI status, developer merge + freshness |
+| 5 Hardening | Usage dashboard, soft caps, member assignment, runbooks |
+
+Mock providers (`CURSOR_MOCK`, `GITHUB_MOCK`, `RAILWAY_MOCK`) exercise the full loop without live credentials.

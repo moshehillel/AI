@@ -193,3 +193,48 @@ export async function verifyBranchProtection(input: {
     throw error;
   }
 }
+
+export function getGitHubAppInstallUrl(state?: string) {
+  const slug = process.env.GITHUB_APP_SLUG;
+  if (!slug) {
+    return null;
+  }
+  const url = new URL(`https://github.com/apps/${slug}/installations/new`);
+  if (state) url.searchParams.set("state", state);
+  return url.toString();
+}
+
+export async function compareBranchToDefault(input: {
+  installationId: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  defaultBranch?: string;
+}) {
+  if (mockEnabled()) {
+    return {
+      aheadBy: 1,
+      behindBy: 0,
+      needsRebase: false,
+      mock: true as const,
+    };
+  }
+
+  const octokit = await getInstallationOctokit(input.installationId);
+  if (!octokit) throw new Error("GitHub App not configured");
+
+  const base = input.defaultBranch ?? "main";
+  const { data } = await octokit.repos.compareCommits({
+    owner: input.owner,
+    repo: input.repo,
+    base,
+    head: input.branch,
+  });
+
+  return {
+    aheadBy: data.ahead_by,
+    behindBy: data.behind_by,
+    needsRebase: data.behind_by > 0,
+  };
+}
+

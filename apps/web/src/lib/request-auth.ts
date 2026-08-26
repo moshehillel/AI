@@ -1,4 +1,4 @@
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import {
   resolveAuthContext,
   AuthError,
@@ -25,9 +25,13 @@ export async function getRequestAuth() {
     if (process.env.ALLOW_DEMO_AUTH === "1") {
       try {
         const h = await headers();
-        hint = h.get("x-demo-user") ?? hint;
+        const cookieStore = await cookies();
+        hint =
+          h.get("x-demo-user") ??
+          cookieStore.get("demo_user")?.value ??
+          hint;
       } catch {
-        // headers() unavailable outside request scope
+        // headers/cookies unavailable outside request scope
       }
     }
 

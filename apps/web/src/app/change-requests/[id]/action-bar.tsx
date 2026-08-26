@@ -62,16 +62,20 @@ export function ActionBar({
         </button>
       ) : null}
 
-      {(status === "READY_FOR_REVIEW" || status === "DEVELOPER_REVIEW") &&
+      {(status === "READY_FOR_REVIEW" ||
+        status === "DEVELOPER_REVIEW" ||
+        status === "APPROVED") &&
       role === "DEVELOPER" ? (
         <>
-          <button
-            className="btn btn-primary"
-            disabled={pending}
-            onClick={() => postAction("approve")}
-          >
-            Approve
-          </button>
+          {status !== "APPROVED" ? (
+            <button
+              className="btn btn-primary"
+              disabled={pending}
+              onClick={() => postAction("approve")}
+            >
+              Approve
+            </button>
+          ) : null}
           <button
             className="btn btn-ghost"
             disabled={pending}
@@ -94,6 +98,16 @@ export function ActionBar({
             Merge to main
           </button>
         </>
+      ) : null}
+
+      {status === "FAILED" ? (
+        <button
+          className="btn btn-primary"
+          disabled={pending}
+          onClick={() => postAction("retry")}
+        >
+          Retry
+        </button>
       ) : null}
 
       {!["MERGED", "DEPLOYED", "REJECTED", "CANCELLED"].includes(status) ? (

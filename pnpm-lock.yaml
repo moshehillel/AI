@@ -95,7 +95,7 @@ importers:
   packages/cursor-adapter:
     dependencies:
       '@cursor/sdk':
-        specifier: '>=0.1.0'
+        specifier: ^1.0.28
         version: 1.0.28
     devDependencies:
       '@types/node':

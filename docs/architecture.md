@@ -49,11 +49,10 @@ Employee-facing labels hide Git concepts. Developers see branch/PR/check details
 - Platform stores preview URL for `[Open Test Version]`
 - Mock mode: `RAILWAY_MOCK=1` or missing `RAILWAY_API_TOKEN`
 
-## Multi-tenancy
+## Background jobs
 
-Every company-owned row is scoped by `companyId`. Authorization checks:
+BullMQ workers process: classify, ensure-branch, cursor start/follow-up/cancel, ensure-pr, CI sync, Railway preview sync (with retries), merge prepare, usage recording.
 
-1. Clerk session / demo auth
-2. Company membership + role
-3. Project membership for employees
-4. Permission for the specific action
+## Usage & soft caps
+
+Company settings support monthly soft caps for tokens and billed cents. Agent starts are blocked when caps are exceeded. The Usage page reports by company/project/person.

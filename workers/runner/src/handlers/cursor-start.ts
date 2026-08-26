@@ -2,6 +2,7 @@ import { db } from "@automation-studio/db";
 import { createTaskAgent } from "@automation-studio/cursor-adapter";
 import { enqueueJob, type CursorStartJobData } from "@automation-studio/jobs";
 import { writeAuditEvent } from "@automation-studio/auth";
+import { assertUnderUsageSoftCap } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
 
 export async function handleCursorStart(data: CursorStartJobData) {
@@ -12,6 +13,24 @@ export async function handleCursorStart(data: CursorStartJobData) {
 
   if (cr.status === "AWAITING_HIGH_RISK_APPROVAL") {
     throw new Error("Blocked: high-risk approval required before implementation");
+  }
+
+  const cap = await assertUnderUsageSoftCap(data.companyId);
+  if (!cap.ok) {
+    await transitionChangeRequest({
+      changeRequestId: cr.id,
+      companyId: data.companyId,
+      toStatus: "FAILED",
+      reason: cap.reason,
+    });
+    await db.changeRequestMessage.create({
+      data: {
+        changeRequestId: cr.id,
+        role: "SYSTEM",
+        content: cap.reason,
+      },
+    });
+    return { blocked: true, reason: cap.reason };
   }
 
   const repo = cr.project.repository;
@@ -105,6 +124,9 @@ export async function handleCursorStart(data: CursorStartJobData) {
     changeRequestId: cr.id,
     companyId: data.companyId,
     agentRunId: agentRun.id,
+    inputTokens: result.usage?.inputTokens,
+    outputTokens: result.usage?.outputTokens,
+    totalTokens: result.usage?.totalTokens,
   });
 
   await writeAuditEvent({

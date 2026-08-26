@@ -2,11 +2,21 @@ export const dynamic = 'force-dynamic';
 import { AppHeader } from "@/components/app-header";
 import { getRequestAuth } from "@/lib/request-auth";
 import { db } from "@automation-studio/db";
+import { parseCompanySettings } from "@automation-studio/domain";
 import { ConnectRepoForm } from "./connect-repo-form";
 import { InviteNote } from "./invite-note";
+import { ProjectMembersForm } from "./project-members-form";
+import { VerifyProtectionButton } from "./verify-protection-button";
+import { CompanySettingsForm } from "./company-settings-form";
+import Link from "next/link";
 
-export default async function AdminPage() {
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const ctx = await getRequestAuth();
+  const params = await searchParams;
 
   if (ctx.role !== "ADMIN" && ctx.role !== "DEVELOPER") {
     return (
@@ -28,6 +38,19 @@ export default async function AdminPage() {
     include: { user: true },
   });
 
+  const installations = await db.githubInstallation.findMany({
+    where: { companyId: ctx.company.id },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const company = await db.company.findUniqueOrThrow({
+    where: { id: ctx.company.id },
+  });
+  const settings = parseCompanySettings(company.settings);
+  const githubNotice = typeof params.github === "string" ? params.github : null;
+  const installationId =
+    typeof params.installation_id === "string" ? params.installation_id : null;
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       <AppHeader role={ctx.role} />
@@ -38,7 +61,43 @@ export default async function AdminPage() {
             Manage members, project access, and repository connections. Production
             deploy access is not granted here by default.
           </p>
+          {githubNotice ? (
+            <p className="mt-3 text-sm text-[var(--accent-soft)]">
+              GitHub install status: {githubNotice}
+              {installationId ? ` (${installationId})` : ""}
+            </p>
+          ) : null}
         </div>
+
+        <div className="panel p-5">
+          <h2 className="text-xl">GitHub App</h2>
+          <p className="muted mt-2 text-sm">
+            Install the Automation Studio GitHub App into your organization, then
+            connect individual repositories to projects.
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <Link className="btn btn-primary" href="/api/github/install">
+              Install / manage GitHub App
+            </Link>
+          </div>
+          <ul className="mt-4 space-y-2 text-sm">
+            {installations.map((install) => (
+              <li key={install.id} className="status-pill">
+                Installation {install.installationId} · {install.accountLogin}
+              </li>
+            ))}
+            {installations.length === 0 ? (
+              <li className="muted">No installations recorded yet.</li>
+            ) : null}
+          </ul>
+        </div>
+
+        {ctx.role === "ADMIN" ? (
+          <div className="panel p-5">
+            <h2 className="text-xl">Company settings</h2>
+            <CompanySettingsForm initial={settings} />
+          </div>
+        ) : null}
 
         <div className="panel p-5">
           <h2 className="text-xl">Members</h2>
@@ -76,18 +135,40 @@ export default async function AdminPage() {
                         : "No repository connected"}
                     </p>
                   </div>
+                  {project.repository ? (
+                    <VerifyProtectionButton projectId={project.id} />
+                  ) : null}
                 </div>
                 {!project.repository ? (
                   <div className="mt-3">
-                    <ConnectRepoForm projectId={project.id} />
+                    <ConnectRepoForm
+                      projectId={project.id}
+                      defaultInstallationId={installations[0]?.installationId}
+                    />
                   </div>
                 ) : null}
-                <p className="muted mt-3 text-sm">
-                  Members:{" "}
-                  {project.members
-                    .map((m) => m.user.name ?? m.user.email)
-                    .join(", ") || "None"}
-                </p>
+                {ctx.role === "ADMIN" ? (
+                  <div className="mt-4">
+                    <ProjectMembersForm
+                      projectId={project.id}
+                      members={project.members.map((m) => ({
+                        userId: m.userId,
+                        label: m.user.name ?? m.user.email,
+                      }))}
+                      candidates={members.map((m) => ({
+                        userId: m.userId,
+                        label: `${m.user.name ?? m.user.email} (${m.role})`,
+                      }))}
+                    />
+                  </div>
+                ) : (
+                  <p className="muted mt-3 text-sm">
+                    Members:{" "}
+                    {project.members
+                      .map((m) => m.user.name ?? m.user.email)
+                      .join(", ") || "None"}
+                  </p>
+                )}
               </div>
             ))}
           </div>

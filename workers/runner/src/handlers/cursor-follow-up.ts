@@ -85,6 +85,9 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     changeRequestId: cr.id,
     companyId: data.companyId,
     agentRunId: agentRun.id,
+    inputTokens: result.usage?.inputTokens,
+    outputTokens: result.usage?.outputTokens,
+    totalTokens: result.usage?.totalTokens,
   });
 
   return { ok: true };

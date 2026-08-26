@@ -8,7 +8,7 @@ export async function handleUsageRecord(data: UsageRecordJobData) {
     include: { changeRequest: true },
   });
 
-  let billedCents: number | undefined;
+  let billedCents = data.billedCents;
   try {
     const usage = await getAgentUsage(run.cursorAgentId);
     const maybeCents = (usage as { totalCents?: number }).totalCents;
@@ -25,11 +25,14 @@ export async function handleUsageRecord(data: UsageRecordJobData) {
       changeRequestId: run.changeRequestId,
       agentRunId: run.id,
       provider: "CURSOR",
-      inputTokens: 0,
-      outputTokens: 0,
-      totalTokens: 0,
+      inputTokens: data.inputTokens ?? 0,
+      outputTokens: data.outputTokens ?? 0,
+      totalTokens: data.totalTokens ?? 0,
       billedCents,
-      metadata: { cursorAgentId: run.cursorAgentId, cursorRunId: run.cursorRunId },
+      metadata: {
+        cursorAgentId: run.cursorAgentId,
+        cursorRunId: run.cursorRunId,
+      },
     },
   });
 

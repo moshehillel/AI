@@ -81,7 +81,7 @@ export async function createTaskAgent(
 
   return {
     agentId: agent.agentId,
-    run: mapStream(run.stream()),
+    run: mapStream(run.stream() as AsyncIterable<{ type: string } & Record<string, unknown>>),
     wait: async () => {
       const result = await run.wait();
       const branchInfo = result.git?.branches?.[0];
@@ -123,7 +123,7 @@ export async function resumeAndSend(
 
   return {
     agentId: agent.agentId,
-    run: mapStream(run.stream()),
+    run: mapStream(run.stream() as AsyncIterable<{ type: string } & Record<string, unknown>>),
     wait: async () => {
       const result = await run.wait();
       return {
@@ -154,10 +154,67 @@ export async function getAgentUsage(agentId: string) {
   return usage;
 }
 
+export async function cancelAgentRun(input: {
+  agentId: string;
+  runId?: string | null;
+}) {
+  const sdk = await loadCursorSdk();
+  if (process.env.CURSOR_MOCK === "1" || !process.env.CURSOR_API_KEY || !sdk) {
+    return { cancelled: true, mock: true as const };
+  }
+
+  // Prefer SDK cancel when available; fall back to Cloud Agents API v1.
+  try {
+    const agent = await sdk.Agent.resume(input.agentId, {
+      apiKey: requireApiKey(),
+    });
+    const maybeCancel = (
+      agent as unknown as {
+        cancel?: () => Promise<unknown>;
+      }
+    ).cancel;
+    if (typeof maybeCancel === "function") {
+      await maybeCancel.call(agent);
+      return { cancelled: true };
+    }
+  } catch {
+    // continue to REST fallback
+  }
+
+  if (!input.runId) {
+    return { cancelled: false, reason: "No run id available to cancel" };
+  }
+
+  const response = await fetch(
+    `https://api.cursor.com/v1/agents/${input.agentId}/runs/${input.runId}/cancel`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${requireApiKey()}`,
+        "Content-Type": "application/json",
+      },
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Cursor cancel failed: HTTP ${response.status}`);
+  }
+  return { cancelled: true };
+}
+
 async function* mapStream(
-  stream: AsyncIterable<{ type: string; [key: string]: unknown }>,
+  stream: AsyncIterable<{ type: string } & Record<string, unknown>>,
 ): AsyncGenerator<NormalizedStreamEvent> {
-  for await (const event of stream) {
+  for await (const event of stream as AsyncIterable<{
+    type: string;
+    message?: { content?: Array<{ type: string; text?: string }> };
+    text?: string;
+    status?: string;
+    usage?: {
+      inputTokens?: number;
+      outputTokens?: number;
+      totalTokens?: number;
+    };
+  }>) {
     if (event.type === "assistant") {
       const message = event.message as { content?: Array<{ type: string; text?: string }> } | undefined;
       const text = message?.content?.map((c) => c.text ?? "").join("") ?? "";

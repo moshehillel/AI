@@ -8,6 +8,7 @@ import { handleClassify } from "./handlers/classify.js";
 import { handleEnsureBranch } from "./handlers/ensure-branch.js";
 import { handleCursorStart } from "./handlers/cursor-start.js";
 import { handleCursorFollowUp } from "./handlers/cursor-follow-up.js";
+import { handleCursorCancel } from "./handlers/cursor-cancel.js";
 import { handleEnsurePr } from "./handlers/ensure-pr.js";
 import { handleSyncChecks } from "./handlers/sync-checks.js";
 import { handleSyncPreview } from "./handlers/sync-preview.js";
@@ -26,6 +27,8 @@ async function processJob(job: Job) {
       return handleCursorStart(job.data);
     case "cursor.follow-up":
       return handleCursorFollowUp(job.data);
+    case "cursor.cancel":
+      return handleCursorCancel(job.data);
     case "github.ensure-pr":
       return handleEnsurePr(job.data);
     case "ci.sync-checks":

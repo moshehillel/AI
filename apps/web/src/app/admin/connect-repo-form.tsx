@@ -3,11 +3,19 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-export function ConnectRepoForm({ projectId }: { projectId: string }) {
+export function ConnectRepoForm({
+  projectId,
+  defaultInstallationId,
+}: {
+  projectId: string;
+  defaultInstallationId?: string;
+}) {
   const router = useRouter();
   const [owner, setOwner] = useState("");
   const [repo, setRepo] = useState("");
-  const [installationId, setInstallationId] = useState("");
+  const [installationId, setInstallationId] = useState(
+    defaultInstallationId ?? "",
+  );
   const [pending, startTransition] = useTransition();
 
   return (

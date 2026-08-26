@@ -15,3 +15,5 @@ workers/runner/dist
 packages/*/dist
 .vercel
 docker-data
+dump.rdb
+*.rdb

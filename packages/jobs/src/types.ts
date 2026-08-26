@@ -6,6 +6,7 @@ export type JobName =
   | "cursor.start-agent"
   | "cursor.follow-up"
   | "cursor.poll-or-stream"
+  | "cursor.cancel"
   | "github.ensure-pr"
   | "ci.sync-checks"
   | "railway.sync-preview"
@@ -37,6 +38,14 @@ export type CursorFollowUpJobData = {
   mode?: "plan" | "agent";
 };
 
+export type CursorCancelJobData = {
+  changeRequestId: string;
+  companyId: string;
+  agentId: string;
+  runId?: string | null;
+  agentRunId?: string;
+};
+
 export type EnsurePrJobData = {
   changeRequestId: string;
   companyId: string;
@@ -50,6 +59,7 @@ export type SyncChecksJobData = {
 export type SyncPreviewJobData = {
   changeRequestId: string;
   companyId: string;
+  attempt?: number;
 };
 
 export type TransitionJobData = {
@@ -69,6 +79,10 @@ export type UsageRecordJobData = {
   changeRequestId: string;
   companyId: string;
   agentRunId: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  billedCents?: number;
 };
 
 export type JobDataMap = {
@@ -76,6 +90,7 @@ export type JobDataMap = {
   "github.ensure-branch": EnsureBranchJobData;
   "cursor.start-agent": CursorStartJobData;
   "cursor.follow-up": CursorFollowUpJobData;
+  "cursor.cancel": CursorCancelJobData;
   "cursor.poll-or-stream": { changeRequestId: string; companyId: string; agentRunId: string };
   "github.ensure-pr": EnsurePrJobData;
   "ci.sync-checks": SyncChecksJobData;

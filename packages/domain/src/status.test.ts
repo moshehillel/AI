@@ -8,6 +8,7 @@ import {
 import { classifyChangeRequest } from "./classification.js";
 import { buildBranchName, slugify } from "./branch.js";
 import { roleHasPermission } from "./permissions.js";
+import { parseCompanySettings } from "./usage.js";
 
 describe("status machine", () => {
   it("allows draft to analyzing", () => {
@@ -20,6 +21,10 @@ describe("status machine", () => {
       () => assertTransition("PREVIEW_READY", "MERGED"),
       InvalidTransitionError,
     );
+  });
+
+  it("allows failed to analyzing for retry", () => {
+    assert.equal(canTransition("FAILED", "ANALYZING"), true);
   });
 });
 
@@ -69,5 +74,18 @@ describe("permissions", () => {
   it("prevents employees from merging", () => {
     assert.equal(roleHasPermission("EMPLOYEE", "change_request:merge"), false);
     assert.equal(roleHasPermission("DEVELOPER", "change_request:merge"), true);
+  });
+});
+
+describe("usage settings", () => {
+  it("parses soft caps", () => {
+    const settings = parseCompanySettings({
+      usageSoftCapCents: 1000,
+      usageSoftCapTokens: 50000,
+      allowAdminDeploy: false,
+    });
+    assert.equal(settings.usageSoftCapCents, 1000);
+    assert.equal(settings.usageSoftCapTokens, 50000);
+    assert.equal(settings.allowAdminDeploy, false);
   });
 });

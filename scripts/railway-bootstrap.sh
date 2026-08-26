@@ -249,8 +249,16 @@ for d in items or []:
 
   if [[ "${SKIP_SEED}" != "1" ]]; then
     echo "==> Seeding demo data (web service)"
-    railway run --service "${WEB_SERVICE}" pnpm db:seed:deploy || \
-      echo "    Seed skipped/failed — run later: railway run --service ${WEB_SERVICE} pnpm db:seed:deploy"
+    # Prefer SSH into the running service: DATABASE_URL uses *.railway.internal
+    # which is unreachable from `railway run` on the local agent machine.
+    if railway ssh --service "${WEB_SERVICE}" -- pnpm db:seed:deploy; then
+      echo "    Seed complete (via railway ssh)"
+    elif railway run --service "${WEB_SERVICE}" pnpm db:seed:deploy; then
+      echo "    Seed complete (via railway run)"
+    else
+      echo "    Seed skipped/failed — run later:"
+      echo "      railway ssh --service ${WEB_SERVICE} -- pnpm db:seed:deploy"
+    fi
   fi
 
   echo ""

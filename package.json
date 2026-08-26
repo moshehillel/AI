@@ -1,0 +1,25 @@
+{
+  "name": "automation-studio",
+  "private": true,
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @automation-studio/web --filter @automation-studio/worker dev",
+    "dev:web": "pnpm --filter @automation-studio/web dev",
+    "dev:worker": "pnpm --filter @automation-studio/worker dev",
+    "build": "pnpm -r --filter=./packages/* build && pnpm --filter @automation-studio/web build && pnpm --filter @automation-studio/worker build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "db:generate": "pnpm --filter @automation-studio/db generate",
+    "db:migrate": "pnpm --filter @automation-studio/db migrate:dev",
+    "db:push": "pnpm --filter @automation-studio/db push",
+    "db:seed": "pnpm --filter @automation-studio/db seed"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "typescript": "^5.8.2"
+  }
+}

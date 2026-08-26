@@ -1,0 +1,28 @@
+{
+  "name": "@automation-studio/worker",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@automation-studio/auth": "workspace:*",
+    "@automation-studio/cursor-adapter": "workspace:*",
+    "@automation-studio/db": "workspace:*",
+    "@automation-studio/domain": "workspace:*",
+    "@automation-studio/github": "workspace:*",
+    "@automation-studio/jobs": "workspace:*",
+    "@automation-studio/railway": "workspace:*",
+    "bullmq": "^5.41.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

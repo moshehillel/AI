@@ -110,14 +110,61 @@ ensure_empty_service "${WEB_SERVICE}"
 ensure_empty_service "${WORKER_SERVICE}"
 
 echo "==> Configuring Dockerfiles (separate files — no dockerBuildTarget)"
-railway environment edit --service-config "${WEB_SERVICE}" build.builder DOCKERFILE -m "web: DOCKERFILE builder"
-railway environment edit --service-config "${WEB_SERVICE}" build.dockerfilePath "Dockerfile.web" -m "web: Dockerfile.web"
-railway environment edit --service-config "${WORKER_SERVICE}" build.builder DOCKERFILE -m "worker: DOCKERFILE builder"
-railway environment edit --service-config "${WORKER_SERVICE}" build.dockerfilePath "Dockerfile.worker" -m "worker: Dockerfile.worker"
+# Prefer GraphQL: CLI `environment edit` path aliases are unreliable for dockerfilePath.
+set_service_instance() {
+  local service_name="$1"
+  shift
+  local service_id
+  service_id="$(railway service list --json 2>/dev/null | python3 -c '
+import json,sys
+name=sys.argv[1]
+data=json.load(sys.stdin)
+items=data if isinstance(data,list) else []
+for s in items:
+  if s.get("name")==name:
+    print(s.get("id","")); break
+' "${service_name}" 2>/dev/null || true)"
+  if [[ -z "${service_id}" ]]; then
+    # Fallback: resolve from railway status when service list omits undeployed services
+    service_id="$(railway status --json 2>/dev/null | python3 -c '
+import json,sys
+name=sys.argv[1]
+d=json.load(sys.stdin)
+for e in d.get("services",{}).get("edges",[]):
+  n=e.get("node") or {}
+  if n.get("name")==name:
+    print(n.get("id","")); break
+' "${service_name}" 2>/dev/null || true)"
+  fi
+  [[ -n "${service_id}" ]] || die "Could not resolve service id for ${service_name}"
 
-echo "==> Configuring healthcheck on web"
-railway environment edit --service-config "${WEB_SERVICE}" deploy.healthcheckPath "/api/health" -m "web: healthcheck" || true
-railway environment edit --service-config "${WEB_SERVICE}" deploy.healthcheckTimeout "30" -m "web: healthcheck timeout" || true
+  local env_id
+  env_id="$(railway status --json 2>/dev/null | python3 -c '
+import json,sys
+d=json.load(sys.stdin)
+edges=(d.get("environments") or {}).get("edges") or []
+print((edges[0].get("node") or {}).get("id","") if edges else "")
+' 2>/dev/null || true)"
+  [[ -n "${env_id}" ]] || die "Could not resolve environment id"
+
+  local token
+  token="$(python3 -c 'import json; print(json.load(open(__import__("os").path.expanduser("~/.railway/config.json")))["user"].get("accessToken") or json.load(open(__import__("os").path.expanduser("~/.railway/config.json")))["user"].get("token") or "")' 2>/dev/null || true)"
+  [[ -n "${token}" ]] || die "No Railway access token; run railway login"
+
+  local input_json="$1"
+  curl -sS https://backboard.railway.com/graphql/v2 \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${token}" \
+    --data-binary @- <<EOF | python3 -c 'import json,sys; d=json.load(sys.stdin); 
+assert not d.get("errors"), d; assert d.get("data",{}).get("serviceInstanceUpdate") is True, d'
+{"query":"mutation(\$serviceId:String!,\$environmentId:String,\$input:ServiceInstanceUpdateInput!){ serviceInstanceUpdate(serviceId:\$serviceId, environmentId:\$environmentId, input:\$input) }","variables":{"serviceId":"${service_id}","environmentId":"${env_id}","input":${input_json}}}
+EOF
+}
+
+set_service_instance "${WEB_SERVICE}" '{"dockerfilePath":"Dockerfile.web","healthcheckPath":"/api/health","healthcheckTimeout":30}'
+set_service_instance "${WORKER_SERVICE}" '{"dockerfilePath":"Dockerfile.worker"}'
+echo "    web -> Dockerfile.web (+ /api/health)"
+echo "    worker -> Dockerfile.worker"
 
 ENCRYPTION_KEY_VALUE="${ENCRYPTION_KEY:-}"
 if [[ -z "${ENCRYPTION_KEY_VALUE}" ]]; then

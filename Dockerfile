@@ -20,7 +20,8 @@ COPY packages/jobs/package.json packages/jobs/
 COPY packages/cursor-adapter/package.json packages/cursor-adapter/
 COPY packages/github/package.json packages/github/
 COPY packages/railway/package.json packages/railway/
-RUN pnpm install --frozen-lockfile || pnpm install
+# Skip root postinstall (db:generate + packages:build) until sources are copied.
+RUN pnpm install --frozen-lockfile --ignore-scripts || pnpm install --ignore-scripts
 
 FROM deps AS build
 COPY . .

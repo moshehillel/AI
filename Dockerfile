@@ -24,6 +24,8 @@ COPY packages/railway/package.json packages/railway/
 RUN pnpm install --frozen-lockfile --ignore-scripts || pnpm install --ignore-scripts
 
 FROM deps AS build
+ARG NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm db:generate

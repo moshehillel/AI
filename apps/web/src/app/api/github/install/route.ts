@@ -3,6 +3,7 @@ import { getRequestAuth } from "@/lib/request-auth";
 import { AuthError, writeAuditEvent } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
 import { getGitHubAppInstallUrl } from "@automation-studio/github";
+import { getAppBaseUrl } from "@/lib/app-url";
 
 export async function GET() {
   try {
@@ -18,7 +19,7 @@ export async function GET() {
     const url =
       getGitHubAppInstallUrl(state) ??
       (process.env.GITHUB_MOCK === "1" || !process.env.GITHUB_APP_SLUG
-        ? `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/github/install/callback?installation_id=mock-${Date.now()}&state=${state}`
+        ? `${getAppBaseUrl()}/api/github/install/callback?installation_id=mock-${Date.now()}&state=${state}`
         : null);
 
     if (!url) {

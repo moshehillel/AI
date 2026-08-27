@@ -18,6 +18,8 @@ COPY packages/railway/package.json packages/railway/
 RUN pnpm install --frozen-lockfile || pnpm install
 
 FROM deps AS build
+ARG NEXT_PUBLIC_APP_URL
+ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 COPY . .
 RUN pnpm db:generate
 RUN pnpm --filter @automation-studio/db build \

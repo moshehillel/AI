@@ -50,6 +50,20 @@ export default async function AdminPage({
   const githubNotice = typeof params.github === "string" ? params.github : null;
   const installationId =
     typeof params.installation_id === "string" ? params.installation_id : null;
+  const githubNoticeMessage =
+    githubNotice === "installed"
+      ? installationId
+        ? params.manual === "1"
+          ? `GitHub App installed (ID ${installationId}). Paste this installation ID when connecting a repository below.`
+          : `GitHub App installed successfully (ID ${installationId}).`
+        : "GitHub App installed."
+      : githubNotice === "pending_approval"
+        ? "Install request sent — a GitHub org admin must approve before you get an installation ID."
+      : githubNotice === "missing_params"
+        ? "GitHub redirect was missing installation_id. Retry from Admin → Install / manage GitHub App on the production URL (not localhost)."
+      : githubNotice === "bad_state"
+        ? "Install session expired or invalid. Retry from Admin → Install / manage GitHub App."
+      : githubNotice;
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -61,10 +75,9 @@ export default async function AdminPage({
             Manage members, project access, and repository connections. Production
             deploy access is not granted here by default.
           </p>
-          {githubNotice ? (
+          {githubNoticeMessage ? (
             <p className="mt-3 text-sm text-[var(--accent-soft)]">
-              GitHub install status: {githubNotice}
-              {installationId ? ` (${installationId})` : ""}
+              {githubNoticeMessage}
               {typeof params.error === "string" ? ` — ${params.error}` : ""}
             </p>
           ) : null}

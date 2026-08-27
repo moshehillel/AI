@@ -1,15 +1,32 @@
 import { NextResponse } from "next/server";
 import { db } from "@automation-studio/db";
 import { writeAuditEvent } from "@automation-studio/auth";
+import { appAdminUrl } from "@/lib/app-url";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const installationId = url.searchParams.get("installation_id");
   const state = url.searchParams.get("state");
+  const setupAction = url.searchParams.get("setup_action");
 
-  if (!installationId || !state) {
+  // GitHub sends setup_action=request when org admin approval is required (no installation_id yet).
+  if (setupAction === "request") {
     return NextResponse.redirect(
-      new URL("/admin?github=missing_params", request.url),
+      appAdminUrl("/admin?github=pending_approval"),
+    );
+  }
+
+  if (!installationId) {
+    return NextResponse.redirect(appAdminUrl("/admin?github=missing_params"));
+  }
+
+  // Post-install redirect includes installation_id + setup_action=install|update.
+  // state is only present when the user started from /api/github/install (preserved by GitHub).
+  if (!state) {
+    return NextResponse.redirect(
+      appAdminUrl(
+        `/admin?github=installed&installation_id=${encodeURIComponent(installationId)}&manual=1`,
+      ),
     );
   }
 
@@ -22,15 +39,11 @@ export async function GET(request: Request) {
     companyId = parsed.companyId;
     userId = parsed.userId;
   } catch {
-    return NextResponse.redirect(
-      new URL("/admin?github=bad_state", request.url),
-    );
+    return NextResponse.redirect(appAdminUrl("/admin?github=bad_state"));
   }
 
   if (!companyId) {
-    return NextResponse.redirect(
-      new URL("/admin?github=bad_state", request.url),
-    );
+    return NextResponse.redirect(appAdminUrl("/admin?github=bad_state"));
   }
 
   await db.githubInstallation.upsert({
@@ -54,10 +67,12 @@ export async function GET(request: Request) {
     action: "github.install_completed",
     entityType: "company",
     entityId: companyId,
-    metadata: { installationId },
+    metadata: { installationId, setupAction },
   });
 
   return NextResponse.redirect(
-    new URL(`/admin?github=installed&installation_id=${installationId}`, request.url),
+    appAdminUrl(
+      `/admin?github=installed&installation_id=${encodeURIComponent(installationId)}`,
+    ),
   );
 }

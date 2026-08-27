@@ -20,7 +20,9 @@ packages/jobs            Queue types + enqueue helpers
 packages/cursor-adapter  Thin @cursor/sdk wrapper (mockable)
 packages/github          GitHub App helpers (mockable)
 packages/railway         Railway GraphQL preview helpers (mockable)
-docs/                    Architecture and security notes
+docs/                    Architecture, security, and deploy notes
+.railway/                Railway Infrastructure as Code (railway.ts)
+scripts/                 railway-bootstrap.sh and helpers
 ```
 
 ## Prerequisites
@@ -33,24 +35,57 @@ docs/                    Architecture and security notes
 
 ```bash
 cp .env.example .env
-# Defaults work for local mock mode. Set ALLOW_DEMO_AUTH=1
+# Defaults work for local mock mode (ALLOW_DEMO_AUTH=1, mocks on)
 
 docker compose up -d
 pnpm install
-pnpm db:generate
+# postinstall builds workspace packages (dist/) and generates Prisma client
 pnpm db:push
 pnpm db:seed
 
 # Terminal 1
-ALLOW_DEMO_AUTH=1 CURSOR_MOCK=1 GITHUB_MOCK=1 RAILWAY_MOCK=1 pnpm dev:web
+pnpm dev:web
 
 # Terminal 2
-ALLOW_DEMO_AUTH=1 CURSOR_MOCK=1 GITHUB_MOCK=1 RAILWAY_MOCK=1 pnpm dev:worker
+pnpm dev:worker
+```
+
+Open http://localhost:3000
+
+**Windows (PowerShell):**
+```powershell
+Copy-Item .env.example .env
+docker compose up -d
+pnpm install
+pnpm db:push
+pnpm db:seed
+pnpm dev:web   # other terminal: pnpm dev:worker
+```
+
+If the worker fails with `Cannot find module .../packages/*/dist/index.js`, rebuild packages:
+
+```bash
+pnpm packages:build
+# or: pnpm -r --filter=./packages/* build
 ```
 
 Open http://localhost:3000
 
 Without Clerk keys, the app uses seeded demo users/company when `ALLOW_DEMO_AUTH=1`.
+
+## Deploy (Railway)
+
+Host web + worker with managed Postgres and Redis. Full guide: [docs/deploy.md](docs/deploy.md).
+
+```bash
+# Headless: export RAILWAY_TOKEN=...   (or railway login)
+pnpm railway:bootstrap
+# equivalent: ./scripts/railway-bootstrap.sh
+```
+
+First deploy uses **demo mode** (`ALLOW_DEMO_AUTH` + provider mocks) so the site works before Clerk/Cursor/GitHub are configured. Images: `Dockerfile.web` and `Dockerfile.worker`. Topology: [`.railway/railway.ts`](.railway/railway.ts).
+
+Generate `ENCRYPTION_KEY` with `openssl rand -hex 32` (bootstrap can generate one if unset).
 
 ## External credentials (production wiring)
 
@@ -59,10 +94,10 @@ Without Clerk keys, the app uses seeded demo users/company when `ALLOW_DEMO_AUTH
 | Clerk | Auth + Organizations (`org:employee`, `org:developer`, `org:admin`) |
 | Cursor | `CURSOR_API_KEY` service account for Cloud Agents |
 | GitHub App | Branch/PR/check access per customer install |
-| Railway | PR Environments inheriting from staging/preview-base |
+| Railway | Hosting + PR Environments inheriting from staging/preview-base |
 | Postgres / Redis | App data + job queue |
 
-See [docs/architecture.md](docs/architecture.md) and [docs/security.md](docs/security.md).
+See [docs/architecture.md](docs/architecture.md), [docs/security.md](docs/security.md), and [docs/deploy.md](docs/deploy.md).
 
 ## Scripts
 

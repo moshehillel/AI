@@ -1,3 +1,6 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { config as loadEnv } from "dotenv";
 import { Worker, type Job } from "bullmq";
 import {
   QUEUE_NAME,
@@ -15,6 +18,9 @@ import { handleSyncPreview } from "./handlers/sync-preview.js";
 import { handleTransition } from "./handlers/transition.js";
 import { handleUsageRecord } from "./handlers/usage-record.js";
 import { handleMergePrepare } from "./handlers/merge-prepare.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+loadEnv({ path: path.join(__dirname, "../../../.env") });
 
 async function processJob(job: Job) {
   const name = job.name as JobName;

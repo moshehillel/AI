@@ -90,10 +90,28 @@ export default async function AdminPage({
             connect individual repositories to projects.
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
+            {!process.env.GITHUB_APP_ID ? (
+              <Link
+                className="btn btn-primary"
+                href="/api/github/app-manifest/start"
+              >
+                Register GitHub App (one-time)
+              </Link>
+            ) : null}
             <Link className="btn btn-primary" href="/api/github/install">
               Install / manage GitHub App
             </Link>
           </div>
+          {!process.env.GITHUB_APP_ID ? (
+            <p className="muted mt-3 text-sm">
+              First-time setup: click Register to create the GitHub App on your
+              account (requires GitHub login). Credentials are saved to Railway
+              automatically when <code>RAILWAY_API_TOKEN</code> is configured.
+              If Railway is blocked (NetFree), run{" "}
+              <code>pnpm register:github-app</code> locally — see{" "}
+              <code>docs/github-app-setup.md</code> (Option A).
+            </p>
+          ) : null}
           <ul className="mt-4 space-y-2 text-sm">
             {installations.map((install) => (
               <li key={install.id} className="status-pill">

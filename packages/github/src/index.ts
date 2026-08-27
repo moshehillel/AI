@@ -1,6 +1,17 @@
 import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
 
+export {
+  buildGitHubAppManifest,
+  buildGitHubAppManifestStartHtml,
+  convertGitHubAppManifestCode,
+  getGitHubAppManifestFormAction,
+  getGitHubAppManifestRedirectUrl,
+  manifestToEnvVars,
+  type GitHubAppManifest,
+  type GitHubAppManifestConversion,
+} from "./manifest.js";
+
 function mockEnabled() {
   return process.env.GITHUB_MOCK === "1" || !process.env.GITHUB_APP_ID;
 }

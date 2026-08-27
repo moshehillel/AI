@@ -17,6 +17,7 @@ async function getClerkHandler() {
     "/sign-in(.*)",
     "/sign-up(.*)",
     "/api/webhooks(.*)",
+    "/api/github/app-manifest(.*)",
     "/api/health",
   ]);
   const mw = clerkMiddleware(async (auth, request) => {

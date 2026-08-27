@@ -33,19 +33,38 @@ docs/                    Architecture and security notes
 
 ```bash
 cp .env.example .env
-# Defaults work for local mock mode. Set ALLOW_DEMO_AUTH=1
+# Defaults work for local mock mode (ALLOW_DEMO_AUTH=1, mocks on)
 
 docker compose up -d
 pnpm install
-pnpm db:generate
+# postinstall builds workspace packages (dist/) and generates Prisma client
 pnpm db:push
 pnpm db:seed
 
 # Terminal 1
-ALLOW_DEMO_AUTH=1 CURSOR_MOCK=1 GITHUB_MOCK=1 RAILWAY_MOCK=1 pnpm dev:web
+pnpm dev:web
 
 # Terminal 2
-ALLOW_DEMO_AUTH=1 CURSOR_MOCK=1 GITHUB_MOCK=1 RAILWAY_MOCK=1 pnpm dev:worker
+pnpm dev:worker
+```
+
+Open http://localhost:3000
+
+**Windows (PowerShell):**
+```powershell
+Copy-Item .env.example .env
+docker compose up -d
+pnpm install
+pnpm db:push
+pnpm db:seed
+pnpm dev:web   # other terminal: pnpm dev:worker
+```
+
+If the worker fails with `Cannot find module .../packages/*/dist/index.js`, rebuild packages:
+
+```bash
+pnpm packages:build
+# or: pnpm -r --filter=./packages/* build
 ```
 
 Open http://localhost:3000

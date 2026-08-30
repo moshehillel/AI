@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { isDemoAuthEnabled } from "@/lib/access-mode";
+import { isDemoAuthEnabled, isOpenAccess } from "@/lib/access-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -8,10 +8,28 @@ export default function HomePage() {
   const clerkEnabled = Boolean(
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
   );
+  const demoOrOpen = isDemoAuthEnabled();
 
-  // Single-customer open access / demo: go straight to onboarding (no Clerk).
-  if (isDemoAuthEnabled()) {
-    redirect("/projects");
+  // While NetFree blocks Clerk, show Enter demo (do not auto-redirect away).
+  if (demoOrOpen) {
+    return (
+      <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">
+        <header className="relative z-10 flex items-center justify-between rise">
+          <div className="brand-mark text-2xl tracking-tight">Koda</div>
+          <div className="flex gap-3">
+            {clerkEnabled && !isOpenAccess() ? (
+              <Link className="btn btn-ghost" href="/sign-in">
+                Sign in
+              </Link>
+            ) : null}
+            <Link className="btn btn-primary" href="/projects">
+              Enter demo
+            </Link>
+          </div>
+        </header>
+        <Hero ctaHref="/projects" ctaLabel="Enter demo" />
+      </main>
+    );
   }
 
   if (!clerkEnabled) {
@@ -20,10 +38,10 @@ export default function HomePage() {
         <header className="relative z-10 flex items-center justify-between rise">
           <div className="brand-mark text-2xl tracking-tight">Koda</div>
           <Link className="btn btn-primary" href="/projects">
-            Continue
+            Enter demo
           </Link>
         </header>
-        <Hero ctaHref="/projects" ctaLabel="Continue" />
+        <Hero ctaHref="/projects" ctaLabel="Enter demo" />
       </main>
     );
   }

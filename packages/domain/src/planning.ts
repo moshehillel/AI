@@ -172,7 +172,26 @@ function looksLikeQuestion(text: string): boolean {
   );
 }
 
-/** Prefer a durable goal; never copy a short question into ## Goal. */
+/** Strip pasted docs / HTML / attachment dumps — never use those as the Goal. */
+function goalCandidateFromUserText(text: string): string | null {
+  const withoutAttach = text
+    .replace(/\n\nAttached (API docs URL|documentation|examples|file)[^\n]*:\n[\s\S]*$/i, "")
+    .replace(/^Attached (API docs URL|documentation|examples|file)[^\n]*:\n[\s\S]*$/i, "")
+    .trim();
+  if (!withoutAttach) return null;
+  if (
+    /<\/?(html|body|head|div|script|style|table|meta)\b/i.test(withoutAttach.slice(0, 4000)) ||
+    /<!DOCTYPE\s+html/i.test(withoutAttach.slice(0, 200))
+  ) {
+    return null;
+  }
+  if (looksLikeQuestion(withoutAttach)) return null;
+  if (withoutAttach.length <= 20) return null;
+  // Cap tightly so huge pastes never become the Goal even if they sneak through.
+  return withoutAttach.slice(0, 280).replace(/\s+/g, " ").trim();
+}
+
+/** Prefer a durable goal; never copy a short question or attachment dump into ## Goal. */
 function deriveGoal(opts: {
   title?: string;
   latestUserContent: string;
@@ -185,15 +204,14 @@ function deriveGoal(opts: {
     priorGoal &&
     priorGoal.length > 8 &&
     !looksLikeQuestion(priorGoal) &&
-    !/^define the business outcome/i.test(priorGoal)
+    !/^define the business outcome/i.test(priorGoal) &&
+    !/<\/?(html|body|div)\b/i.test(priorGoal)
   ) {
     return priorGoal.slice(0, 500);
   }
 
-  const brief = opts.latestUserContent.trim();
-  if (brief && !looksLikeQuestion(brief) && brief.length > 20) {
-    return brief.slice(0, 500);
-  }
+  const fromUser = goalCandidateFromUserText(opts.latestUserContent);
+  if (fromUser) return fromUser;
 
   if (opts.systems.length >= 2) {
     return `Connect ${opts.systems.join(" and ")} so data flows reliably between them.`;

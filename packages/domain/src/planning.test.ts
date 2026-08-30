@@ -112,6 +112,19 @@ describe("planning Q&A", () => {
     assert.match(reply.planMarkdown, /Provider Soft|HHA/i);
   });
 
+  it("does not put HTML attachment dumps into Goal", () => {
+    const html = `<!DOCTYPE html><html><head><title>API</title></head><body>${"x".repeat(2000)}</body></html>`;
+    const reply = buildPlanningFollowUp({
+      meta: { coveredTopics: ["goals"] },
+      title: "HHA sync",
+      latestUserContent: `Attached documentation:\n${html}`,
+      attachmentKind: "docs_text",
+    });
+    assert.doesNotMatch(reply.planMarkdown, /## Goal\n<!DOCTYPE/i);
+    assert.doesNotMatch(reply.planMarkdown, /## Goal\n[\s\S]*<html/i);
+    assert.match(reply.planMarkdown, /## Goal\n.+/);
+  });
+
   it("infers HHA and Provider Soft as systems", () => {
     const md = synthesizePlanMarkdown({
       title: "Test Project",

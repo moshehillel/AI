@@ -6,17 +6,25 @@ export default function HomePage() {
   const clerkEnabled = Boolean(
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
   );
+  const demoAuth = process.env.NEXT_PUBLIC_ALLOW_DEMO_AUTH === "1";
 
-  if (!clerkEnabled) {
+  if (!clerkEnabled || demoAuth) {
     return (
       <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">
         <header className="relative z-10 flex items-center justify-between rise">
           <div className="brand-mark text-2xl tracking-tight">Koda</div>
-          <Link className="btn btn-primary" href="/projects">
-            Open workspace
-          </Link>
+          <div className="flex gap-3">
+            {clerkEnabled ? (
+              <Link className="btn btn-ghost" href="/sign-in">
+                Sign in
+              </Link>
+            ) : null}
+            <Link className="btn btn-primary" href="/projects">
+              Enter demo
+            </Link>
+          </div>
         </header>
-        <Hero ctaHref="/projects" ctaLabel="Start building" />
+        <Hero ctaHref="/projects" ctaLabel="Enter demo" />
       </main>
     );
   }

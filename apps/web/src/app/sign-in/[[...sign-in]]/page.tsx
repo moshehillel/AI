@@ -4,6 +4,7 @@ import { SignIn } from "@clerk/nextjs";
 const clerkEnabled = Boolean(
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
 );
+const demoAuth = process.env.NEXT_PUBLIC_ALLOW_DEMO_AUTH === "1";
 
 export default function SignInPage() {
   if (!clerkEnabled) {
@@ -14,15 +15,23 @@ export default function SignInPage() {
           the workspace directly.
         </p>
         <Link className="btn btn-primary" href="/projects">
-          Open workspace
+          Enter demo
         </Link>
       </main>
     );
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
+    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-6">
       <SignIn />
+      {demoAuth ? (
+        <p className="muted text-center text-sm">
+          Exploring without an organization?{" "}
+          <Link className="text-[var(--accent-soft)] underline" href="/projects">
+            Enter demo
+          </Link>
+        </p>
+      ) : null}
     </main>
   );
 }

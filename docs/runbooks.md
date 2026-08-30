@@ -21,7 +21,21 @@ pnpm dev:web
 pnpm dev:worker
 ```
 
-Open http://localhost:3000 and use the role switcher (Employee / Developer / Admin).
+Open http://localhost:3000 → **Enter demo** (or go to `/projects`) and use the role switcher (Employee / Developer / Admin).
+
+## Hosted demo (temporary, with Clerk keys still set)
+
+When Clerk Organizations are not ready yet, re-enable demo mode on Railway **web** and **worker**:
+
+```bash
+railway variable set --service web ALLOW_DEMO_AUTH=1 NEXT_PUBLIC_ALLOW_DEMO_AUTH=1
+railway variable set --service worker ALLOW_DEMO_AUTH=1 NEXT_PUBLIC_ALLOW_DEMO_AUTH=1
+# NEXT_PUBLIC_* is baked at image build — redeploy from source:
+railway up --service web -d -y -m "Re-enable demo auth"
+railway up --service worker -d -y -m "Re-enable demo auth"
+```
+
+Then open https://koda.advancedautomations.net → **Enter demo**. Header role switcher changes Employee / Developer / Admin. While demo is on, Clerk org sign-in is optional; turn demo off again before relying on real org tenancy.
 
 ## Connect a repository (demo)
 

@@ -7,17 +7,92 @@ import {
   AuthError,
   writeAuditEvent,
 } from "@automation-studio/auth";
-import { db } from "@automation-studio/db";
+import { db, Prisma } from "@automation-studio/db";
 import {
   detectAndRedactSecrets,
   encryptSecret,
   isProgramPlanOnly,
+  buildPlanningFollowUp,
+  planningAgentInstructions,
+  type PlanningMeta,
 } from "@automation-studio/domain";
 import { enqueueJob } from "@automation-studio/jobs";
 
+const attachmentSchema = z
+  .object({
+    kind: z.enum(["api_docs_url", "docs_text", "examples", "file"]),
+    value: z.string().min(1).max(20000),
+    fileName: z.string().max(260).optional(),
+  })
+  .optional();
+
 const bodySchema = z.object({
-  content: z.string().min(1).max(20000),
+  content: z.string().max(20000).optional(),
+  attachment: attachmentSchema,
+}).superRefine((value, ctx) => {
+  const content = value.content?.trim() ?? "";
+  if (!content && !value.attachment) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Message or attachment required",
+      path: ["content"],
+    });
+  }
+  if (value.attachment?.kind === "api_docs_url") {
+    try {
+      // eslint-disable-next-line no-new
+      new URL(value.attachment.value);
+    } catch {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Invalid API docs URL",
+        path: ["attachment", "value"],
+      });
+    }
+  }
 });
+
+function composeUserContent(
+  content: string,
+  attachment?: z.infer<typeof attachmentSchema>,
+): string {
+  if (!attachment) return content;
+  const label =
+    attachment.kind === "api_docs_url"
+      ? `Attached API docs URL: ${attachment.value}`
+      : attachment.kind === "docs_text"
+        ? `Attached documentation:\n${attachment.value}`
+        : attachment.kind === "examples"
+          ? `Attached examples:\n${attachment.value}`
+          : `Attached file${attachment.fileName ? ` (${attachment.fileName})` : ""}:\n${attachment.value}`;
+  return content ? `${content}\n\n${label}` : label;
+}
+
+function mergePlanningAttachment(
+  meta: PlanningMeta,
+  attachment?: z.infer<typeof attachmentSchema>,
+): PlanningMeta {
+  if (!attachment) return meta;
+  if (attachment.kind === "api_docs_url") {
+    return { ...meta, apiDocsUrl: attachment.value };
+  }
+  if (attachment.kind === "docs_text" || attachment.kind === "file") {
+    const prior = meta.docsText ? `${meta.docsText}\n\n` : "";
+    const prefix =
+      attachment.kind === "file" && attachment.fileName
+        ? `[${attachment.fileName}]\n`
+        : "";
+    return {
+      ...meta,
+      docsText: `${prior}${prefix}${attachment.value}`.slice(0, 40000),
+    };
+  }
+  const prior = meta.examples ? `${meta.examples}\n\n` : "";
+  return {
+    ...meta,
+    examples: `${prior}${attachment.value}`.slice(0, 40000),
+  };
+}
 
 export async function POST(
   request: Request,
@@ -30,7 +105,11 @@ export async function POST(
     const cr = await requireChangeRequestAccess(ctx, id);
     const body = bodySchema.parse(await request.json());
 
-    const { redacted, secrets, hadSecrets } = detectAndRedactSecrets(body.content);
+    const rawContent = composeUserContent(
+      body.content?.trim() ?? "",
+      body.attachment,
+    );
+    const { redacted, secrets, hadSecrets } = detectAndRedactSecrets(rawContent);
 
     for (const secret of secrets) {
       await db.secretRef.upsert({
@@ -78,9 +157,17 @@ export async function POST(
         authorId: ctx.user.id,
         role: "USER",
         content: redacted,
-        metadata: hadSecrets
-          ? { secretsRedacted: true, secretRefs: secrets.map((s) => s.keyName) }
-          : {},
+        metadata: {
+          ...(hadSecrets
+            ? {
+                secretsRedacted: true,
+                secretRefs: secrets.map((s) => s.keyName),
+              }
+            : {}),
+          ...(body.attachment
+            ? { attachmentKind: body.attachment.kind }
+            : {}),
+        },
       },
     });
 
@@ -97,26 +184,74 @@ export async function POST(
     const forcePlan =
       cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status);
 
+    let assistantMessage: {
+      id: string;
+      role: string;
+      content: string;
+      createdAt: string;
+    } | null = null;
+
     if (cr.cursorAgentId) {
+      const planHint = forcePlan
+        ? `\n\n${planningAgentInstructions()}`
+        : "";
       await enqueueJob("cursor.follow-up", {
         changeRequestId: cr.id,
         companyId: ctx.company.id,
-        prompt: redacted,
+        prompt: `${redacted}${planHint}`,
         mode: forcePlan ? "plan" : "agent",
       });
     } else if (cr.kind === "PROGRAM" && cr.status === "PLANNING") {
-      // Lightweight planning reply without backend when no agent yet
-      await db.changeRequestMessage.create({
+      const currentMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+      const nextMetaBase = mergePlanningAttachment(
+        currentMeta,
+        body.attachment,
+      );
+      const { content, nextMeta } = buildPlanningFollowUp({
+        meta: nextMetaBase,
+        latestUserContent: redacted,
+        attachmentKind: body.attachment?.kind ?? null,
+      });
+
+      await db.changeRequest.update({
+        where: { id: cr.id },
+        data: {
+          planningMeta: nextMeta as Prisma.InputJsonValue,
+          updatedAt: new Date(),
+        },
+      });
+
+      const created = await db.changeRequestMessage.create({
         data: {
           changeRequestId: cr.id,
           role: "ASSISTANT",
-          content: [
-            "Got it — I've added that to the program plan.",
-            "",
-            "Keep sharing details, or refine acceptance criteria. When the plan feels complete, submit to a developer for building.",
-            "",
-            "Koda is AI and can make mistakes.",
-          ].join("\n"),
+          content,
+          metadata: {
+            planningFollowUp: true,
+            topic: nextMeta.lastQuestionTopic ?? null,
+          },
+        },
+      });
+      assistantMessage = {
+        id: created.id,
+        role: created.role,
+        content: created.content,
+        createdAt: created.createdAt.toISOString(),
+      };
+    } else if (
+      cr.kind === "PROGRAM" &&
+      body.attachment &&
+      isProgramPlanOnly(cr.status)
+    ) {
+      const currentMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+      await db.changeRequest.update({
+        where: { id: cr.id },
+        data: {
+          planningMeta: mergePlanningAttachment(
+            currentMeta,
+            body.attachment,
+          ) as Prisma.InputJsonValue,
+          updatedAt: new Date(),
         },
       });
     }
@@ -128,6 +263,7 @@ export async function POST(
         content: message.content,
         createdAt: message.createdAt.toISOString(),
       },
+      assistantMessage,
     });
   } catch (error) {
     if (error instanceof AuthError) {

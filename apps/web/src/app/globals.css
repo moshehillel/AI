@@ -232,3 +232,49 @@ select {
 .pulse-soft {
   animation: pulse-soft 1.8s ease-in-out infinite;
 }
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.chip:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--accent-soft) 45%, var(--line));
+}
+
+.chip-active {
+  background: color-mix(in oklab, var(--accent) 22%, transparent);
+  border-color: color-mix(in oklab, var(--accent) 55%, var(--line));
+  color: var(--accent-soft);
+}
+
+.chat-bubble {
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  padding: 0.85rem 1rem;
+}
+
+.chat-bubble-user {
+  background: color-mix(in oklab, var(--accent) 12%, rgba(255, 255, 255, 0.04));
+  margin-left: 1.5rem;
+}
+
+.chat-bubble-koda {
+  background: rgba(0, 0, 0, 0.22);
+  margin-right: 1.5rem;
+  border-color: color-mix(in oklab, var(--accent-soft) 18%, var(--line));
+}
+
+.chat-bubble-system {
+  background: transparent;
+  border-style: dashed;
+}

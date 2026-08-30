@@ -47,8 +47,9 @@ export default async function ProjectDetailPage({
           <div className="mt-8 panel p-6">
             <h2 className="text-xl">New program</h2>
             <p className="muted mt-2 text-sm">
-              Plan a new automation with Koda. Stay in planning until you submit
-              to a developer for building.
+              Start a back-and-forth with Koda. Answer questions as they come —
+              attach docs in chat when ready — then submit to a developer for
+              building.
             </p>
             <div className="mt-4">
               <NewProgramForm projectId={project.id} />

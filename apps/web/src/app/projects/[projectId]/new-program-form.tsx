@@ -6,10 +6,7 @@ import { useState, useTransition } from "react";
 export function NewProgramForm({ projectId }: { projectId: string }) {
   const router = useRouter();
   const [title, setTitle] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [apiDocsUrl, setApiDocsUrl] = useState("");
-  const [docsText, setDocsText] = useState("");
-  const [examples, setExamples] = useState("");
+  const [spark, setSpark] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -27,21 +24,19 @@ export function NewProgramForm({ projectId }: { projectId: string }) {
               projectId,
               kind: "PROGRAM",
               title: title || undefined,
-              prompt,
-              apiDocsUrl: apiDocsUrl || undefined,
-              docsText: docsText || undefined,
-              examples: examples || undefined,
+              prompt: spark || undefined,
             }),
           });
           const json = (await response.json()) as {
             id?: string;
-            error?: string;
+            error?: string | { formErrors?: string[] };
           };
           if (!response.ok || !json.id) {
+            const err = json.error;
             setError(
-              typeof json.error === "string"
-                ? json.error
-                : "Could not start program",
+              typeof err === "string"
+                ? err
+                : "Add a program name or a short note to start",
             );
             return;
           }
@@ -49,41 +44,27 @@ export function NewProgramForm({ projectId }: { projectId: string }) {
         });
       }}
     >
+      <p className="text-sm muted">
+        Koda will ask clarifying questions one at a time — not a long form.
+      </p>
       <input
         className="field"
-        placeholder="Program name (optional)"
+        placeholder="Program name"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
       />
       <textarea
-        className="field min-h-28"
-        placeholder="Describe the automation workflow you want to build…"
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        required
-      />
-      <input
-        className="field"
-        type="url"
-        placeholder="URL to API docs (optional)"
-        value={apiDocsUrl}
-        onChange={(e) => setApiDocsUrl(e.target.value)}
-      />
-      <textarea
         className="field min-h-24"
-        placeholder="Paste documentation excerpts (optional)"
-        value={docsText}
-        onChange={(e) => setDocsText(e.target.value)}
-      />
-      <textarea
-        className="field min-h-24"
-        placeholder="Paste example requests / responses (optional)"
-        value={examples}
-        onChange={(e) => setExamples(e.target.value)}
+        placeholder="Optional: a sentence about what you want to automate (or leave blank and let Koda ask)"
+        value={spark}
+        onChange={(e) => setSpark(e.target.value)}
       />
       {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-      <button className="btn btn-primary" disabled={pending || !prompt.trim()}>
-        {pending ? "Starting…" : "Start new program"}
+      <button
+        className="btn btn-primary"
+        disabled={pending || (!title.trim() && !spark.trim())}
+      >
+        {pending ? "Starting…" : "Start planning with Koda"}
       </button>
     </form>
   );

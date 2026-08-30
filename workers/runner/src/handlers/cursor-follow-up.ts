@@ -1,7 +1,7 @@
 import { db } from "@automation-studio/db";
 import { resumeAndSend } from "@automation-studio/cursor-adapter";
 import { enqueueJob, type CursorFollowUpJobData } from "@automation-studio/jobs";
-import { isProgramPlanOnly } from "@automation-studio/domain";
+import { isProgramPlanOnly, planningAgentInstructions } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
 
 export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
@@ -15,6 +15,10 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
 
   const forcePlan = cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status);
   const mode = forcePlan ? "plan" : (data.mode ?? "agent");
+  const prompt =
+    mode === "plan"
+      ? `${planningAgentInstructions()}\n\nClient message:\n${data.prompt}`
+      : data.prompt;
 
   if (mode === "agent" && cr.status !== "BUILDING" && cr.status !== "IMPLEMENTING") {
     const next =
@@ -46,7 +50,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
 
   const { wait } = await resumeAndSend({
     agentId: cr.cursorAgentId,
-    prompt: data.prompt,
+    prompt,
     mode,
   });
   const result = await wait();

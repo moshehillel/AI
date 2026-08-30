@@ -25,21 +25,32 @@ enum ChangeClassification {
   HIGH_RISK
 }
 
+enum ChangeRequestKind {
+  CHANGE
+  PROGRAM
+}
+
 enum ChangeRequestStatus {
   DRAFT
   ANALYZING
   PLANNING
   AWAITING_PLAN_APPROVAL
   AWAITING_HIGH_RISK_APPROVAL
+  AWAITING_DEV_BUILD
+  BUILDING
   IMPLEMENTING
   TESTING
   PREVIEW_READY
+  CLIENT_VERIFY
   CHANGES_REQUESTED
   READY_FOR_REVIEW
+  AWAITING_FINAL_REVIEW
   DEVELOPER_REVIEW
   APPROVED
   MERGED
+  DEPLOYING
   DEPLOYED
+  DONE
   REJECTED
   FAILED
   CANCELLED
@@ -89,16 +100,25 @@ enum CiCheckStatus {
 enum SecretPurpose {
   PREVIEW
   PLATFORM
+  CHAT
 }
 
 enum SecretProvider {
   ENV
   VAULT
+  ENCRYPTED
 }
 
 enum UsageProvider {
   CURSOR
   RAILWAY
+}
+
+enum OutboundEmailStatus {
+  QUEUED
+  SENT
+  FAILED
+  READ
 }
 
 model Company {
@@ -116,6 +136,7 @@ model Company {
   usageRecords   UsageRecord[]
   secretRefs     SecretRef[]
   auditEvents    AuditEvent[]
+  outboundEmails OutboundEmail[]
 }
 
 model User {
@@ -213,11 +234,16 @@ model ChangeRequest {
   number              Int
   title               String
   description         String               @default("")
+  kind                ChangeRequestKind    @default(CHANGE)
   classification      ChangeClassification @default(NORMAL)
   status              ChangeRequestStatus  @default(DRAFT)
   branchName          String?
   cursorAgentId       String?
   shortDescription    String?
+  /// Planning inputs for Programs: apiDocsUrl, docsText, examples, notes
+  planningMeta        Json                 @default("{}")
+  /// Developer build setup: serverLabel, autoDeploy, repoConnected
+  buildSetup          Json                 @default("{}")
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
@@ -233,12 +259,14 @@ model ChangeRequest {
   previews          PreviewEnvironment[]
   ciChecks          CiCheckSuite[]
   usageRecords      UsageRecord[]
+  secretRefs        SecretRef[]
 
   @@unique([projectId, number])
   @@index([companyId, status])
   @@index([projectId])
   @@index([createdById])
   @@index([cursorAgentId])
+  @@index([kind, status])
 }
 
 model ChangeRequestStatusEvent {
@@ -386,21 +414,26 @@ model CiCheckSuite {
 }
 
 model SecretRef {
-  id          String         @id @default(cuid())
-  companyId   String
-  projectId   String?
-  purpose     SecretPurpose
-  provider    SecretProvider @default(ENV)
-  keyName     String
-  externalRef String
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id              String         @id @default(cuid())
+  companyId       String
+  projectId       String?
+  changeRequestId String?
+  purpose         SecretPurpose
+  provider        SecretProvider @default(ENV)
+  keyName         String
+  externalRef     String
+  /// AES-GCM ciphertext for CHAT secrets (never returned to UI after create)
+  ciphertext      String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
-  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  project       Project?       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  changeRequest ChangeRequest? @relation(fields: [changeRequestId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, projectId, keyName, purpose])
   @@index([companyId])
+  @@index([changeRequestId])
 }
 
 model AuditEvent {
@@ -430,4 +463,24 @@ model GithubInstallation {
   updatedAt      DateTime @updatedAt
 
   @@index([companyId])
+}
+
+model OutboundEmail {
+  id         String              @id @default(cuid())
+  companyId  String
+  toEmail    String
+  subject    String
+  body       String
+  status     OutboundEmailStatus @default(QUEUED)
+  entityType String?
+  entityId   String?
+  metadata   Json                @default("{}")
+  sentAt     DateTime?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([status])
 }

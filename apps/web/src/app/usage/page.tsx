@@ -70,7 +70,7 @@ export default async function UsagePage() {
         <div>
           <h1 className="brand-mark text-4xl">Usage</h1>
           <p className="muted mt-2">
-            Cursor and preview usage by company, project, and person for this
+            Koda AI and preview usage by company, workspace, and person for this
             month.
           </p>
         </div>
@@ -150,7 +150,7 @@ export default async function UsagePage() {
         </div>
 
         <div className="panel p-5">
-          <h2 className="text-lg">Recent agent runs</h2>
+          <h2 className="text-lg">Recent AI runs</h2>
           <ul className="mt-3 space-y-2 text-sm">
             {recent.map((row) => (
               <li

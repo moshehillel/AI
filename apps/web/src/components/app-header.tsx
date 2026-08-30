@@ -13,18 +13,19 @@ function setDemoUser(role: string) {
 export function AppHeader({ role }: { role?: string | null }) {
   const router = useRouter();
   const pathname = usePathname();
+  const isStaff = role === "DEVELOPER" || role === "ADMIN";
 
   return (
     <header className="mb-8 flex flex-wrap items-center justify-between gap-4">
       <div className="flex items-center gap-6">
         <Link href="/projects" className="brand-mark text-2xl">
-          Automation Studio
+          Koda
         </Link>
-        <nav className="flex gap-4 text-sm muted">
-          <Link href="/projects">Projects</Link>
-          <Link href="/review">Review queue</Link>
-          <Link href="/usage">Usage</Link>
-          <Link href="/admin">Admin</Link>
+        <nav className="flex flex-wrap gap-4 text-sm muted">
+          <Link href="/projects">Programs</Link>
+          {isStaff ? <Link href="/review">Review queue</Link> : null}
+          {isStaff ? <Link href="/usage">Usage</Link> : null}
+          {isStaff ? <Link href="/admin">Admin</Link> : null}
         </nav>
       </div>
       <div className="flex items-center gap-3">

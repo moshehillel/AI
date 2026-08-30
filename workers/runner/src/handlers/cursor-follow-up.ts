@@ -1,6 +1,7 @@
 import { db } from "@automation-studio/db";
 import { resumeAndSend } from "@automation-studio/cursor-adapter";
 import { enqueueJob, type CursorFollowUpJobData } from "@automation-studio/jobs";
+import { isProgramPlanOnly } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
 
 export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
@@ -9,15 +10,29 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
   });
 
   if (!cr.cursorAgentId) {
-    throw new Error("No Cursor agent associated with this change request");
+    throw new Error("No AI build session associated with this program");
   }
 
-  const mode = data.mode ?? "agent";
-  await transitionChangeRequest({
-    changeRequestId: cr.id,
-    companyId: data.companyId,
-    toStatus: mode === "plan" ? "PLANNING" : "IMPLEMENTING",
-  });
+  const forcePlan = cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status);
+  const mode = forcePlan ? "plan" : (data.mode ?? "agent");
+
+  if (mode === "agent" && cr.status !== "BUILDING" && cr.status !== "IMPLEMENTING") {
+    const next =
+      cr.kind === "PROGRAM"
+        ? cr.status === "CLIENT_VERIFY" ||
+          cr.status === "PREVIEW_READY" ||
+          cr.status === "CHANGES_REQUESTED"
+          ? ("BUILDING" as const)
+          : null
+        : ("IMPLEMENTING" as const);
+    if (next) {
+      await transitionChangeRequest({
+        changeRequestId: cr.id,
+        companyId: data.companyId,
+        toStatus: next,
+      });
+    }
+  }
 
   const agentRun = await db.agentRun.create({
     data: {
@@ -74,11 +89,14 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
         content: result.text ?? "Updated plan",
       },
     });
-    await transitionChangeRequest({
-      changeRequestId: cr.id,
-      companyId: data.companyId,
-      toStatus: "AWAITING_PLAN_APPROVAL",
-    });
+    if (cr.kind !== "PROGRAM") {
+      await transitionChangeRequest({
+        changeRequestId: cr.id,
+        companyId: data.companyId,
+        toStatus: "AWAITING_PLAN_APPROVAL",
+      });
+    }
+    // Programs remain in PLANNING / AWAITING_DEV_BUILD
   }
 
   await enqueueJob("usage.record", {

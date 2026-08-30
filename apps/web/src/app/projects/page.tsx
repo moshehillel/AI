@@ -1,4 +1,4 @@
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 import { AppHeader } from "@/components/app-header";
 import { getRequestAuth } from "@/lib/request-auth";
 import { db } from "@automation-studio/db";
@@ -21,10 +21,10 @@ export default async function ProjectsPage() {
     <main className="mx-auto max-w-6xl px-6 py-8">
       <AppHeader role={ctx.role} />
       <section className="rise">
-        <h1 className="brand-mark text-4xl">Projects</h1>
+        <h1 className="brand-mark text-4xl">Programs</h1>
         <p className="muted mt-2 max-w-2xl">
-          Choose an automation to request a change. You do not need GitHub,
-          branches, or deployments — just describe what you want.
+          Choose a workspace to start a new program with Koda, or request a
+          change to an existing automation.
         </p>
         <div className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {projects.map((project, index) => (
@@ -42,7 +42,7 @@ export default async function ProjectsPage() {
           ))}
           {projects.length === 0 ? (
             <div className="panel p-6 muted">
-              No projects assigned yet. Ask an admin to grant access.
+              No workspaces assigned yet. Ask an admin to grant access.
             </div>
           ) : null}
         </div>

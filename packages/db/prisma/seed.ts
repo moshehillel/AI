@@ -102,7 +102,7 @@ async function main() {
     }
   }
 
-  console.log("Seeded demo company, users, and projects");
+  console.log("Seeded demo company, users, and projects for Koda");
 }
 
 main()

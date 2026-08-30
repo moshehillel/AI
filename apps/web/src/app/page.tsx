@@ -5,14 +5,14 @@ const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 export default function HomePage() {
   if (!clerkEnabled) {
     return (
-      <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">
-        <header className="flex items-center justify-between rise">
-          <div className="brand-mark text-3xl">Automation Studio</div>
+      <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">
+        <header className="relative z-10 flex items-center justify-between rise">
+          <div className="brand-mark text-2xl tracking-tight">Koda</div>
           <Link className="btn btn-primary" href="/projects">
-            Enter demo
+            Open workspace
           </Link>
         </header>
-        <Hero />
+        <Hero ctaHref="/projects" ctaLabel="Start building" />
       </main>
     );
   }
@@ -20,48 +20,40 @@ export default function HomePage() {
   return <ClerkHome />;
 }
 
-function Hero() {
+function Hero({
+  ctaHref,
+  ctaLabel,
+}: {
+  ctaHref: string;
+  ctaLabel: string;
+}) {
   return (
-    <section className="relative mt-24 grid gap-10 lg:grid-cols-[1.2fr_0.8fr]">
-      <div className="rise" style={{ animationDelay: "80ms" }}>
-        <p className="muted mb-4 text-sm uppercase tracking-[0.2em]">
-          Isolated AI changes · Developer gatekeepers
+    <section className="hero-stage">
+      <div className="hero-grid" aria-hidden />
+      <div className="relative z-10 max-w-3xl">
+        <p
+          className="brand-mark rise text-6xl leading-none md:text-8xl"
+          style={{ animationDelay: "40ms" }}
+        >
+          Koda
         </p>
-        <h1 className="brand-mark max-w-3xl text-5xl leading-tight md:text-6xl">
-          Ask for software changes in plain English.
+        <h1
+          className="rise mt-5 max-w-2xl text-2xl font-medium leading-snug text-[var(--accent-soft)] md:text-4xl"
+          style={{ animationDelay: "120ms" }}
+        >
+          Advanced Automations AI Builder
         </h1>
-        <p className="muted mt-6 max-w-xl text-lg leading-relaxed">
-          Employees describe what they need. Automation Studio uses AI to prepare
-          changes on isolated branches and temporary previews. Developers review
-          and merge to production.
+        <p
+          className="muted rise mt-6 max-w-xl text-lg leading-relaxed"
+          style={{ animationDelay: "200ms" }}
+        >
+          Plan new programs with Koda, submit for building, verify the preview,
+          then ship with developer approval — without touching infrastructure.
         </p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link className="btn btn-primary" href="/projects">
-            Open the studio
+        <div className="rise mt-9" style={{ animationDelay: "280ms" }}>
+          <Link className="btn btn-primary" href={ctaHref}>
+            {ctaLabel}
           </Link>
-        </div>
-      </div>
-
-      <div
-        className="panel rise relative overflow-hidden p-6"
-        style={{ animationDelay: "160ms" }}
-      >
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(125,206,160,0.18),transparent_45%)]" />
-        <div className="relative space-y-4">
-          <div className="status-pill pulse-soft">Analyzing project…</div>
-          <div className="rounded-xl border border-[var(--line)] bg-black/20 p-4">
-            <p className="text-sm muted">Sarah · Invoice Automation</p>
-            <p className="mt-2">
-              Add a way to retry invoices that failed because the customer’s
-              account was temporarily unavailable.
-            </p>
-          </div>
-          <ul className="space-y-2 text-sm">
-            <li>✓ Found invoice processing logic</li>
-            <li>✓ Found dashboard</li>
-            <li>✓ Found existing tests</li>
-            <li className="muted">Making the change…</li>
-          </ul>
         </div>
       </div>
     </section>
@@ -77,9 +69,9 @@ async function ClerkHome() {
   }
 
   return (
-    <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">
-      <header className="flex items-center justify-between rise">
-        <div className="brand-mark text-3xl">Automation Studio</div>
+    <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">
+      <header className="relative z-10 flex items-center justify-between rise">
+        <div className="brand-mark text-2xl tracking-tight">Koda</div>
         <div className="flex gap-3">
           <Link className="btn btn-ghost" href="/sign-in">
             Sign in
@@ -89,7 +81,7 @@ async function ClerkHome() {
           </Link>
         </div>
       </header>
-      <Hero />
+      <Hero ctaHref="/sign-up" ctaLabel="Start with Koda" />
     </main>
   );
 }

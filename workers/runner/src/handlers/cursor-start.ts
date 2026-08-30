@@ -38,7 +38,12 @@ export async function handleCursorStart(data: CursorStartJobData) {
     throw new Error("Missing repository or branch");
   }
 
-  const toStatus = data.mode === "plan" ? "PLANNING" : "IMPLEMENTING";
+  const toStatus =
+    data.mode === "plan"
+      ? "PLANNING"
+      : cr.kind === "PROGRAM"
+        ? "BUILDING"
+        : "IMPLEMENTING";
   await transitionChangeRequest({
     changeRequestId: cr.id,
     companyId: data.companyId,
@@ -103,11 +108,21 @@ export async function handleCursorStart(data: CursorStartJobData) {
         content: result.text ?? "Plan generated",
       },
     });
-    await transitionChangeRequest({
-      changeRequestId: cr.id,
-      companyId: data.companyId,
-      toStatus: "AWAITING_PLAN_APPROVAL",
-    });
+    if (cr.kind === "PROGRAM") {
+      // Stay in planning until client submits to developer
+      await transitionChangeRequest({
+        changeRequestId: cr.id,
+        companyId: data.companyId,
+        toStatus: "PLANNING",
+        reason: "Plan updated — still in program planning",
+      });
+    } else {
+      await transitionChangeRequest({
+        changeRequestId: cr.id,
+        companyId: data.companyId,
+        toStatus: "AWAITING_PLAN_APPROVAL",
+      });
+    }
   } else {
     await transitionChangeRequest({
       changeRequestId: cr.id,
@@ -131,7 +146,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
 
   await writeAuditEvent({
     companyId: data.companyId,
-    action: data.mode === "plan" ? "cursor.plan_created" : "cursor.implemented",
+    action: data.mode === "plan" ? "koda.plan_created" : "koda.implemented",
     entityType: "change_request",
     entityId: cr.id,
     metadata: { agentId, runId: result.runId },

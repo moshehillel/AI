@@ -20,7 +20,7 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
       changeRequestId: cr.id,
       companyId: data.companyId,
       toStatus: "FAILED",
-      reason: "Project has no connected GitHub repository",
+      reason: "Project has no connected repository",
     });
     throw new Error("No repository connected");
   }
@@ -56,12 +56,19 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     metadata: { branchName, sha: result.sha },
   });
 
-  const needsPlan = cr.classification === "COMPLEX" || cr.classification === "HIGH_RISK";
+  const needsPlan =
+    cr.kind === "PROGRAM" ||
+    cr.classification === "COMPLEX" ||
+    cr.classification === "HIGH_RISK";
+
+  // Programs only leave plan mode after developer starts a build (BUILDING).
+  const mode =
+    cr.kind === "PROGRAM" && cr.status !== "BUILDING" ? "plan" : needsPlan ? "plan" : "agent";
 
   await enqueueJob("cursor.start-agent", {
     changeRequestId: cr.id,
     companyId: data.companyId,
-    mode: needsPlan ? "plan" : "agent",
+    mode: mode as "plan" | "agent",
     prompt: `${cr.title}\n\n${cr.description}`.trim(),
   });
 

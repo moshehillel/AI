@@ -40,10 +40,10 @@ export function buildGitHubAppManifest(input: {
 }): GitHubAppManifest {
   const base = input.appUrl.replace(/\/$/, "");
   return {
-    name: input.appName ?? "Automation Studio",
+    name: input.appName ?? "Koda",
     url: base,
     description:
-      "Automation Studio — AI-assisted change requests with branch/PR workflows.",
+      "Koda — Advanced Automations AI Builder with isolated preview workflows.",
     public: false,
     hook_attributes: {
       url: `${base}/api/webhooks/github`,
@@ -89,7 +89,7 @@ export function buildGitHubAppManifestStartHtml(input: {
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
-  <title>Register Automation Studio GitHub App</title>
+  <title>Register Koda GitHub App</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
     .steps { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }

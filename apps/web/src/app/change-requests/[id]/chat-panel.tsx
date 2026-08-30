@@ -13,15 +13,18 @@ export function ChatPanel({
   changeRequestId,
   initialMessages,
   status: initialStatus,
+  kind,
 }: {
   changeRequestId: string;
   initialMessages: Message[];
   status: string;
+  kind: string;
 }) {
   const [messages, setMessages] = useState(initialMessages);
   const [status, setStatus] = useState(initialStatus);
   const [prompt, setPrompt] = useState("");
   const [pending, startTransition] = useTransition();
+  const isProgram = kind === "PROGRAM";
 
   useEffect(() => {
     const source = new EventSource(
@@ -48,8 +51,19 @@ export function ChatPanel({
     return () => source.close();
   }, [changeRequestId]);
 
+  const placeholder = isProgram
+    ? status === "PLANNING"
+      ? "Share docs, examples, or answer Koda’s questions…"
+      : status === "CLIENT_VERIFY" || status === "PREVIEW_READY"
+        ? "Ask how it works, request a test script, or describe a change…"
+        : "Send a message…"
+    : "Ask for another change or clarification…";
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <div className="mb-3 rounded-xl border border-[var(--line)] bg-black/20 px-3 py-2 text-xs muted">
+        Koda is AI and can make mistakes.
+      </div>
       <div className="flex-1 space-y-3 overflow-y-auto pr-1">
         {messages.map((message) => (
           <div
@@ -63,17 +77,22 @@ export function ChatPanel({
                 ? "You"
                 : message.role === "SYSTEM"
                   ? "System"
-                  : "Assistant"}
+                  : "Koda"}
             </p>
             <p className="whitespace-pre-wrap text-sm leading-relaxed">
               {message.content}
             </p>
           </div>
         ))}
-        {["ANALYZING", "PLANNING", "IMPLEMENTING", "TESTING"].includes(
-          status,
-        ) ? (
-          <p className="muted pulse-soft text-sm">Working on your request…</p>
+        {[
+          "ANALYZING",
+          "PLANNING",
+          "IMPLEMENTING",
+          "TESTING",
+          "BUILDING",
+          "DEPLOYING",
+        ].includes(status) ? (
+          <p className="muted pulse-soft text-sm">Koda is working…</p>
         ) : null}
         {status === "FAILED" ? (
           <p className="text-sm text-[var(--danger)]">
@@ -106,7 +125,7 @@ export function ChatPanel({
       >
         <input
           className="field"
-          placeholder="Ask for another change or clarification…"
+          placeholder={placeholder}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
         />

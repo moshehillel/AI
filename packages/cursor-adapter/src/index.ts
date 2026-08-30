@@ -39,14 +39,15 @@ export type AgentRunResult = {
 function requireApiKey(): string {
   const key = process.env.CURSOR_API_KEY;
   if (!key) {
-    throw new Error("CURSOR_API_KEY is not configured");
+    throw new Error("AI backend API key is not configured");
   }
   return key;
 }
 
 /**
- * Thin adapter over @cursor/sdk so API beta churn stays isolated.
+ * Thin adapter over the AI build backend SDK.
  * Uses dynamic import so the platform can boot without the SDK in local mock mode.
+ * Customer-facing product name is Koda — do not surface backend vendor names in UI.
  */
 async function loadCursorSdk(): Promise<typeof import("@cursor/sdk") | null> {
   try {
@@ -196,7 +197,7 @@ export async function cancelAgentRun(input: {
     },
   );
   if (!response.ok) {
-    throw new Error(`Cursor cancel failed: HTTP ${response.status}`);
+    throw new Error(`AI cancel failed: HTTP ${response.status}`);
   }
   return { cancelled: true };
 }
@@ -253,8 +254,8 @@ function mockCreate(input: CreateTaskAgentInput) {
       runId: `run-mock-${Date.now()}`,
       text:
         input.mode === "plan"
-          ? "Proposed plan:\n1. Locate relevant modules\n2. Implement change\n3. Add tests"
-          : "Implemented the requested change on the feature branch (mock).",
+          ? "Proposed plan:\n1. Map the workflow and integrations\n2. Design the automation steps\n3. Define acceptance tests"
+          : "Built the requested automation on an isolated preview (mock).",
       model: "mock-auto",
       branch: input.branch,
       usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
@@ -266,16 +267,16 @@ function mockFollowUp(input: FollowUpInput) {
   return {
     agentId: input.agentId,
     run: (async function* () {
-      yield { type: "status" as const, message: "Continuing (mock)…" };
+      yield { type: "status" as const, message: "Continuing with Koda…" };
       yield {
         type: "assistant" as const,
-        text: "Updated the change based on your follow-up (mock).",
+        text: "Updated the program based on your follow-up.",
       };
       yield { type: "done" as const };
     })(),
     wait: async (): Promise<AgentRunResult> => ({
       agentId: input.agentId,
-      text: "Updated the change based on your follow-up (mock).",
+      text: "Updated the program based on your follow-up.",
       usage: { inputTokens: 50, outputTokens: 80, totalTokens: 130 },
     }),
   };
@@ -284,16 +285,19 @@ function mockFollowUp(input: FollowUpInput) {
 async function* mockStream(
   input: CreateTaskAgentInput,
 ): AsyncGenerator<NormalizedStreamEvent> {
-  yield { type: "status", message: "Analyzing project…" };
-  yield { type: "assistant", text: "I found the relevant application logic." };
+  yield { type: "status", message: "Reviewing your inputs…" };
+  yield {
+    type: "assistant",
+    text: "I reviewed the workflow details you shared.",
+  };
   if (input.mode === "plan") {
     yield {
       type: "assistant",
-      text: "This is a larger change. I've prepared a plan for your review.",
+      text: "I've prepared a plan. Ask questions or submit to a developer when you're ready.",
     };
   } else {
-    yield { type: "status", message: "Making the change…" };
-    yield { type: "assistant", text: "Code updated on the feature branch." };
+    yield { type: "status", message: "Building your program…" };
+    yield { type: "assistant", text: "Preview build updated." };
   }
   yield { type: "usage", inputTokens: 100, outputTokens: 200, totalTokens: 300 };
   yield { type: "done" };

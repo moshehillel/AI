@@ -32,6 +32,7 @@ export default async function ChangeRequestPage({
       pullRequests: { orderBy: { createdAt: "desc" }, take: 1 },
       ciChecks: { orderBy: { createdAt: "desc" }, take: 1 },
       statusEvents: { orderBy: { createdAt: "asc" } },
+      secretRefs: { where: { purpose: "CHAT" }, select: { keyName: true, createdAt: true } },
     },
   });
 
@@ -39,6 +40,17 @@ export default async function ChangeRequestPage({
   const pr = full.pullRequests[0];
   const plan = full.plans[0];
   const ci = full.ciChecks[0];
+  const isProgram = full.kind === "PROGRAM";
+  const isStaff = ctx.role === "DEVELOPER" || ctx.role === "ADMIN";
+  const planningMeta = (full.planningMeta ?? {}) as {
+    apiDocsUrl?: string | null;
+    docsText?: string | null;
+    examples?: string | null;
+  };
+  const buildSetup = (full.buildSetup ?? {}) as {
+    serverLabel?: string;
+    autoDeploy?: boolean;
+  };
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -47,7 +59,10 @@ export default async function ChangeRequestPage({
         <div className="panel flex min-h-[70vh] flex-col p-5">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="muted text-sm">{full.project.name}</p>
+              <p className="muted text-sm">
+                {full.project.name}
+                {isProgram ? " · Program" : " · Change"}
+              </p>
               <h1 className="brand-mark text-3xl">
                 #{full.number} {full.title}
               </h1>
@@ -63,6 +78,7 @@ export default async function ChangeRequestPage({
               createdAt: m.createdAt.toISOString(),
             }))}
             status={full.status}
+            kind={full.kind}
           />
         </div>
 
@@ -83,22 +99,43 @@ export default async function ChangeRequestPage({
 
           <div className="panel space-y-3 p-5">
             <h2 className="text-lg">Details</h2>
-            <p className="text-sm">
-              <span className="muted">Classification:</span> {full.classification}
-            </p>
-            {full.branchName ? (
+            {isProgram && planningMeta.apiDocsUrl ? (
+              <p className="text-sm">
+                <span className="muted">API docs:</span>{" "}
+                <a
+                  className="underline"
+                  href={planningMeta.apiDocsUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open link
+                </a>
+              </p>
+            ) : null}
+            {full.secretRefs.length > 0 ? (
+              <p className="text-sm">
+                <span className="muted">Secure secrets stored:</span>{" "}
+                {full.secretRefs.map((s) => s.keyName).join(", ")}
+              </p>
+            ) : null}
+            {isStaff && buildSetup.serverLabel ? (
+              <p className="text-sm">
+                <span className="muted">Server:</span> {buildSetup.serverLabel}
+              </p>
+            ) : null}
+            {isStaff && ci ? (
+              <p className="text-sm">
+                <span className="muted">Checks:</span> {ci.status}
+              </p>
+            ) : null}
+            {isStaff && full.branchName ? (
               <p className="text-sm">
                 <span className="muted">Branch:</span> {full.branchName}
               </p>
             ) : null}
-            {ci ? (
-              <p className="text-sm">
-                <span className="muted">Build/tests:</span> {ci.status}
-              </p>
-            ) : null}
-            {pr ? (
+            {isStaff && pr ? (
               <a className="btn btn-ghost w-full" href={pr.url} target="_blank">
-                View pull request
+                Open review link
               </a>
             ) : null}
             {preview?.url ? (
@@ -107,7 +144,7 @@ export default async function ChangeRequestPage({
                 href={preview.url}
                 target="_blank"
               >
-                Open test version
+                Open preview
               </a>
             ) : null}
           </div>
@@ -126,6 +163,7 @@ export default async function ChangeRequestPage({
             status={full.status}
             role={ctx.role}
             hasPlan={Boolean(plan)}
+            kind={full.kind}
           />
         </aside>
       </section>

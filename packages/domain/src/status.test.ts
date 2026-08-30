@@ -26,6 +26,28 @@ describe("status machine", () => {
   it("allows failed to analyzing for retry", () => {
     assert.equal(canTransition("FAILED", "ANALYZING"), true);
   });
+
+  it("supports program lifecycle transitions", () => {
+    assert.equal(canTransition("DRAFT", "PLANNING"), true);
+    assert.equal(canTransition("PLANNING", "AWAITING_DEV_BUILD"), true);
+    assert.equal(canTransition("AWAITING_DEV_BUILD", "BUILDING"), true);
+    assert.equal(canTransition("BUILDING", "CLIENT_VERIFY"), true);
+    assert.equal(canTransition("CLIENT_VERIFY", "AWAITING_FINAL_REVIEW"), true);
+    assert.equal(canTransition("AWAITING_FINAL_REVIEW", "DEPLOYING"), true);
+    assert.equal(canTransition("DEPLOYING", "DONE"), true);
+  });
+});
+
+describe("secret redaction", () => {
+  it("redacts api keys from chat", async () => {
+    const { detectAndRedactSecrets } = await import("./secrets.js");
+    const result = detectAndRedactSecrets(
+      "Here is my key sk-abcdefghijklmnopqrstuvwxyz123456",
+    );
+    assert.equal(result.hadSecrets, true);
+    assert.equal(result.redacted.includes("sk-"), false);
+    assert.equal(result.secrets.length >= 1, true);
+  });
 });
 
 describe("classification", () => {

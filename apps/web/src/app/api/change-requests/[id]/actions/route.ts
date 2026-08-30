@@ -10,13 +10,23 @@ import {
 import { db } from "@automation-studio/db";
 import { enqueueJob } from "@automation-studio/jobs";
 import { mergePullRequest } from "@automation-studio/github";
-import { assertTransition } from "@automation-studio/domain";
+import {
+  assertTransition,
+  programSubmittedEmail,
+  finalReviewEmail,
+} from "@automation-studio/domain";
+import { getAppBaseUrl } from "@/lib/app-url";
+import { queueAndMaybeSendEmail } from "@/lib/notify";
 
 const bodySchema = z.object({
   action: z.enum([
     "approve_plan",
     "approve_high_risk",
     "submit_review",
+    "submit_to_dev",
+    "start_build",
+    "submit_final_review",
+    "approve_deploy",
     "approve",
     "request_changes",
     "reject",
@@ -24,6 +34,9 @@ const bodySchema = z.object({
     "cancel",
     "retry",
   ]),
+  serverLabel: z.string().max(200).optional(),
+  autoDeploy: z.boolean().optional(),
+  notes: z.string().max(4000).optional(),
 });
 
 async function transition(
@@ -66,9 +79,281 @@ export async function POST(
     const { id } = await context.params;
     const ctx = await getRequestAuth();
     const cr = await requireChangeRequestAccess(ctx, id);
-    const { action } = bodySchema.parse(await request.json());
+    const body = bodySchema.parse(await request.json());
+    const { action } = body;
 
     switch (action) {
+      case "submit_to_dev": {
+        await requirePermission(ctx, "program:submit_to_dev");
+        if (cr.kind !== "PROGRAM") {
+          throw new AuthError("Only programs can be submitted to developers", 400);
+        }
+        if (cr.status !== "PLANNING" && cr.status !== "AWAITING_PLAN_APPROVAL") {
+          throw new AuthError("Program is not in planning", 400);
+        }
+        await transition(
+          cr.id,
+          ctx.company.id,
+          cr.status,
+          "AWAITING_DEV_BUILD",
+          ctx.user.id,
+          "Submitted to developer for building",
+        );
+
+        await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            authorId: ctx.user.id,
+            content:
+              "Submitted to a developer for building. You'll be notified when a preview is ready to verify.",
+          },
+        });
+
+        const developers = await db.companyMembership.findMany({
+          where: {
+            companyId: ctx.company.id,
+            role: { in: ["DEVELOPER", "ADMIN"] },
+          },
+          include: { user: true },
+        });
+        const reviewUrl = `${getAppBaseUrl()}/change-requests/${cr.id}`;
+        const emailContent = programSubmittedEmail({
+          programTitle: cr.title,
+          programNumber: cr.number,
+          requesterName: ctx.user.name ?? ctx.user.email,
+          reviewUrl,
+        });
+        for (const member of developers) {
+          await queueAndMaybeSendEmail({
+            companyId: ctx.company.id,
+            toEmail: member.user.email,
+            subject: emailContent.subject,
+            body: emailContent.body,
+            entityType: "change_request",
+            entityId: cr.id,
+            metadata: { kind: "program_submit_to_dev" },
+          });
+        }
+        break;
+      }
+      case "start_build": {
+        await requirePermission(ctx, "program:start_build");
+        if (cr.status !== "AWAITING_DEV_BUILD" && cr.status !== "CHANGES_REQUESTED") {
+          throw new AuthError("Program is not waiting for a build", 400);
+        }
+        const fromStatus =
+          cr.status === "CHANGES_REQUESTED" ? "CHANGES_REQUESTED" : "AWAITING_DEV_BUILD";
+        await db.changeRequest.update({
+          where: { id: cr.id },
+          data: {
+            assignedDeveloperId: ctx.user.id,
+            buildSetup: {
+              serverLabel: body.serverLabel ?? "default",
+              autoDeploy: body.autoDeploy ?? true,
+              notes: body.notes ?? null,
+              startedAt: new Date().toISOString(),
+              startedBy: ctx.user.id,
+            },
+          },
+        });
+        await transition(
+          cr.id,
+          ctx.company.id,
+          fromStatus,
+          "BUILDING",
+          ctx.user.id,
+          "Developer started build",
+        );
+        await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            authorId: ctx.user.id,
+            content: `Developer started the build${body.serverLabel ? ` on ${body.serverLabel}` : ""}. Auto-deploy on push: ${body.autoDeploy === false ? "off" : "on"}.`,
+          },
+        });
+
+        const full = await db.changeRequest.findFirstOrThrow({
+          where: { id: cr.id },
+          include: { project: { include: { repository: true } }, plans: true },
+        });
+        const planText = full.plans[0]?.content ?? full.description;
+        if (full.project.repository) {
+          if (!full.branchName) {
+            await enqueueJob("github.ensure-branch", {
+              changeRequestId: cr.id,
+              companyId: ctx.company.id,
+            });
+          } else {
+            await enqueueJob("cursor.start-agent", {
+              changeRequestId: cr.id,
+              companyId: ctx.company.id,
+              mode: "agent",
+              prompt: `Build the approved program plan.\n\nTitle: ${full.title}\n\n${planText}`,
+            });
+          }
+        } else {
+          // Mock build path when no repo connected yet
+          await db.changeRequestMessage.create({
+            data: {
+              changeRequestId: cr.id,
+              role: "ASSISTANT",
+              content:
+                "Build started in mock mode (no repository connected yet). Connect a repository in Admin to enable live builds. Preparing a preview stub…",
+            },
+          });
+          await transition(
+            cr.id,
+            ctx.company.id,
+            "BUILDING",
+            "CLIENT_VERIFY",
+            ctx.user.id,
+            "Mock preview ready",
+          );
+          await db.previewEnvironment.create({
+            data: {
+              changeRequestId: cr.id,
+              provider: "MOCK",
+              url: `${getAppBaseUrl()}/projects/${full.projectId}`,
+              status: "READY",
+              externalId: `mock-preview-${cr.id}`,
+            },
+          });
+          await db.changeRequestMessage.create({
+            data: {
+              changeRequestId: cr.id,
+              role: "SYSTEM",
+              content:
+                "Preview is ready for verification. Ask Koda how things work, request test scripts, or request changes until you're satisfied — then submit for final review.",
+            },
+          });
+        }
+        break;
+      }
+      case "submit_final_review": {
+        await requirePermission(ctx, "change_request:submit_review");
+        const from =
+          cr.status === "CLIENT_VERIFY" || cr.status === "PREVIEW_READY"
+            ? cr.status
+            : null;
+        if (!from) {
+          throw new AuthError("Preview must be ready before final review", 400);
+        }
+        await transition(
+          cr.id,
+          ctx.company.id,
+          from,
+          "AWAITING_FINAL_REVIEW",
+          ctx.user.id,
+          "Submitted for final review",
+        );
+        await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            authorId: ctx.user.id,
+            content: "Submitted for final developer review and deploy approval.",
+          },
+        });
+        const developers = await db.companyMembership.findMany({
+          where: {
+            companyId: ctx.company.id,
+            role: { in: ["DEVELOPER", "ADMIN"] },
+          },
+          include: { user: true },
+        });
+        const reviewUrl = `${getAppBaseUrl()}/change-requests/${cr.id}`;
+        const emailContent = finalReviewEmail({
+          programTitle: cr.title,
+          programNumber: cr.number,
+          reviewUrl,
+        });
+        for (const member of developers) {
+          await queueAndMaybeSendEmail({
+            companyId: ctx.company.id,
+            toEmail: member.user.email,
+            subject: emailContent.subject,
+            body: emailContent.body,
+            entityType: "change_request",
+            entityId: cr.id,
+            metadata: { kind: "program_final_review" },
+          });
+        }
+        break;
+      }
+      case "approve_deploy": {
+        await requirePermission(ctx, "program:final_approve");
+        if (
+          cr.status !== "AWAITING_FINAL_REVIEW" &&
+          cr.status !== "APPROVED" &&
+          cr.status !== "DEVELOPER_REVIEW"
+        ) {
+          throw new AuthError("Not awaiting final deploy approval", 400);
+        }
+        let from = cr.status;
+        if (from === "AWAITING_FINAL_REVIEW" || from === "DEVELOPER_REVIEW") {
+          await transition(
+            cr.id,
+            ctx.company.id,
+            from,
+            "APPROVED",
+            ctx.user.id,
+            "Approved for deploy",
+          );
+          from = "APPROVED";
+        }
+        await transition(
+          cr.id,
+          ctx.company.id,
+          from,
+          "DEPLOYING",
+          ctx.user.id,
+          "Deploy started",
+        );
+        await enqueueJob("merge.prepare", {
+          changeRequestId: cr.id,
+          companyId: ctx.company.id,
+        });
+        const full = await db.changeRequest.findFirst({
+          where: { id: cr.id },
+          include: {
+            pullRequests: true,
+            project: { include: { repository: true } },
+          },
+        });
+        const pr = full?.pullRequests[0];
+        const repo = full?.project.repository;
+        if (pr && repo) {
+          await mergePullRequest({
+            installationId: repo.installationId ?? "0",
+            owner: repo.githubOwner,
+            repo: repo.githubRepo,
+            pullNumber: pr.githubPrNumber,
+          });
+          await db.pullRequest.update({
+            where: { id: pr.id },
+            data: { status: "MERGED" },
+          });
+        }
+        await transition(
+          cr.id,
+          ctx.company.id,
+          "DEPLOYING",
+          "DONE",
+          ctx.user.id,
+          "Deploy complete",
+        );
+        await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            authorId: ctx.user.id,
+            content: "Program approved and deployed. Status: Complete.",
+          },
+        });
+        break;
+      }
       case "approve_plan": {
         await requirePermission(ctx, "change_request:approve_plan");
         const plan = await db.plan.findFirst({
@@ -80,6 +365,17 @@ export async function POST(
             where: { id: plan.id },
             data: { approvedAt: new Date(), approvedById: ctx.user.id },
           });
+        }
+        if (cr.kind === "PROGRAM") {
+          await transition(
+            cr.id,
+            ctx.company.id,
+            cr.status,
+            "AWAITING_DEV_BUILD",
+            ctx.user.id,
+            "Plan approved — awaiting developer build",
+          );
+          break;
         }
         await transition(
           cr.id,
@@ -216,13 +512,30 @@ export async function POST(
           from,
           "MERGED",
           ctx.user.id,
-          "Merged to main",
+          "Merged",
         );
         break;
       }
       case "retry": {
         if (cr.status !== "FAILED") {
           throw new AuthError("Only failed requests can be retried", 400);
+        }
+        if (cr.kind === "PROGRAM") {
+          await transition(
+            cr.id,
+            ctx.company.id,
+            cr.status,
+            "BUILDING",
+            ctx.user.id,
+            "Retry build",
+          );
+          await enqueueJob("cursor.start-agent", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+            mode: "agent",
+            prompt: `${cr.title}\n\n${cr.description}`.trim(),
+          });
+          break;
         }
         await transition(
           cr.id,
@@ -237,7 +550,7 @@ export async function POST(
             changeRequestId: cr.id,
             role: "SYSTEM",
             authorId: ctx.user.id,
-            content: "Retrying this change request…",
+            content: "Retrying this request…",
           },
         });
         if (cr.branchName) {

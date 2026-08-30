@@ -47,6 +47,11 @@ export default async function AdminPage({
     where: { id: ctx.company.id },
   });
   const settings = parseCompanySettings(company.settings);
+  const inbox = await db.outboundEmail.findMany({
+    where: { companyId: ctx.company.id },
+    orderBy: { createdAt: "desc" },
+    take: 25,
+  });
   const githubNotice = typeof params.github === "string" ? params.github : null;
   const installationId =
     typeof params.installation_id === "string" ? params.installation_id : null;
@@ -70,10 +75,9 @@ export default async function AdminPage({
       <AppHeader role={ctx.role} />
       <section className="rise space-y-6">
         <div>
-          <h1 className="brand-mark text-4xl">Company admin</h1>
+          <h1 className="brand-mark text-4xl">Admin</h1>
           <p className="muted mt-2">
-            Manage members, project access, and repository connections. Production
-            deploy access is not granted here by default.
+            Manage members, workspace access, and infrastructure connections.
           </p>
           {githubNoticeMessage ? (
             <p className="mt-3 text-sm text-[var(--accent-soft)]">
@@ -84,10 +88,41 @@ export default async function AdminPage({
         </div>
 
         <div className="panel p-5">
-          <h2 className="text-xl">GitHub App</h2>
+          <h2 className="text-xl">Notification inbox</h2>
           <p className="muted mt-2 text-sm">
-            Install the Automation Studio GitHub App into your organization, then
-            connect individual repositories to projects.
+            Emails queued for developers (sent when an email API key is
+            configured; otherwise stored here for review).
+          </p>
+          <ul className="mt-4 space-y-3">
+            {inbox.map((mail) => (
+              <li
+                key={mail.id}
+                className="rounded-xl border border-[var(--line)] p-3 text-sm"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">{mail.subject}</span>
+                  <span className="status-pill">{mail.status}</span>
+                </div>
+                <p className="muted mt-1">
+                  To {mail.toEmail} · {mail.createdAt.toLocaleString()}
+                </p>
+                <pre className="muted mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-xs">
+                  {mail.body}
+                </pre>
+              </li>
+            ))}
+            {inbox.length === 0 ? (
+              <li className="muted text-sm">No notifications yet.</li>
+            ) : null}
+          </ul>
+        </div>
+
+        <div className="panel p-5">
+          <h2 className="text-xl">Source control (Admin)</h2>
+          <p className="muted mt-2 text-sm">
+            Install the Koda GitHub App into your organization, then connect
+            repositories to workspaces. Infrastructure details are only shown
+            here for developers and admins.
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
             {!process.env.GITHUB_APP_ID ? (

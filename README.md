@@ -1,6 +1,9 @@
-# Automation Studio
+# Koda — Advanced Automations AI Builder
 
-Multi-tenant portal where non-developers request software changes in plain English. AI prepares isolated feature-branch changes and temporary previews; developers review and merge to production.
+Multi-tenant portal where teams plan and ship business automations with AI.
+Koda plans programs with clients, developers build and approve production deploys.
+
+> **Koda is AI and can make mistakes.**
 
 ## Safety model
 

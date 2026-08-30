@@ -52,11 +52,17 @@ export async function handleSyncPreview(data: SyncPreviewJobData & { attempt?: n
   }
 
   if (preview.url) {
-    if (cr.status === "TESTING" || cr.status === "IMPLEMENTING") {
+    if (
+      cr.status === "TESTING" ||
+      cr.status === "IMPLEMENTING" ||
+      cr.status === "BUILDING"
+    ) {
+      const nextStatus =
+        cr.kind === "PROGRAM" ? "CLIENT_VERIFY" : "PREVIEW_READY";
       await transitionChangeRequest({
         changeRequestId: cr.id,
         companyId: data.companyId,
-        toStatus: "PREVIEW_READY",
+        toStatus: nextStatus,
         reason: "Preview environment ready",
       });
     }

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import { Fraunces, Sora } from "next/font/google";
+import { Fraunces, Outfit } from "next/font/google";
 import { Providers } from "@/components/providers";
+import { AiDisclaimer } from "@/components/ai-disclaimer";
 import "./globals.css";
 
 const display = Fraunces({
@@ -8,15 +9,15 @@ const display = Fraunces({
   variable: "--font-display",
 });
 
-const body = Sora({
+const body = Outfit({
   subsets: ["latin"],
   variable: "--font-body",
 });
 
 export const metadata: Metadata = {
-  title: "Automation Studio",
+  title: "Koda — Advanced Automations AI Builder",
   description:
-    "Request software changes in plain language. AI prepares them. Developers approve production.",
+    "Koda plans, builds, and ships business automations with AI — developers stay in control of production.",
 };
 
 export default function RootLayout({
@@ -27,7 +28,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${display.variable} ${body.variable} studio-shell`}>
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+          <AiDisclaimer />
+        </Providers>
       </body>
     </html>
   );

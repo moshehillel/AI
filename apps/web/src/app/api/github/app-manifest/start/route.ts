@@ -11,7 +11,7 @@ export async function GET() {
   const org = process.env.GITHUB_APP_ORG;
   const manifest = buildGitHubAppManifest({
     appUrl,
-    appName: process.env.GITHUB_APP_NAME ?? "Automation Studio",
+    appName: process.env.GITHUB_APP_NAME ?? "Koda",
     org,
   });
   const state = randomBytes(16).toString("hex");

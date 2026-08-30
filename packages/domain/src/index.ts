@@ -3,3 +3,6 @@ export * from "./classification.js";
 export * from "./branch.js";
 export * from "./permissions.js";
 export * from "./usage.js";
+export * from "./secrets.js";
+export * from "./crypto.js";
+export * from "./email.js";

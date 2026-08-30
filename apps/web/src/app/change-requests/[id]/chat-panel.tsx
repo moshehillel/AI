@@ -76,7 +76,7 @@ export function ChatPanel({
 
   const placeholder = isProgram
     ? isPlanning
-      ? "Answer Koda’s question…"
+      ? "Message Koda — ask anything, request a diagram, refine the plan…"
       : status === "CLIENT_VERIFY" || status === "PREVIEW_READY"
         ? "Ask how it works, request a test script, or describe a change…"
         : "Send a message…"
@@ -167,7 +167,7 @@ export function ChatPanel({
       <div className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-[var(--line)] bg-black/20 px-3 py-2">
         <p className="text-xs muted">
           {isPlanning
-            ? "Planning chat — Koda asks, you answer. Attach docs anytime."
+            ? "Planning with Koda — real Q&A and a living plan. Attach docs anytime."
             : "Koda is AI and can make mistakes."}
         </p>
         <p className="shrink-0 text-xs muted">Koda is AI and can make mistakes.</p>

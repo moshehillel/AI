@@ -2,7 +2,11 @@ import { db } from "@automation-studio/db";
 import { createTaskAgent } from "@automation-studio/cursor-adapter";
 import { enqueueJob, type CursorStartJobData } from "@automation-studio/jobs";
 import { writeAuditEvent } from "@automation-studio/auth";
-import { assertUnderUsageSoftCap } from "@automation-studio/domain";
+import {
+  assertUnderUsageSoftCap,
+  planningAgentInstructions,
+  type PlanningMeta,
+} from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
 
 export async function handleCursorStart(data: CursorStartJobData) {
@@ -38,6 +42,20 @@ export async function handleCursorStart(data: CursorStartJobData) {
     throw new Error("Missing repository or branch");
   }
 
+  // Reuse the existing plan-mode session instead of spawning a second agent.
+  if (data.mode === "plan" && cr.cursorAgentId) {
+    console.info(
+      `[cursor-start] plan session exists — follow-up agentId=${cr.cursorAgentId} cr=${cr.id}`,
+    );
+    await enqueueJob("cursor.follow-up", {
+      changeRequestId: cr.id,
+      companyId: data.companyId,
+      prompt: data.prompt,
+      mode: "plan",
+    });
+    return { agentId: cr.cursorAgentId, mode: data.mode, resumed: true };
+  }
+
   const toStatus =
     data.mode === "plan"
       ? "PLANNING"
@@ -51,10 +69,19 @@ export async function handleCursorStart(data: CursorStartJobData) {
   });
 
   const repoUrl = `https://github.com/${repo.githubOwner}/${repo.githubRepo}`;
+  const prompt =
+    data.mode === "plan" && !data.prompt.includes("PLANNING mode")
+      ? `${planningAgentInstructions()}\n\n${data.prompt}`
+      : data.prompt;
+
+  console.info(
+    `[cursor-start] LIVE start mode=${data.mode} cr=${cr.id} kind=${cr.kind}`,
+  );
+
   const { agentId, wait } = await createTaskAgent({
     repoUrl,
     branch: cr.branchName,
-    prompt: data.prompt,
+    prompt,
     mode: data.mode,
     metadata: {
       company_id: data.companyId,
@@ -102,10 +129,22 @@ export async function handleCursorStart(data: CursorStartJobData) {
   }
 
   if (data.mode === "plan") {
+    const planContent = result.text ?? "Plan generated";
     await db.plan.create({
       data: {
         changeRequestId: cr.id,
-        content: result.text ?? "Plan generated",
+        content: planContent,
+      },
+    });
+    const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+    await db.changeRequest.update({
+      where: { id: cr.id },
+      data: {
+        planningMeta: {
+          ...priorMeta,
+          planMarkdown: planContent,
+        },
+        updatedAt: new Date(),
       },
     });
     if (cr.kind === "PROGRAM") {

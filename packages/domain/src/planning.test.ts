@@ -3,41 +3,89 @@ import { describe, it } from "node:test";
 import {
   buildOpeningPlanningMessage,
   buildPlanningFollowUp,
-  nextPlanningTopic,
+  buildPlanningStartPrompt,
+  planningAgentInstructions,
+  synthesizePlanMarkdown,
 } from "./planning.js";
 
 describe("planning Q&A", () => {
-  it("opens with a single goals question when there is no spark", () => {
+  it("opens as Koda without a scripted questionnaire dump", () => {
     const msg = buildOpeningPlanningMessage({ hasInitialPrompt: false });
-    assert.match(msg, /Let's plan/i);
-    assert.match(msg, /outcome|automate|done/i);
+    assert.match(msg, /Koda/i);
+    assert.match(msg, /Advanced Automations/i);
     assert.doesNotMatch(msg, /1\.\s+Links to API/);
+    assert.doesNotMatch(msg, /Got it/);
   });
 
-  it("asks systems next after an initial spark", () => {
+  it("acknowledges an initial spark without rotating canned questions", () => {
     const msg = buildOpeningPlanningMessage({
       title: "Invoice sync",
       hasInitialPrompt: true,
     });
     assert.match(msg, /Invoice sync/);
-    assert.match(msg, /systems|tools/i);
+    assert.match(msg, /living plan|diagram|clarifying/i);
   });
 
-  it("advances topics one at a time on follow-up", () => {
-    const first = buildPlanningFollowUp({
-      meta: { coveredTopics: [], lastQuestionTopic: "goals" },
-      latestUserContent: "We want to sync invoices from our ERP to Stripe nightly.",
+  it("answers identity questions directly instead of ignoring them", () => {
+    const reply = buildPlanningFollowUp({
+      meta: { coveredTopics: [] },
+      latestUserContent: "whats your name",
     });
-    assert.equal(nextPlanningTopic(first.nextMeta), "apis");
-    assert.match(first.content, /Got it/);
-    assert.doesNotMatch(first.content, /1\.\s+/);
+    assert.match(reply.content, /I'm \*\*Koda\*\*/i);
+    assert.doesNotMatch(reply.content, /API docs/);
+    assert.doesNotMatch(reply.content, /^Got it\./m);
+  });
 
-    const second = buildPlanningFollowUp({
-      meta: first.nextMeta,
-      latestUserContent: "ERP is NetSuite, payments go to Stripe.",
-      attachmentKind: "api_docs_url",
+  it("returns a mermaid diagram when asked for a digram", () => {
+    const reply = buildPlanningFollowUp({
+      meta: { coveredTopics: ["goals", "systems"] },
+      latestUserContent: "give me a digram of the software",
+      title: "Invoice email to QB",
     });
-    assert.ok(second.nextMeta.coveredTopics?.includes("apis"));
-    assert.match(second.content, /API docs|saved/i);
+    assert.match(reply.content, /mermaid/);
+    assert.match(reply.planMarkdown, /# Plan:/);
+  });
+
+  it("synthesizes a real plan from an invoice → QuickBooks description", () => {
+    const reply = buildPlanningFollowUp({
+      meta: { coveredTopics: [] },
+      title: "Invoice email automation",
+      latestUserContent:
+        "When an invoice email arrives, extract the fields and create a bill in QuickBooks. Then notify accounting in Slack if it fails.",
+    });
+    assert.match(reply.content, /# Plan:/);
+    assert.match(reply.content, /QuickBooks/);
+    assert.match(reply.planMarkdown, /## Workflow/);
+    assert.doesNotMatch(reply.content, /^Got it\./m);
+  });
+
+  it("planning instructions never mention Cursor and require markdown plans", () => {
+    const prompt = planningAgentInstructions();
+    assert.match(prompt, /Koda/);
+    assert.match(prompt, /mermaid|diagram/i);
+    assert.doesNotMatch(prompt, /Cursor/);
+  });
+
+  it("start prompt includes conversation and instructions", () => {
+    const prompt = buildPlanningStartPrompt({
+      title: "Invoice sync",
+      description: "Email to QB",
+      messages: [
+        { role: "USER", content: "whats your name" },
+        { role: "ASSISTANT", content: "I'm Koda." },
+      ],
+    });
+    assert.match(prompt, /whats your name/);
+    assert.match(prompt, /PLANNING mode/);
+  });
+
+  it("synthesizePlanMarkdown builds mermaid for multi-system flows", () => {
+    const md = synthesizePlanMarkdown({
+      title: "Mail to QB",
+      meta: {},
+      latestUserContent: "Gmail invoice emails should create QuickBooks bills",
+    });
+    assert.match(md, /QuickBooks/);
+    assert.match(md, /mermaid/);
   });
 });

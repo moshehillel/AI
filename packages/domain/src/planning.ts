@@ -12,6 +12,8 @@ export type PlanningMeta = {
   examples?: string | null;
   coveredTopics?: PlanningTopic[];
   lastQuestionTopic?: PlanningTopic | null;
+  /** Latest synthesized plan markdown (also mirrored in Plan rows). */
+  planMarkdown?: string | null;
 };
 
 export const PLANNING_TOPICS: PlanningTopic[] = [
@@ -23,39 +25,404 @@ export const PLANNING_TOPICS: PlanningTopic[] = [
   "acceptance",
 ];
 
-const QUESTIONS: Record<PlanningTopic, string[]> = {
-  goals: [
-    "What outcome should this automation deliver — what does “done” look like for the business?",
-    "Who benefits from this automation, and how often should it run?",
-  ],
-  systems: [
-    "Which systems or tools are involved (e.g. CRM, email, spreadsheet, ERP)?",
-    "Where does the data start, and where should the final result land?",
-  ],
-  apis: [
-    "Do you have API docs, an OpenAPI link, or sample endpoints I should follow? You can attach a URL or paste examples below.",
-    "Any auth, rate limits, or environment details (sandbox vs production) I should plan around?",
-  ],
-  workflow: [
-    "Walk me through the happy-path steps, one by one — what happens first, then next?",
-    "Are there approvals, notifications, or hand-offs to a person in the middle?",
-  ],
-  edge_cases: [
-    "What should happen when something fails — missing data, API errors, duplicates?",
-    "Any cases we must never automate, or always escalate to a human?",
-  ],
-  acceptance: [
-    "How will we know the build is correct — a few concrete acceptance checks?",
-    "Anything else that must be true before you submit this to a developer for building?",
-  ],
-};
+/** Opening assistant message when a program enters PLANNING. */
+export function buildOpeningPlanningMessage(opts: {
+  title?: string;
+  hasInitialPrompt: boolean;
+}): string {
+  const brand = opts.title
+    ? `Hi — I'm **Koda**, Advanced Automations' AI Builder. Let's plan **${opts.title}** together.`
+    : "Hi — I'm **Koda**, Advanced Automations' AI Builder. Let's plan your automation together.";
 
-function pickQuestion(topic: PlanningTopic, covered: PlanningTopic[]): string {
-  const options = QUESTIONS[topic];
-  const index = covered.filter((t) => t === topic).length % options.length;
-  return options[index] ?? options[0]!;
+  if (opts.hasInitialPrompt) {
+    return [
+      brand,
+      "",
+      "I've got your starting notes. I'll shape a living plan with you — ask me anything, request a diagram, or refine the workflow. I'll only ask clarifying questions when I need them.",
+      "",
+      "You can attach API docs, paste examples, or upload a file anytime.",
+      "",
+      "Koda is AI and can make mistakes.",
+    ].join("\n");
+  }
+
+  return [
+    brand,
+    "",
+    "Tell me what you want to automate in your own words. I'll draft a plan, answer questions directly, and draw diagrams when you ask. Clarifying questions only when needed.",
+    "",
+    "You can attach an API docs URL, paste examples, or upload a file whenever it's useful.",
+    "",
+    "Koda is AI and can make mistakes.",
+  ].join("\n");
 }
 
+/**
+ * System prompt for live Cursor plan-mode agents.
+ * Never mention Cursor / GitHub / Railway by name.
+ */
+export function planningAgentInstructions(): string {
+  return [
+    "You are Koda, Advanced Automations' AI Builder, in PLANNING mode only.",
+    "Do not implement, write production code, or create files unless the client explicitly asks for a diagram or plan document in chat.",
+    "Behave like an expert product-planning partner: thoughtful, conversational, and specific to what the client said.",
+    "Answer direct questions directly (including who you are: Koda). Never ignore the user's message to push a scripted questionnaire.",
+    "Produce markdown plans. When asked for a diagram / digram / flowchart / architecture view, include a mermaid fenced code block.",
+    "Ask clarifying questions only when needed to unblock the plan — one or a few at a time, never a rotating checklist.",
+    "Maintain and update a living plan document in your replies: goals, systems, integrations/APIs, workflow steps, edge cases, and acceptance criteria.",
+    "When the plan feels solid, briefly note they can Submit to developer for building.",
+    "Never mention underlying AI vendors, source-control hosts, cloud hosts, job queues, or other internal tooling by name.",
+    "Remind briefly that Koda is AI and can make mistakes when appropriate.",
+  ].join("\n");
+}
+
+/** Prompt used when starting a plan-mode agent for a program. */
+export function buildPlanningStartPrompt(opts: {
+  title: string;
+  description: string;
+  messages?: Array<{ role: string; content: string }>;
+  planningMeta?: PlanningMeta;
+}): string {
+  const parts = [
+    planningAgentInstructions(),
+    "",
+    `Program title: ${opts.title}`,
+    opts.description ? `Initial brief:\n${opts.description}` : "",
+  ];
+
+  const meta = opts.planningMeta;
+  if (meta?.apiDocsUrl) parts.push(`API docs URL: ${meta.apiDocsUrl}`);
+  if (meta?.docsText) parts.push(`Documentation notes:\n${meta.docsText}`);
+  if (meta?.examples) parts.push(`Examples:\n${meta.examples}`);
+  if (meta?.planMarkdown) {
+    parts.push(`Current living plan document:\n${meta.planMarkdown}`);
+  }
+
+  const history = (opts.messages ?? []).filter(
+    (m) => m.role === "USER" || m.role === "ASSISTANT",
+  );
+  if (history.length > 0) {
+    parts.push(
+      "",
+      "Conversation so far:",
+      ...history.map(
+        (m) => `${m.role === "USER" ? "Client" : "Koda"}: ${m.content}`,
+      ),
+    );
+  }
+
+  parts.push(
+    "",
+    "Respond as Koda. If the client already described a workflow, synthesize a concrete markdown plan now. If they asked a direct question, answer it. Include mermaid when a diagram was requested.",
+  );
+
+  return parts.filter((p) => p !== "").join("\n");
+}
+
+function wantsDiagram(text: string): boolean {
+  return /(diagram|digram|mermaid|flowchart|architecture|sequence diagram)/i.test(
+    text,
+  );
+}
+
+function isDirectQuestion(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t) return false;
+  if (/^(hi|hello|hey)\b/.test(t) && t.length < 40) return true;
+  if (
+    /what('?s| is) your name|who are you|are you koda|what can you do/.test(t)
+  ) {
+    return true;
+  }
+  if (wantsDiagram(t)) return true;
+  if (t.endsWith("?") && t.length < 160) return true;
+  return false;
+}
+
+function inferSystems(text: string): string[] {
+  const systems: string[] = [];
+  const map: Array<[RegExp, string]> = [
+    [/\bquickbooks?\b|\bqb\b/i, "QuickBooks"],
+    [/\bgmail\b|email/i, "Email"],
+    [/\bsalesforce\b/i, "Salesforce"],
+    [/\bhubspot\b/i, "HubSpot"],
+    [/\bshopify\b/i, "Shopify"],
+    [/\bslack\b/i, "Slack"],
+    [/\bstripe\b/i, "Stripe"],
+    [/\bnetsuite\b/i, "NetSuite"],
+    [/\berp\b/i, "ERP"],
+    [/\bsheets?\b|spreadsheet/i, "Spreadsheets"],
+  ];
+  for (const [re, label] of map) {
+    if (re.test(text) && !systems.includes(label)) systems.push(label);
+  }
+  return systems;
+}
+
+/** Build / refresh living plan markdown from conversation context. */
+export function synthesizePlanMarkdown(opts: {
+  title?: string;
+  meta: PlanningMeta;
+  latestUserContent: string;
+  priorPlan?: string | null;
+}): string {
+  const systems = inferSystems(
+    `${opts.latestUserContent}\n${opts.meta.docsText ?? ""}\n${opts.meta.examples ?? ""}`,
+  );
+  const title = opts.title?.trim() || "Automation program";
+  const brief = opts.latestUserContent.trim();
+  const hasWorkflow =
+    brief.length > 60 ||
+    /(then |after |when |trigger|invoice|sync|create|send)/i.test(brief);
+
+  const lines = [
+    `# Plan: ${title}`,
+    "",
+    "## Goal",
+    brief
+      ? brief.slice(0, 500)
+      : "Define the business outcome with the client.",
+    "",
+    "## Systems",
+    systems.length
+      ? systems.map((s) => `- ${s}`).join("\n")
+      : "- To be confirmed with the client",
+    "",
+    "## Integrations / APIs",
+    opts.meta.apiDocsUrl
+      ? `- Docs: ${opts.meta.apiDocsUrl}`
+      : "- API docs / auth details: attach when available",
+    opts.meta.docsText
+      ? `- Notes: ${opts.meta.docsText.slice(0, 280)}${opts.meta.docsText.length > 280 ? "…" : ""}`
+      : "",
+    "",
+    "## Workflow",
+    hasWorkflow
+      ? [
+          "1. Trigger from the described source event",
+          "2. Validate and normalize payload fields",
+          "3. Call downstream system(s) with mapped data",
+          "4. Record success / surface failures for review",
+        ].join("\n")
+      : "Walk through happy-path steps with the client.",
+    "",
+    "## Edge cases",
+    "- Missing or invalid fields",
+    "- Downstream API errors / retries",
+    "- Duplicates and idempotency",
+    "",
+    "## Acceptance criteria",
+    "- Happy path completes end-to-end in a test environment",
+    "- Failures are visible and recoverable",
+    "- Secrets never appear in chat logs",
+  ];
+
+  if (wantsDiagram(brief) || systems.length >= 2) {
+    const nodes =
+      systems.length >= 2
+        ? systems
+        : ["Source", "Automation", "Destination"];
+    lines.push(
+      "",
+      "## Diagram",
+      "```mermaid",
+      "flowchart LR",
+      ...nodes.map((n, i) => {
+        const id = `N${i}`;
+        const next = nodes[i + 1];
+        if (!next) return `  ${id}[${n}]`;
+        return `  ${id}[${n}] --> N${i + 1}[${next}]`;
+      }),
+      "```",
+    );
+  }
+
+  if (opts.priorPlan && opts.priorPlan.includes("## Goal")) {
+    // Prefer freshly synthesized content; prior plan is already reflected via meta.
+  }
+
+  return lines.filter((l) => l !== undefined).join("\n");
+}
+
+function answerDirectly(opts: {
+  latestUserContent: string;
+  planMarkdown: string;
+}): string | null {
+  const lower = opts.latestUserContent.toLowerCase().trim();
+
+  if (
+    /what('?s| is) your name|who are you|are you (an )?ai|what can you do/.test(
+      lower,
+    )
+  ) {
+    return [
+      "I'm **Koda** — Advanced Automations' AI Builder.",
+      "",
+      "I help you plan business automations in plain language: workflows, integrations, diagrams, and acceptance checks. When the plan looks right, you can submit it to a developer to build.",
+      "",
+      "What would you like to automate?",
+      "",
+      "Koda is AI and can make mistakes.",
+    ].join("\n");
+  }
+
+  if (/^(hi|hello|hey)\b/.test(lower) && lower.length < 40) {
+    return [
+      "Hey — I'm Koda. Tell me the automation you have in mind, or ask for a plan/diagram anytime.",
+      "",
+      "Koda is AI and can make mistakes.",
+    ].join("\n");
+  }
+
+  if (wantsDiagram(lower)) {
+    return [
+      "Here's a working diagram of the software flow based on what we know so far. Tell me what to adjust.",
+      "",
+      opts.planMarkdown.includes("```mermaid")
+        ? opts.planMarkdown.slice(opts.planMarkdown.indexOf("## Diagram"))
+        : [
+            "```mermaid",
+            "flowchart LR",
+            "  A[Source system] --> B[Koda automation]",
+            "  B --> C[Destination system]",
+            "```",
+          ].join("\n"),
+      "",
+      "I've also refreshed the living plan in the Plan panel.",
+      "",
+      "Koda is AI and can make mistakes.",
+    ].join("\n");
+  }
+
+  return null;
+}
+
+/**
+ * Local / mock planning follow-up when a live agent session is unavailable.
+ * Keyword-aware: answers directly, synthesizes plan markdown — not a scripted Q&A loop.
+ */
+export function buildPlanningFollowUp(opts: {
+  meta: PlanningMeta;
+  latestUserContent: string;
+  attachmentKind?: "api_docs_url" | "docs_text" | "examples" | "file" | null;
+  title?: string;
+}): { content: string; nextMeta: PlanningMeta; planMarkdown: string } {
+  let meta = { ...opts.meta };
+  const covered = new Set(meta.coveredTopics ?? []);
+
+  if (opts.attachmentKind === "api_docs_url" || opts.attachmentKind === "docs_text") {
+    covered.add("apis");
+  }
+  if (opts.attachmentKind === "examples" || opts.attachmentKind === "file") {
+    covered.add("apis");
+    covered.add("workflow");
+  }
+
+  const lower = opts.latestUserContent.toLowerCase();
+  if (/(crm|salesforce|hubspot|shopify|erp|slack|email|gmail|sheets?|quickbooks?|\bqb\b)/.test(lower)) {
+    covered.add("systems");
+  }
+  if (/(api|endpoint|webhook|oauth|token|swagger|openapi)/.test(lower)) {
+    covered.add("apis");
+  }
+  if (/(then |after that|first |step |when |trigger|invoice|workflow)/.test(lower)) {
+    covered.add("workflow");
+  }
+  if (/(error|fail|retry|duplicate|missing|edge)/.test(lower)) {
+    covered.add("edge_cases");
+  }
+  if (/(accept|must |should |criteria|done when)/.test(lower)) {
+    covered.add("acceptance");
+  }
+  if (opts.latestUserContent.trim().length > 40) {
+    covered.add("goals");
+  }
+
+  const planMarkdown = synthesizePlanMarkdown({
+    title: opts.title,
+    meta: { ...meta, coveredTopics: [...covered] },
+    latestUserContent: opts.latestUserContent,
+    priorPlan: meta.planMarkdown,
+  });
+
+  meta = {
+    ...meta,
+    coveredTopics: [...covered],
+    planMarkdown,
+  };
+
+  if (opts.attachmentKind === "api_docs_url") {
+    meta = { ...meta, apiDocsUrl: meta.apiDocsUrl };
+  }
+
+  const direct = answerDirectly({
+    latestUserContent: opts.latestUserContent,
+    planMarkdown,
+  });
+  if (direct) {
+    return { content: direct, nextMeta: meta, planMarkdown };
+  }
+
+  const attachAck =
+    opts.attachmentKind === "api_docs_url"
+      ? "I've saved that API docs link into the plan."
+      : opts.attachmentKind === "docs_text"
+        ? "I've added those docs into the plan notes."
+        : opts.attachmentKind === "examples"
+          ? "Those examples are in the plan now."
+          : opts.attachmentKind === "file"
+            ? "I've pulled that file into the plan notes."
+            : null;
+
+  const systems = inferSystems(opts.latestUserContent);
+  const substantive = opts.latestUserContent.trim().length > 80 || systems.length > 0;
+
+  if (substantive || isDirectQuestion(opts.latestUserContent)) {
+    const clarifying =
+      !covered.has("apis") && !meta.apiDocsUrl
+        ? "If you have API docs or sample payloads, attach them when you can — otherwise I can keep planning from what you described."
+        : !covered.has("edge_cases")
+          ? "One gap: what should happen on failures or duplicates?"
+          : "Anything you'd like to refine, or are you ready to **Submit to developer for building**?";
+
+    return {
+      content: [
+        attachAck,
+        "Here's an updated plan based on what you shared:",
+        "",
+        planMarkdown,
+        "",
+        clarifying,
+        "",
+        "Koda is AI and can make mistakes.",
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      nextMeta: meta,
+      planMarkdown,
+    };
+  }
+
+  return {
+    content: [
+      attachAck ?? "Happy to help.",
+      "",
+      "Describe the automation in a few sentences (trigger → steps → destination), ask for a diagram, or tell me what to change in the plan.",
+      "",
+      meta.planMarkdown
+        ? "Current plan is in the Plan panel — I'll keep it updated as we go."
+        : "",
+      "",
+      "Koda is AI and can make mistakes.",
+    ]
+      .filter((line) => line !== "")
+      .join("\n"),
+    nextMeta: meta,
+    planMarkdown,
+  };
+}
+
+/** @deprecated topic helpers kept for tests / light meta tracking */
 export function nextPlanningTopic(meta: PlanningMeta): PlanningTopic | null {
   const covered = new Set(meta.coveredTopics ?? []);
   for (const topic of PLANNING_TOPICS) {
@@ -129,162 +496,4 @@ export function inferTopicFromAssistantQuestion(
     return "acceptance";
   }
   return null;
-}
-
-/** Opening assistant message when a program enters PLANNING. */
-export function buildOpeningPlanningMessage(opts: {
-  title?: string;
-  hasInitialPrompt: boolean;
-}): string {
-  if (opts.hasInitialPrompt) {
-    return [
-      opts.title
-        ? `Thanks — I've started planning **${opts.title}** with you.`
-        : "Thanks — I've started planning this program with you.",
-      "",
-      "We'll shape the build together. One question at a time.",
-      "",
-      pickQuestion("systems", []),
-      "",
-      "You can also attach API docs, paste examples, or upload a file anytime.",
-      "",
-      "Koda is AI and can make mistakes.",
-    ].join("\n");
-  }
-
-  return [
-    opts.title
-      ? `Hi — I'm Koda. Let's plan **${opts.title}** together.`
-      : "Hi — I'm Koda. Let's plan your automation together.",
-    "",
-    "I'll ask a few clarifying questions (goals, systems, APIs, workflow, edge cases, and acceptance criteria). Answer in your own words — one step at a time.",
-    "",
-    pickQuestion("goals", []),
-    "",
-    "You can attach an API docs URL, paste examples, or upload a file whenever it's useful.",
-    "",
-    "Koda is AI and can make mistakes.",
-  ].join("\n");
-}
-
-/**
- * Plan-mode follow-up when no live agent session exists yet.
- * Asks one (or few) clarifying questions; never dumps a full form.
- */
-export function buildPlanningFollowUp(opts: {
-  meta: PlanningMeta;
-  latestUserContent: string;
-  attachmentKind?: "api_docs_url" | "docs_text" | "examples" | "file" | null;
-}): { content: string; nextMeta: PlanningMeta } {
-  let meta = { ...opts.meta };
-  const covered = new Set(meta.coveredTopics ?? []);
-
-  // Credit the topic Koda last asked about once the user replies.
-  if (meta.lastQuestionTopic) {
-    covered.add(meta.lastQuestionTopic);
-  }
-
-  if (opts.attachmentKind === "api_docs_url" || opts.attachmentKind === "docs_text") {
-    covered.add("apis");
-  }
-  if (opts.attachmentKind === "examples" || opts.attachmentKind === "file") {
-    covered.add("apis");
-    covered.add("workflow");
-  }
-
-  // Light keyword boosts from the user's answer
-  const lower = opts.latestUserContent.toLowerCase();
-  if (/(crm|salesforce|hubspot|shopify|erp|slack|email|gmail|sheets?)/.test(lower)) {
-    covered.add("systems");
-  }
-  if (/(api|endpoint|webhook|oauth|token|swagger|openapi)/.test(lower)) {
-    covered.add("apis");
-  }
-  if (/(then |after that|first |step |when |trigger)/.test(lower)) {
-    covered.add("workflow");
-  }
-  if (/(error|fail|retry|duplicate|missing|edge)/.test(lower)) {
-    covered.add("edge_cases");
-  }
-  if (/(accept|must |should |criteria|done when)/.test(lower)) {
-    covered.add("acceptance");
-  }
-  if (opts.latestUserContent.trim().length > 40 && !covered.has("goals")) {
-    covered.add("goals");
-  }
-
-  meta = {
-    ...meta,
-    coveredTopics: [...covered],
-  };
-
-  const next = nextPlanningTopic(meta);
-  if (!next) {
-    const summaryBits = [
-      meta.apiDocsUrl ? "API docs link on file" : null,
-      meta.docsText ? "documentation notes saved" : null,
-      meta.examples ? "examples saved" : null,
-    ].filter(Boolean);
-
-    return {
-      nextMeta: { ...meta, lastQuestionTopic: "acceptance" },
-      content: [
-        "Got it — that covers the main planning areas.",
-        summaryBits.length
-          ? `I also have ${summaryBits.join(", ")}.`
-          : "If you still have docs or examples, attach them now.",
-        "",
-        "Here's what I'd draft for a developer:",
-        "• Goal and systems involved",
-        "• Workflow and integrations",
-        "• Edge cases and acceptance checks",
-        "",
-        "Anything you'd like to refine, or are you ready to **Submit to developer for building**?",
-        "",
-        "Koda is AI and can make mistakes.",
-      ].join("\n"),
-    };
-  }
-
-  const ack =
-    opts.attachmentKind === "api_docs_url"
-      ? "Thanks — I've saved that API docs link."
-      : opts.attachmentKind === "docs_text"
-        ? "Thanks — I've added those docs to the plan."
-        : opts.attachmentKind === "examples"
-          ? "Thanks — those examples help a lot."
-          : opts.attachmentKind === "file"
-            ? "Thanks — I've pulled that file into the plan notes."
-            : "Got it.";
-
-  const question = pickQuestion(next, meta.coveredTopics ?? []);
-
-  return {
-    nextMeta: { ...meta, lastQuestionTopic: next },
-    content: [
-      ack,
-      "",
-      question,
-      next === "apis"
-        ? "\nTip: use the chips below to attach a docs URL, paste text, or upload a file."
-        : "",
-      "",
-      "Koda is AI and can make mistakes.",
-    ]
-      .filter((line) => line !== "")
-      .join("\n"),
-  };
-}
-
-/** System prompt snippet for live plan-mode agents. */
-export function planningAgentInstructions(): string {
-  return [
-    "You are Koda in PLANNING mode only. Do not implement or write production code.",
-    "Have a back-and-forth conversation: ask clarifying questions one or a few at a time.",
-    "Cover: goals, systems, APIs, workflow, edge cases, and acceptance criteria.",
-    "Invite the client to attach API docs URLs, paste examples, or upload files when useful.",
-    "When the plan feels solid, remind them they can Submit to developer for building.",
-    "Never mention Cursor, GitHub, Railway, or internal tooling by name.",
-    "Remind briefly that Koda is AI and can make mistakes when appropriate.",
-  ].join("\n");
 }

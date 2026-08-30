@@ -57,15 +57,26 @@ async function loadCursorSdk(): Promise<typeof import("@cursor/sdk") | null> {
   }
 }
 
+function isMockMode(sdk: typeof import("@cursor/sdk") | null): boolean {
+  return process.env.CURSOR_MOCK === "1" || !process.env.CURSOR_API_KEY || !sdk;
+}
+
 export async function createTaskAgent(
   input: CreateTaskAgentInput,
 ): Promise<{ agentId: string; run: AsyncIterable<NormalizedStreamEvent>; wait: () => Promise<AgentRunResult> }> {
   const sdk = await loadCursorSdk();
-  if (process.env.CURSOR_MOCK === "1" || !process.env.CURSOR_API_KEY || !sdk) {
+  if (isMockMode(sdk)) {
+    console.warn(
+      `[cursor-adapter] MOCK createTaskAgent mode=${input.mode} (CURSOR_MOCK=${process.env.CURSOR_MOCK ?? "unset"} sdk=${Boolean(sdk)} key=${Boolean(process.env.CURSOR_API_KEY)})`,
+    );
     return mockCreate(input);
   }
 
-  const { Agent } = sdk;
+  console.info(
+    `[cursor-adapter] LIVE createTaskAgent mode=${input.mode} repo=${input.repoUrl} branch=${input.branch}`,
+  );
+
+  const { Agent } = sdk!;
   const agent = await Agent.create({
     apiKey: requireApiKey(),
     model: { id: input.modelId ?? "auto-smart" },
@@ -109,11 +120,18 @@ export async function resumeAndSend(
   input: FollowUpInput,
 ): Promise<{ agentId: string; run: AsyncIterable<NormalizedStreamEvent>; wait: () => Promise<AgentRunResult> }> {
   const sdk = await loadCursorSdk();
-  if (process.env.CURSOR_MOCK === "1" || !process.env.CURSOR_API_KEY || !sdk) {
+  if (isMockMode(sdk)) {
+    console.warn(
+      `[cursor-adapter] MOCK resumeAndSend mode=${input.mode ?? "agent"} agentId=${input.agentId}`,
+    );
     return mockFollowUp(input);
   }
 
-  const { Agent } = sdk;
+  console.info(
+    `[cursor-adapter] LIVE resumeAndSend mode=${input.mode ?? "agent"} agentId=${input.agentId}`,
+  );
+
+  const { Agent } = sdk!;
   const agent = await Agent.resume(input.agentId, {
     apiKey: requireApiKey(),
   });
@@ -244,18 +262,88 @@ async function* mapStream(
   yield { type: "done" };
 }
 
+function mockPlanReply(prompt: string): string {
+  const lower = prompt.toLowerCase();
+  if (/what('?s| is) your name|who are you/.test(lower)) {
+    return [
+      "I'm **Koda** — Advanced Automations' AI Builder.",
+      "",
+      "Tell me what you want to automate and I'll draft a living plan (with diagrams when you ask).",
+      "",
+      "Koda is AI and can make mistakes.",
+    ].join("\n");
+  }
+  if (/(diagram|digram|mermaid|flowchart)/.test(lower)) {
+    return [
+      "Here's a diagram of the flow based on your brief:",
+      "",
+      "```mermaid",
+      "flowchart LR",
+      "  A[Trigger] --> B[Automation]",
+      "  B --> C[Destination]",
+      "```",
+      "",
+      "# Plan (draft)",
+      "## Goal",
+      "Automate the workflow described in chat.",
+      "## Workflow",
+      "1. Receive trigger",
+      "2. Transform / validate",
+      "3. Write to destination",
+      "",
+      "Koda is AI and can make mistakes.",
+    ].join("\n");
+  }
+
+  const systems: string[] = [];
+  if (/quickbooks?|\bqb\b/.test(lower)) systems.push("QuickBooks");
+  if (/gmail|email|invoice/.test(lower)) systems.push("Email");
+  if (/slack/.test(lower)) systems.push("Slack");
+
+  return [
+    "Here's a draft plan from what you shared:",
+    "",
+    "# Plan",
+    "## Goal",
+    prompt.slice(0, 400).replace(/\n+/g, " ").trim() || "Confirm outcome with the client.",
+    "",
+    "## Systems",
+    ...(systems.length ? systems.map((s) => `- ${s}`) : ["- To be confirmed"]),
+    "",
+    "## Workflow",
+    "1. Trigger from the source event",
+    "2. Validate and map fields",
+    "3. Call the destination system",
+    "4. Handle errors / notify as needed",
+    "",
+    "## Edge cases",
+    "- Missing fields, API errors, duplicates",
+    "",
+    "## Acceptance criteria",
+    "- Happy path works in a test environment",
+    "- Failures are visible",
+    "",
+    systems.length
+      ? "Ask me to refine any section, or request a diagram."
+      : "What systems are involved, and what should happen step by step?",
+    "",
+    "Koda is AI and can make mistakes.",
+  ].join("\n");
+}
+
 function mockCreate(input: CreateTaskAgentInput) {
   const agentId = `bc-mock-${Date.now()}`;
+  const text =
+    input.mode === "plan"
+      ? mockPlanReply(input.prompt)
+      : "Built the requested automation on an isolated preview (mock).";
   return {
     agentId,
-    run: mockStream(input),
+    run: mockStream(input, text),
     wait: async (): Promise<AgentRunResult> => ({
       agentId,
       runId: `run-mock-${Date.now()}`,
-      text:
-        input.mode === "plan"
-          ? "Proposed plan:\n1. Map the workflow and integrations\n2. Design the automation steps\n3. Define acceptance tests"
-          : "Built the requested automation on an isolated preview (mock).",
+      text,
       model: "mock-auto",
       branch: input.branch,
       usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
@@ -264,19 +352,23 @@ function mockCreate(input: CreateTaskAgentInput) {
 }
 
 function mockFollowUp(input: FollowUpInput) {
+  const text =
+    input.mode === "plan"
+      ? mockPlanReply(input.prompt)
+      : "Updated the program based on your follow-up.";
   return {
     agentId: input.agentId,
     run: (async function* () {
       yield { type: "status" as const, message: "Continuing with Koda…" };
       yield {
         type: "assistant" as const,
-        text: "Updated the program based on your follow-up.",
+        text,
       };
       yield { type: "done" as const };
     })(),
     wait: async (): Promise<AgentRunResult> => ({
       agentId: input.agentId,
-      text: "Updated the program based on your follow-up.",
+      text,
       usage: { inputTokens: 50, outputTokens: 80, totalTokens: 130 },
     }),
   };
@@ -284,20 +376,12 @@ function mockFollowUp(input: FollowUpInput) {
 
 async function* mockStream(
   input: CreateTaskAgentInput,
+  text: string,
 ): AsyncGenerator<NormalizedStreamEvent> {
   yield { type: "status", message: "Reviewing your inputs…" };
-  yield {
-    type: "assistant",
-    text: "I reviewed the workflow details you shared.",
-  };
-  if (input.mode === "plan") {
-    yield {
-      type: "assistant",
-      text: "I've prepared a plan. Ask questions or submit to a developer when you're ready.",
-    };
-  } else {
+  yield { type: "assistant", text };
+  if (input.mode !== "plan") {
     yield { type: "status", message: "Building your program…" };
-    yield { type: "assistant", text: "Preview build updated." };
   }
   yield { type: "usage", inputTokens: 100, outputTokens: 200, totalTokens: 300 };
   yield { type: "done" };

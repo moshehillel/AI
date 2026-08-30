@@ -13,7 +13,7 @@ import {
   encryptSecret,
   isProgramPlanOnly,
   buildPlanningFollowUp,
-  planningAgentInstructions,
+  buildPlanningStartPrompt,
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { enqueueJob } from "@automation-studio/jobs";
@@ -192,52 +192,121 @@ export async function POST(
     } | null = null;
 
     if (cr.cursorAgentId) {
-      const planHint = forcePlan
-        ? `\n\n${planningAgentInstructions()}`
-        : "";
       await enqueueJob("cursor.follow-up", {
         changeRequestId: cr.id,
         companyId: ctx.company.id,
-        prompt: `${redacted}${planHint}`,
+        prompt: redacted,
         mode: forcePlan ? "plan" : "agent",
       });
-    } else if (cr.kind === "PROGRAM" && cr.status === "PLANNING") {
-      const currentMeta = (cr.planningMeta ?? {}) as PlanningMeta;
-      const nextMetaBase = mergePlanningAttachment(
-        currentMeta,
+    } else if (cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status)) {
+      const full = await db.changeRequest.findFirstOrThrow({
+        where: { id: cr.id },
+        include: { project: { include: { repository: true } } },
+      });
+
+      const currentMeta = mergePlanningAttachment(
+        (cr.planningMeta ?? {}) as PlanningMeta,
         body.attachment,
       );
-      const { content, nextMeta } = buildPlanningFollowUp({
-        meta: nextMetaBase,
-        latestUserContent: redacted,
-        attachmentKind: body.attachment?.kind ?? null,
-      });
 
-      await db.changeRequest.update({
-        where: { id: cr.id },
-        data: {
-          planningMeta: nextMeta as Prisma.InputJsonValue,
-          updatedAt: new Date(),
-        },
-      });
-
-      const created = await db.changeRequestMessage.create({
-        data: {
-          changeRequestId: cr.id,
-          role: "ASSISTANT",
-          content,
-          metadata: {
-            planningFollowUp: true,
-            topic: nextMeta.lastQuestionTopic ?? null,
+      if (full.project.repository) {
+        // Prefer live Cursor plan mode — kick off (or continue) agent startup.
+        await db.changeRequest.update({
+          where: { id: cr.id },
+          data: {
+            planningMeta: currentMeta as Prisma.InputJsonValue,
+            updatedAt: new Date(),
           },
-        },
-      });
-      assistantMessage = {
-        id: created.id,
-        role: created.role,
-        content: created.content,
-        createdAt: created.createdAt.toISOString(),
-      };
+        });
+
+        if (full.branchName) {
+          const history = await db.changeRequestMessage.findMany({
+            where: { changeRequestId: cr.id },
+            orderBy: { createdAt: "asc" },
+            take: 40,
+          });
+          await enqueueJob("cursor.start-agent", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+            mode: "plan",
+            prompt: buildPlanningStartPrompt({
+              title: cr.title,
+              description: cr.description,
+              messages: history.map((m) => ({
+                role: m.role,
+                content: m.content,
+              })),
+              planningMeta: currentMeta,
+            }),
+          });
+        } else {
+          await enqueueJob(
+            "github.ensure-branch",
+            {
+              changeRequestId: cr.id,
+              companyId: ctx.company.id,
+            },
+            { jobId: `plan-branch-${cr.id}` },
+          );
+        }
+
+        const created = await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            content:
+              "Koda is connecting your live planning session… replies will appear here in a moment.",
+            metadata: { planningSessionStarting: true },
+          },
+        });
+        assistantMessage = {
+          id: created.id,
+          role: created.role,
+          content: created.content,
+          createdAt: created.createdAt.toISOString(),
+        };
+      } else {
+        // No repo yet — keyword-aware local planning (not the old rotating script).
+        const { content, nextMeta, planMarkdown } = buildPlanningFollowUp({
+          meta: currentMeta,
+          latestUserContent: redacted,
+          attachmentKind: body.attachment?.kind ?? null,
+          title: cr.title,
+        });
+
+        await db.changeRequest.update({
+          where: { id: cr.id },
+          data: {
+            planningMeta: nextMeta as Prisma.InputJsonValue,
+            updatedAt: new Date(),
+          },
+        });
+
+        await db.plan.create({
+          data: {
+            changeRequestId: cr.id,
+            content: planMarkdown,
+          },
+        });
+
+        const created = await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "ASSISTANT",
+            content,
+            metadata: {
+              planningFollowUp: true,
+              localPlanFallback: true,
+            },
+          },
+        });
+        assistantMessage = {
+          id: created.id,
+          role: created.role,
+          content: created.content,
+          createdAt: created.createdAt.toISOString(),
+        };
+      }
     } else if (
       cr.kind === "PROGRAM" &&
       body.attachment &&

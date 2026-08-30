@@ -20,12 +20,14 @@ import {
 
 const REPO = "moshehillel/AI";
 
-/** Shared demo-mode vars so the first deploy works without Clerk/Cursor/GitHub. */
+/** Shared demo-mode vars so the first deploy works without Clerk/Cursor/GitHub.
+ *  Production overrides CURSOR_MOCK=0 + CURSOR_API_KEY on Railway (do not re-apply demoEnv blindly). */
 const demoEnv = {
   NODE_ENV: "production",
   ALLOW_DEMO_AUTH: "1",
   NEXT_PUBLIC_ALLOW_DEMO_AUTH: "1",
-  CURSOR_MOCK: "1",
+  // Prefer live Cursor when a key is present; bootstrap may still set CURSOR_MOCK=1 explicitly.
+  CURSOR_MOCK: "0",
   GITHUB_MOCK: "1",
   RAILWAY_MOCK: "1",
   NEXT_TELEMETRY_DISABLED: "1",

@@ -1,5 +1,10 @@
 import { db } from "@automation-studio/db";
-import { buildBranchName, slugify } from "@automation-studio/domain";
+import {
+  buildBranchName,
+  buildPlanningStartPrompt,
+  slugify,
+  type PlanningMeta,
+} from "@automation-studio/domain";
 import { createBranchFromDefault } from "@automation-studio/github";
 import { enqueueJob, type EnsureBranchJobData } from "@automation-studio/jobs";
 import { writeAuditEvent } from "@automation-studio/auth";
@@ -11,6 +16,7 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     include: {
       createdBy: true,
       project: { include: { repository: true } },
+      messages: { orderBy: { createdAt: "asc" }, take: 40 },
     },
   });
 
@@ -65,11 +71,24 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
   const mode =
     cr.kind === "PROGRAM" && cr.status !== "BUILDING" ? "plan" : needsPlan ? "plan" : "agent";
 
+  const prompt =
+    mode === "plan"
+      ? buildPlanningStartPrompt({
+          title: cr.title,
+          description: cr.description,
+          messages: cr.messages.map((m) => ({
+            role: m.role,
+            content: m.content,
+          })),
+          planningMeta: (cr.planningMeta ?? {}) as PlanningMeta,
+        })
+      : `${cr.title}\n\n${cr.description}`.trim();
+
   await enqueueJob("cursor.start-agent", {
     changeRequestId: cr.id,
     companyId: data.companyId,
     mode: mode as "plan" | "agent",
-    prompt: `${cr.title}\n\n${cr.description}`.trim(),
+    prompt,
   });
 
   return { branchName };

@@ -1,7 +1,11 @@
 import { db } from "@automation-studio/db";
 import { resumeAndSend } from "@automation-studio/cursor-adapter";
 import { enqueueJob, type CursorFollowUpJobData } from "@automation-studio/jobs";
-import { isProgramPlanOnly, planningAgentInstructions } from "@automation-studio/domain";
+import {
+  isProgramPlanOnly,
+  planningAgentInstructions,
+  type PlanningMeta,
+} from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
 
 export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
@@ -19,6 +23,10 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     mode === "plan"
       ? `${planningAgentInstructions()}\n\nClient message:\n${data.prompt}`
       : data.prompt;
+
+  console.info(
+    `[cursor-follow-up] mode=${mode} cr=${cr.id} agentId=${cr.cursorAgentId}`,
+  );
 
   if (mode === "agent" && cr.status !== "BUILDING" && cr.status !== "IMPLEMENTING") {
     const next =
@@ -87,10 +95,22 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       companyId: data.companyId,
     });
   } else {
+    const planContent = result.text ?? "Updated plan";
     await db.plan.create({
       data: {
         changeRequestId: cr.id,
-        content: result.text ?? "Updated plan",
+        content: planContent,
+      },
+    });
+    const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+    await db.changeRequest.update({
+      where: { id: cr.id },
+      data: {
+        planningMeta: {
+          ...priorMeta,
+          planMarkdown: planContent,
+        },
+        updatedAt: new Date(),
       },
     });
     if (cr.kind !== "PROGRAM") {

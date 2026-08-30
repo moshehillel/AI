@@ -77,7 +77,7 @@ export async function POST(request: Request) {
           docsText: body.docsText || null,
           examples: body.examples || null,
           coveredTopics: prompt ? ["goals"] : [],
-          lastQuestionTopic: prompt ? "systems" : "goals",
+          lastQuestionTopic: null,
         }
       : {};
 
@@ -87,6 +87,11 @@ export async function POST(request: Request) {
           hasInitialPrompt: prompt.length >= 3,
         })
       : null;
+
+    const project = await db.project.findFirst({
+      where: { id: body.projectId },
+      include: { repository: true },
+    });
 
     const changeRequest = await db.changeRequest.create({
       data: {
@@ -132,7 +137,7 @@ export async function POST(request: Request) {
             toStatus: isProgram ? "PLANNING" : "DRAFT",
             actorId: ctx.user.id,
             reason: isProgram
-              ? "Program created — planning Q&A started"
+              ? "Program created — live planning session starting"
               : "Change request created",
           },
         },
@@ -156,6 +161,16 @@ export async function POST(request: Request) {
           companyId: ctx.company.id,
         },
         { jobId: `classify-${changeRequest.id}` },
+      );
+    } else if (project?.repository) {
+      // Start real Cursor plan-mode agent (via branch ensure → cursor.start).
+      await enqueueJob(
+        "github.ensure-branch",
+        {
+          changeRequestId: changeRequest.id,
+          companyId: ctx.company.id,
+        },
+        { jobId: `plan-branch-${changeRequest.id}` },
       );
     }
 

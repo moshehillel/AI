@@ -6,6 +6,7 @@ import { STATUS_LABELS } from "@automation-studio/domain";
 import { notFound, redirect } from "next/navigation";
 import { ChatPanel } from "./chat-panel";
 import { ActionBar } from "./action-bar";
+import { LivePlanPanel } from "./live-plan-panel";
 
 export default async function ChangeRequestPage({
   params,
@@ -153,14 +154,21 @@ export default async function ChangeRequestPage({
             ) : null}
           </div>
 
-          {plan ? (
-            <div className="panel p-5">
-              <h2 className="text-lg">Plan</h2>
-              <pre className="muted mt-3 whitespace-pre-wrap text-sm">
-                {plan.content}
-              </pre>
-            </div>
-          ) : null}
+          {(isProgram || plan) && (
+            <LivePlanPanel
+              changeRequestId={full.id}
+              initialPlan={
+                plan
+                  ? {
+                      id: plan.id,
+                      content: plan.content,
+                      createdAt: plan.createdAt.toISOString(),
+                      updatedAt: plan.updatedAt.toISOString(),
+                    }
+                  : null
+              }
+            />
+          )}
 
           <ActionBar
             changeRequestId={full.id}

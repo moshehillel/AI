@@ -11,9 +11,7 @@ import {
 const clerkEnabled = Boolean(
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
 );
-const hideAuthChrome =
-  process.env.NEXT_PUBLIC_OPEN_ACCESS === "1" ||
-  process.env.NEXT_PUBLIC_ALLOW_DEMO_AUTH === "1";
+const hideAuthChrome = process.env.NEXT_PUBLIC_OPEN_ACCESS === "1";
 
 export function AppHeader({ role }: { role?: string | null }) {
   const isStaff = role === "DEVELOPER" || role === "ADMIN";

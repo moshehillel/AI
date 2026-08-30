@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { isDemoAuthEnabled } from "@/lib/access-mode";
+import { isOpenAccess } from "@/lib/access-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export default function HomePage() {
   );
 
   // Single-customer open access: go straight to onboarding (no Clerk).
-  if (isDemoAuthEnabled()) {
+  if (isOpenAccess()) {
     redirect("/projects");
   }
 

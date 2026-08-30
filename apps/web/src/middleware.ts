@@ -24,9 +24,13 @@ async function getClerkHandler() {
     "/favicon.ico",
     "/apple-icon(.*)",
   ]);
+  // Prefer explicit redirect over auth.protect()'s rewrite, which surfaces as a
+  // confusing 404 when Clerk development keys lack a "dev browser" cookie.
   const mw = clerkMiddleware(async (auth, request) => {
-    if (!isPublicRoute(request)) {
-      await auth.protect();
+    if (isPublicRoute(request)) return;
+    const session = await auth();
+    if (!session.userId) {
+      return session.redirectToSignIn({ returnBackUrl: request.url });
     }
   });
   clerkHandler = mw as unknown as typeof clerkHandler;

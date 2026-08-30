@@ -23,8 +23,18 @@ COPY packages/railway/package.json packages/railway/
 RUN pnpm install --frozen-lockfile --ignore-scripts || pnpm install --ignore-scripts
 
 FROM deps AS build
+# NEXT_PUBLIC_* must be present at `next build` so the client bundle and SSG
+# match runtime Clerk/demo configuration (Railway injects service vars as ARG/ENV).
 ARG NEXT_PUBLIC_APP_URL
+ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+ARG NEXT_PUBLIC_ALLOW_DEMO_AUTH
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+ENV NEXT_PUBLIC_CLERK_SIGN_IN_URL=${NEXT_PUBLIC_CLERK_SIGN_IN_URL}
+ENV NEXT_PUBLIC_CLERK_SIGN_UP_URL=${NEXT_PUBLIC_CLERK_SIGN_UP_URL}
+ENV NEXT_PUBLIC_ALLOW_DEMO_AUTH=${NEXT_PUBLIC_ALLOW_DEMO_AUTH}
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm db:generate

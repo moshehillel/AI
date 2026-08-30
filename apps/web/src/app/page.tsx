@@ -1,8 +1,12 @@
 import Link from "next/link";
 
-const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+export const dynamic = "force-dynamic";
 
 export default function HomePage() {
+  const clerkEnabled = Boolean(
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
+  );
+
   if (!clerkEnabled) {
     return (
       <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">

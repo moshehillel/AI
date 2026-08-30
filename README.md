@@ -38,7 +38,7 @@ scripts/                 railway-bootstrap.sh and helpers
 
 ```bash
 cp .env.example .env
-# Defaults work for local mock mode (ALLOW_DEMO_AUTH=1, mocks on)
+# Defaults: OPEN_ACCESS=1 (no login); keep ALLOW_DEMO_AUTH=0; mocks on for local
 
 docker compose up -d
 pnpm install
@@ -86,7 +86,7 @@ pnpm railway:bootstrap
 # equivalent: ./scripts/railway-bootstrap.sh
 ```
 
-First deploy uses **demo mode** (`ALLOW_DEMO_AUTH` + provider mocks) so the site works before Clerk/Cursor/GitHub are configured. Images: `Dockerfile.web` and `Dockerfile.worker`. Topology: [`.railway/railway.ts`](.railway/railway.ts).
+First deploy uses **open access** (`OPEN_ACCESS=1`, demo auth off) plus provider mocks so the site works before Clerk/NetFree/Cursor/GitHub are fully wired. Images: `Dockerfile.web` and `Dockerfile.worker`. Topology: [`.railway/railway.ts`](.railway/railway.ts).
 
 Generate `ENCRYPTION_KEY` with `openssl rand -hex 32` (bootstrap can generate one if unset).
 

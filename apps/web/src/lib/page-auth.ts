@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { AuthError } from "@automation-studio/auth";
-import { isOpenAccess } from "@/lib/open-access";
+import { isDemoAuthEnabled } from "@/lib/access-mode";
 import { getRequestAuth } from "@/lib/request-auth";
 
 /**
@@ -13,7 +13,7 @@ export async function requirePageAuth() {
   } catch (error) {
     if (error instanceof AuthError) {
       if (error.status === 401) {
-        redirect(isOpenAccess() ? "/projects" : "/sign-in");
+        redirect(isDemoAuthEnabled() ? "/projects" : "/sign-in");
       }
       if (
         error.status === 400 ||
@@ -21,7 +21,7 @@ export async function requirePageAuth() {
         error.status === 404 ||
         /organization|synced|company|member/i.test(error.message)
       ) {
-        redirect(isOpenAccess() ? "/projects" : "/select-org");
+        redirect(isDemoAuthEnabled() ? "/projects" : "/select-org");
       }
     }
     throw error;

@@ -1,13 +1,11 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getAppBaseUrl } from "@/lib/app-url";
-import { isOpenAccess } from "@/lib/open-access";
 
 const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
-/** Temporary explore mode: skip Clerk gate when demo auth is on. */
-const demoAuthEnabled = process.env.ALLOW_DEMO_AUTH === "1";
-/** Temporary single-customer open access (NetFree / Clerk blocked). */
-const openAccessEnabled = isOpenAccess();
+/** Skip Clerk gate for open access / demo until NetFree allows Clerk. */
+const skipClerkProtect =
+  process.env.OPEN_ACCESS === "1" || process.env.ALLOW_DEMO_AUTH === "1";
 
 let clerkHandler:
   | ((request: NextRequest) => Promise<NextResponse | Response>)
@@ -25,20 +23,17 @@ async function getClerkHandler() {
     "/api/webhooks(.*)",
     "/api/github/app-manifest(.*)",
     "/api/health",
-    // App Router metadata icons (extensionless /icon can otherwise hit protect())
     "/icon(.*)",
     "/favicon.ico",
     "/apple-icon(.*)",
+    "/projects(.*)",
+    "/select-org(.*)",
   ]);
-  // Prefer explicit redirect over auth.protect()'s rewrite, which surfaces as a
-  // confusing 404 when Clerk development keys lack a "dev browser" cookie.
   const mw = clerkMiddleware(async (auth, request) => {
     if (isPublicRoute(request)) return;
-    // Open access / demo: no sign-in gate while Clerk is blocked or exploring.
-    if (openAccessEnabled || demoAuthEnabled) return;
+    if (skipClerkProtect) return;
     const session = await auth();
     if (!session.userId) {
-      // request.url is localhost behind Railway; use the public origin.
       const returnBackUrl = new URL(
         `${request.nextUrl.pathname}${request.nextUrl.search}`,
         getAppBaseUrl(),
@@ -51,8 +46,8 @@ async function getClerkHandler() {
 }
 
 export default async function middleware(request: NextRequest) {
-  // No Clerk keys, or temporary open access → all app routes open.
-  if (!clerkEnabled || openAccessEnabled) {
+  // No Clerk keys, or open access → skip protect (Clerk code remains for later).
+  if (!clerkEnabled || skipClerkProtect) {
     return NextResponse.next();
   }
   const handler = await getClerkHandler();

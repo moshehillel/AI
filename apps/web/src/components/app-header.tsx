@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
 import {
   OrganizationSwitcher,
   SignedIn,
@@ -12,16 +11,11 @@ import {
 const clerkEnabled = Boolean(
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
 );
-const demoAuth = process.env.NEXT_PUBLIC_ALLOW_DEMO_AUTH === "1";
-const openAccess = process.env.NEXT_PUBLIC_OPEN_ACCESS === "1";
-
-function setDemoUser(role: string) {
-  document.cookie = `demo_user=${role}; path=/; max-age=604800; SameSite=Lax`;
-}
+const hideAuthChrome =
+  process.env.NEXT_PUBLIC_OPEN_ACCESS === "1" ||
+  process.env.NEXT_PUBLIC_ALLOW_DEMO_AUTH === "1";
 
 export function AppHeader({ role }: { role?: string | null }) {
-  const router = useRouter();
-  const pathname = usePathname();
   const isStaff = role === "DEVELOPER" || role === "ADMIN";
 
   return (
@@ -38,25 +32,7 @@ export function AppHeader({ role }: { role?: string | null }) {
         </nav>
       </div>
       <div className="flex items-center gap-3">
-        {openAccess ? null : role ? (
-          <span className="status-pill">{role}</span>
-        ) : null}
-        {openAccess ? null : demoAuth || !clerkEnabled ? (
-          <select
-            className="field max-w-40 py-2"
-            defaultValue={(role ?? "EMPLOYEE").toLowerCase()}
-            onChange={(event) => {
-              setDemoUser(event.target.value);
-              router.push(pathname);
-              router.refresh();
-            }}
-            aria-label="Demo role"
-          >
-            <option value="employee">Employee</option>
-            <option value="developer">Developer</option>
-            <option value="admin">Admin</option>
-          </select>
-        ) : (
+        {hideAuthChrome || !clerkEnabled ? null : (
           <>
             <SignedIn>
               <OrganizationSwitcher

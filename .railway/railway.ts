@@ -22,13 +22,13 @@ const REPO = "moshehillel/AI";
 
 /** Shared open-access vars so the first deploy works without Clerk login.
  *  Production overrides CURSOR_MOCK=0 + CURSOR_API_KEY on Railway (do not re-apply demoEnv blindly).
- *  Set OPEN_ACCESS=0 + ALLOW_DEMO_AUTH=0 when Clerk is usable again. */
+ *  Set OPEN_ACCESS=0 / NEXT_PUBLIC_OPEN_ACCESS=0 when Clerk/NetFree is ready. */
 const demoEnv = {
   NODE_ENV: "production",
   OPEN_ACCESS: "1",
   NEXT_PUBLIC_OPEN_ACCESS: "1",
-  ALLOW_DEMO_AUTH: "1",
-  NEXT_PUBLIC_ALLOW_DEMO_AUTH: "1",
+  ALLOW_DEMO_AUTH: "0",
+  NEXT_PUBLIC_ALLOW_DEMO_AUTH: "0",
   // Prefer live agent API when a key is present; bootstrap may still set CURSOR_MOCK=1 explicitly.
   CURSOR_MOCK: "0",
   GITHUB_MOCK: "1",

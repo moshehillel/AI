@@ -2,12 +2,12 @@ import { OrganizationList } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { isOpenAccess } from "@/lib/open-access";
+import { isDemoAuthEnabled } from "@/lib/access-mode";
 
 export const dynamic = "force-dynamic";
 
 export default async function SelectOrgPage() {
-  if (isOpenAccess()) {
+  if (isDemoAuthEnabled()) {
     redirect("/projects");
   }
 

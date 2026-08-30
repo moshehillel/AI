@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { isOpenAccess } from "@/lib/open-access";
+import { isDemoAuthEnabled } from "@/lib/access-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -8,30 +8,22 @@ export default function HomePage() {
   const clerkEnabled = Boolean(
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
   );
-  const demoAuth = process.env.NEXT_PUBLIC_ALLOW_DEMO_AUTH === "1";
-  const openAccess = isOpenAccess();
 
-  if (openAccess) {
+  // Single-customer open access / demo: go straight to onboarding (no Clerk).
+  if (isDemoAuthEnabled()) {
     redirect("/projects");
   }
 
-  if (!clerkEnabled || demoAuth) {
+  if (!clerkEnabled) {
     return (
       <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">
         <header className="relative z-10 flex items-center justify-between rise">
           <div className="brand-mark text-2xl tracking-tight">Koda</div>
-          <div className="flex gap-3">
-            {clerkEnabled ? (
-              <Link className="btn btn-ghost" href="/sign-in">
-                Sign in
-              </Link>
-            ) : null}
-            <Link className="btn btn-primary" href="/projects">
-              Start onboarding
-            </Link>
-          </div>
+          <Link className="btn btn-primary" href="/projects">
+            Continue
+          </Link>
         </header>
-        <Hero ctaHref="/projects" ctaLabel="Start onboarding" />
+        <Hero ctaHref="/projects" ctaLabel="Continue" />
       </main>
     );
   }

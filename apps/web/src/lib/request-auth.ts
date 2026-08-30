@@ -1,22 +1,14 @@
-import { cookies, headers } from "next/headers";
 import { AuthError, resolveAuthContext } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
+import { isDemoAuthEnabled, isOpenAccess } from "@/lib/access-mode";
 import { syncClerkOrgMembership } from "@/lib/clerk-sync";
-import { isOpenAccess } from "@/lib/open-access";
 
 const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
-function demoUserIdFromHint(hint: string | null | undefined) {
-  const normalized = (hint ?? "").toLowerCase();
-  if (normalized === "developer" || normalized === "dev") return "seed_developer";
-  if (normalized === "admin") return "seed_admin";
-  return "seed_employee";
-}
-
 async function seededAuthContext(clerkUserId: string) {
-  const company = await db.company.findFirst({
-    where: { slug: "demo-co" },
-  });
+  const company =
+    (await db.company.findFirst({ where: { slug: "demo-co" } })) ??
+    (await db.company.findFirst({ orderBy: { createdAt: "asc" } }));
   const user = await db.user.findFirst({
     where: { clerkUserId },
   });
@@ -35,43 +27,30 @@ async function seededAuthContext(clerkUserId: string) {
 }
 
 /**
- * Auth context resolution:
- * - OPEN_ACCESS=1 → fixed seeded customer (EMPLOYEE / seed_employee); no Clerk
- * - ALLOW_DEMO_AUTH=1 → seeded users with optional role cookie switcher
+ * Auth context:
+ * - OPEN_ACCESS / demo → seeded employee on demo-co (single customer)
  * - Clerk org + synced DB → real multi-tenant context
  * - Clerk org present but DB lag → JIT sync from Clerk API
  */
 export async function getRequestAuth() {
-  if (isOpenAccess()) {
-    const ctx = await seededAuthContext("seed_employee");
-    if (ctx) return ctx;
-    throw new AuthError(
-      "Open access is enabled but seed customer data is missing. Run pnpm db:seed.",
-      500,
-    );
-  }
+  if (isOpenAccess() || isDemoAuthEnabled()) {
+    // Always the single customer while open access / demo is on — no role UI.
+    const clerkUserId =
+      !isOpenAccess() && process.env.DEMO_ROLE
+        ? process.env.DEMO_ROLE === "developer" ||
+          process.env.DEMO_ROLE === "dev"
+          ? "seed_developer"
+          : process.env.DEMO_ROLE === "admin"
+            ? "seed_admin"
+            : "seed_employee"
+        : "seed_employee";
 
-  if (!clerkEnabled || process.env.ALLOW_DEMO_AUTH === "1") {
-    let hint = process.env.DEMO_ROLE ?? "employee";
-    if (process.env.ALLOW_DEMO_AUTH === "1") {
-      try {
-        const h = await headers();
-        const cookieStore = await cookies();
-        hint =
-          h.get("x-demo-user") ??
-          cookieStore.get("demo_user")?.value ??
-          hint;
-      } catch {
-        // headers/cookies unavailable outside request scope
-      }
-    }
-
-    const ctx = await seededAuthContext(demoUserIdFromHint(hint));
+    const ctx = await seededAuthContext(clerkUserId);
     if (ctx) return ctx;
 
-    if (!clerkEnabled) {
+    if (isOpenAccess() || !clerkEnabled) {
       throw new AuthError(
-        "Clerk is not configured and demo auth data is missing. Run pnpm db:seed.",
+        "Open access is on but seed data is missing. Run pnpm db:seed.",
         500,
       );
     }
@@ -100,7 +79,6 @@ export async function getRequestAuth() {
       throw error;
     }
 
-    // Webhook lag / missed org events — sync from Clerk then retry once.
     try {
       await syncClerkOrgMembership({
         clerkUserId: session.userId,

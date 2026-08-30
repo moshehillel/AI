@@ -1,6 +1,2 @@
-/** @deprecated Prefer `@/lib/access-mode`. */
-export {
-  isOpenAccess,
-  isDemoAuthEnabled,
-  isOpenAccessPublic,
-} from "./access-mode";
+/** Compatibility shim — prefer `@/lib/access-mode`. */
+export { isOpenAccess, isDemoAuthEnabled } from "@/lib/access-mode";

@@ -49,6 +49,11 @@ export default async function ProjectDetailPage({
       })
     : [];
 
+  // Employees only see programs (not small change requests) on this surface
+  const visibleWork = isStaff
+    ? project.changeRequests
+    : project.changeRequests.filter((cr) => cr.kind === "PROGRAM");
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
       <AppHeader role={ctx.role} />
@@ -70,21 +75,23 @@ export default async function ProjectDetailPage({
             </div>
           </div>
 
-          <div className="mt-6 panel p-6">
-            <h2 className="text-lg">Or request a small change</h2>
-            <p className="muted mt-2 text-sm">
-              For tweaks to an existing automation.
-            </p>
-            <div className="mt-4">
-              <NewChangeForm projectId={project.id} />
+          {isStaff ? (
+            <div className="mt-6 panel p-6">
+              <h2 className="text-lg">Request a small change</h2>
+              <p className="muted mt-2 text-sm">
+                Staff only — tweaks to an existing automation.
+              </p>
+              <div className="mt-4">
+                <NewChangeForm projectId={project.id} />
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
 
         <div className="panel p-6">
-          <h2 className="text-lg">Recent work</h2>
+          <h2 className="text-lg">Your programs</h2>
           <ul className="mt-4 space-y-3">
-            {project.changeRequests.map((cr) => (
+            {visibleWork.map((cr) => (
               <li key={cr.id}>
                 <Link
                   href={`/change-requests/${cr.id}`}
@@ -98,13 +105,15 @@ export default async function ProjectDetailPage({
                       {STATUS_LABELS[cr.status]}
                     </span>
                   </div>
-                  <p className="muted mt-1 text-xs">
-                    {cr.kind === "PROGRAM" ? "Program" : "Change"}
-                  </p>
+                  {isStaff ? (
+                    <p className="muted mt-1 text-xs">
+                      {cr.kind === "PROGRAM" ? "Program" : "Change"}
+                    </p>
+                  ) : null}
                 </Link>
               </li>
             ))}
-            {project.changeRequests.length === 0 ? (
+            {visibleWork.length === 0 ? (
               <li className="muted text-sm">No programs yet.</li>
             ) : null}
           </ul>

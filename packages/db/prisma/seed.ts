@@ -65,14 +65,14 @@ async function main() {
 
   const projects = [
     {
-      name: "Invoice Automation",
-      slug: "invoice-automation",
-      description: "Process and retry failed invoices",
-    },
-    {
       name: "Customer Onboarding",
       slug: "customer-onboarding",
       description: "New customer provisioning workflows",
+    },
+    {
+      name: "Invoice Automation",
+      slug: "invoice-automation",
+      description: "Process and retry failed invoices",
     },
     {
       name: "Reporting System",

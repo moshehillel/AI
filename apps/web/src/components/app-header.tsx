@@ -30,7 +30,7 @@ export function AppHeader({ role }: { role?: string | null }) {
           Koda
         </Link>
         <nav className="flex flex-wrap gap-4 text-sm muted">
-          <Link href="/projects">Programs</Link>
+          <Link href="/projects">Onboarding</Link>
           {isStaff ? <Link href="/review">Review queue</Link> : null}
           {isStaff ? <Link href="/usage">Usage</Link> : null}
           {isStaff ? <Link href="/admin">Admin</Link> : null}

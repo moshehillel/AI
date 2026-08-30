@@ -15,7 +15,7 @@ export default function SignUpPage() {
           the workspace directly.
         </p>
         <Link className="btn btn-primary" href="/projects">
-          Enter demo
+          Start onboarding
         </Link>
       </main>
     );
@@ -28,7 +28,7 @@ export default function SignUpPage() {
         <p className="muted text-center text-sm">
           Exploring without an organization?{" "}
           <Link className="text-[var(--accent-soft)] underline" href="/projects">
-            Enter demo
+            Start onboarding
           </Link>
         </p>
       ) : null}

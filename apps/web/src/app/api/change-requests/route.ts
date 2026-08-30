@@ -52,6 +52,13 @@ export async function POST(request: Request) {
     const body = bodySchema.parse(await request.json());
     await requireProjectAccess(ctx, body.projectId);
 
+    if (body.kind === "CHANGE" && ctx.role === "EMPLOYEE") {
+      return NextResponse.json(
+        { error: "Small changes are not available. Start a new program instead." },
+        { status: 403 },
+      );
+    }
+
     const latest = await db.changeRequest.findFirst({
       where: { projectId: body.projectId },
       orderBy: { number: "desc" },

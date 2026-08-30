@@ -20,11 +20,11 @@ export default function HomePage() {
               </Link>
             ) : null}
             <Link className="btn btn-primary" href="/projects">
-              Enter demo
+              Start onboarding
             </Link>
           </div>
         </header>
-        <Hero ctaHref="/projects" ctaLabel="Enter demo" />
+        <Hero ctaHref="/projects" ctaLabel="Start onboarding" />
       </main>
     );
   }
@@ -59,8 +59,9 @@ function Hero({
           className="muted rise mt-6 max-w-xl text-lg leading-relaxed"
           style={{ animationDelay: "200ms" }}
         >
-          Plan new programs with Koda, submit for building, verify the preview,
-          then ship with developer approval — without touching infrastructure.
+          Tell Koda what you need automated. Answer a few questions, review the
+          plan, then ship with developer approval — without touching
+          infrastructure.
         </p>
         <div className="rise mt-9" style={{ animationDelay: "280ms" }}>
           <Link className="btn btn-primary" href={ctaHref}>

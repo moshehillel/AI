@@ -44,7 +44,7 @@ export default async function ChangeRequestPage({
   const isStaff = ctx.role === "DEVELOPER" || ctx.role === "ADMIN";
   // Customers should not linger on cancelled programs; staff can open archive links
   if (full.status === "CANCELLED" && !isStaff) {
-    redirect(`/projects/${full.projectId}`);
+    redirect("/projects");
   }
   const planningMeta = (full.planningMeta ?? {}) as {
     apiDocsUrl?: string | null;

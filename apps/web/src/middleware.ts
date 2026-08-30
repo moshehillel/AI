@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getAppBaseUrl } from "@/lib/app-url";
 
 const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
@@ -30,7 +31,12 @@ async function getClerkHandler() {
     if (isPublicRoute(request)) return;
     const session = await auth();
     if (!session.userId) {
-      return session.redirectToSignIn({ returnBackUrl: request.url });
+      // request.url is localhost behind Railway; use the public origin.
+      const returnBackUrl = new URL(
+        `${request.nextUrl.pathname}${request.nextUrl.search}`,
+        getAppBaseUrl(),
+      ).toString();
+      return session.redirectToSignIn({ returnBackUrl });
     }
   });
   clerkHandler = mw as unknown as typeof clerkHandler;

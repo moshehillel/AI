@@ -1,5 +1,5 @@
 import { AppHeader } from "@/components/app-header";
-import { getRequestAuth } from "@/lib/request-auth";
+import { requirePageAuth } from "@/lib/page-auth";
 import { requireChangeRequestAccess } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
 import { STATUS_LABELS } from "@automation-studio/domain";
@@ -13,7 +13,7 @@ export default async function ChangeRequestPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const ctx = await getRequestAuth();
+  const ctx = await requirePageAuth();
 
   let changeRequest;
   try {

@@ -69,7 +69,7 @@ async function ClerkHome() {
   const { redirect } = await import("next/navigation");
   const session = await auth();
   if (session.userId) {
-    redirect("/projects");
+    redirect(session.orgId ? "/projects" : "/select-org");
   }
 
   return (

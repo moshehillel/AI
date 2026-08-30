@@ -1,9 +1,7 @@
 import { cookies, headers } from "next/headers";
-import {
-  resolveAuthContext,
-  AuthError,
-} from "@automation-studio/auth";
+import { AuthError, resolveAuthContext } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
+import { syncClerkOrgMembership } from "@/lib/clerk-sync";
 
 const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
@@ -18,6 +16,7 @@ function demoUserIdFromHint(hint: string | null | undefined) {
  * Dev-friendly auth context:
  * - With Clerk org + synced DB rows → real multi-tenant context
  * - Without Clerk configured / unsynced → fall back to seeded demo company
+ * - Clerk org present but DB lag → JIT sync from Clerk API
  */
 export async function getRequestAuth() {
   if (!clerkEnabled || process.env.ALLOW_DEMO_AUTH === "1") {
@@ -69,19 +68,45 @@ export async function getRequestAuth() {
     throw new AuthError("Unauthorized", 401);
   }
 
+  if (!session.orgId) {
+    throw new AuthError(
+      "No active organization. Create or select an organization to continue.",
+      400,
+    );
+  }
+
   try {
-    if (session.orgId) {
+    return await resolveAuthContext({
+      clerkUserId: session.userId,
+      clerkOrgId: session.orgId,
+    });
+  } catch (error) {
+    if (!(error instanceof AuthError)) {
+      throw error;
+    }
+
+    // Webhook lag / missed org events — sync from Clerk then retry once.
+    try {
+      await syncClerkOrgMembership({
+        clerkUserId: session.userId,
+        clerkOrgId: session.orgId,
+        orgRole: session.orgRole,
+      });
       return await resolveAuthContext({
         clerkUserId: session.userId,
         clerkOrgId: session.orgId,
       });
+    } catch (syncError) {
+      console.error(
+        "[auth] clerk org sync failed",
+        syncError instanceof Error ? syncError.message : syncError,
+      );
+      throw error instanceof AuthError
+        ? error
+        : new AuthError(
+            "Organization is not ready yet. Open Select organization and try again.",
+            400,
+          );
     }
-  } catch {
-    // fall through
   }
-
-  throw new AuthError(
-    "No active organization. Invite users via Clerk Organizations.",
-    400,
-  );
 }

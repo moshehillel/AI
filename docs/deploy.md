@@ -99,6 +99,30 @@ railway domain --service web   # if no public URL yet
 railway run --service web pnpm db:seed:deploy
 ```
 
+## Clerk keys (development vs production)
+
+Railway currently can run with Clerk **development** keys (`pk_test_` / `sk_test_`). That works, but:
+
+- The browser shows a Clerk warning that development keys are loaded
+- Development instances have stricter limits and weaker custom-domain behavior
+- For `https://koda.advancedautomations.net`, prefer a **Production** Clerk instance
+
+### Switch to production keys
+
+1. Clerk Dashboard → create / open the **Production** instance (not Development)
+2. Enable **Organizations** (Configure → Organizations settings) with membership required
+3. Add roles with keys `org:admin`, `org:developer`, `org:employee`
+4. Configure → API Keys → copy **live** keys:
+   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` = `pk_live_…`
+   - `CLERK_SECRET_KEY` = `sk_live_…`
+5. Webhooks → endpoint `https://koda.advancedautomations.net/api/webhooks/clerk`  
+   Events: `user.*`, `organization.created`, `organizationMembership.*`  
+   Paste signing secret as `CLERK_WEBHOOK_SECRET`
+6. Allowed origins / redirect URLs: `https://koda.advancedautomations.net`
+7. Set the three vars on the Railway **web** service and redeploy
+
+Until live keys are pasted, test keys remain usable for smoke tests after signing in and selecting an organization (`/select-org`).
+
 ## Turning off demo mode
 
 When Clerk / Cursor / GitHub are ready:
@@ -107,6 +131,7 @@ When Clerk / Cursor / GitHub are ready:
 2. Remove or set to `0`: `ALLOW_DEMO_AUTH`, `NEXT_PUBLIC_ALLOW_DEMO_AUTH`, `CURSOR_MOCK`, `GITHUB_MOCK`, `RAILWAY_MOCK`
 3. Redeploy web + worker
 4. Follow [runbooks.md](./runbooks.md) production wiring checklist
+5. Prefer `pk_live_` / `sk_live_` on the custom domain (see above)
 
 ### GitHub App (one-click)
 

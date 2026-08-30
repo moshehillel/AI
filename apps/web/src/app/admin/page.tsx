@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 import { AppHeader } from "@/components/app-header";
-import { getRequestAuth } from "@/lib/request-auth";
+import { requirePageAuth } from "@/lib/page-auth";
 import { db } from "@automation-studio/db";
 import { parseCompanySettings } from "@automation-studio/domain";
 import { ConnectRepoForm } from "./connect-repo-form";
@@ -15,7 +15,7 @@ export default async function AdminPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const ctx = await getRequestAuth();
+  const ctx = await requirePageAuth();
   const params = await searchParams;
 
   if (ctx.role !== "ADMIN" && ctx.role !== "DEVELOPER") {

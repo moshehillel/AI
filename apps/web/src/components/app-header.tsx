@@ -2,8 +2,16 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import {
+  OrganizationSwitcher,
+  SignedIn,
+  SignedOut,
+  UserButton,
+} from "@clerk/nextjs";
 
-const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const clerkEnabled = Boolean(
+  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
+);
 const demoAuth = process.env.NEXT_PUBLIC_ALLOW_DEMO_AUTH === "1";
 
 function setDemoUser(role: string) {
@@ -46,7 +54,21 @@ export function AppHeader({ role }: { role?: string | null }) {
             <option value="admin">Admin</option>
           </select>
         ) : (
-          <span className="status-pill">Signed in</span>
+          <>
+            <SignedIn>
+              <OrganizationSwitcher
+                hidePersonal
+                afterCreateOrganizationUrl="/projects"
+                afterSelectOrganizationUrl="/projects"
+              />
+              <UserButton afterSignOutUrl="/" />
+            </SignedIn>
+            <SignedOut>
+              <Link className="btn btn-ghost" href="/sign-in">
+                Sign in
+              </Link>
+            </SignedOut>
+          </>
         )}
       </div>
     </header>

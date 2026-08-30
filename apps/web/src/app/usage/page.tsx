@@ -1,6 +1,6 @@
 export const dynamic = "force-dynamic";
 import { AppHeader } from "@/components/app-header";
-import { getRequestAuth } from "@/lib/request-auth";
+import { requirePageAuth } from "@/lib/page-auth";
 import { db } from "@automation-studio/db";
 import {
   getCompanyUsageTotals,
@@ -8,7 +8,7 @@ import {
 } from "@automation-studio/domain";
 
 export default async function UsagePage() {
-  const ctx = await getRequestAuth();
+  const ctx = await requirePageAuth();
   if (ctx.role === "EMPLOYEE") {
     return (
       <main className="mx-auto max-w-6xl px-6 py-8">

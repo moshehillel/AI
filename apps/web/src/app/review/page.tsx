@@ -1,12 +1,12 @@
 export const dynamic = "force-dynamic";
 import { AppHeader } from "@/components/app-header";
-import { getRequestAuth } from "@/lib/request-auth";
+import { requirePageAuth } from "@/lib/page-auth";
 import { db } from "@automation-studio/db";
 import { STATUS_LABELS } from "@automation-studio/domain";
 import Link from "next/link";
 
 export default async function ReviewQueuePage() {
-  const ctx = await getRequestAuth();
+  const ctx = await requirePageAuth();
 
   if (ctx.role !== "DEVELOPER" && ctx.role !== "ADMIN") {
     return (

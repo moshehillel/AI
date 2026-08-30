@@ -1,11 +1,11 @@
 export const dynamic = "force-dynamic";
 import { AppHeader } from "@/components/app-header";
-import { getRequestAuth } from "@/lib/request-auth";
+import { requirePageAuth } from "@/lib/page-auth";
 import { db } from "@automation-studio/db";
 import Link from "next/link";
 
 export default async function ProjectsPage() {
-  const ctx = await getRequestAuth();
+  const ctx = await requirePageAuth();
   const projects = await db.project.findMany({
     where: {
       companyId: ctx.company.id,

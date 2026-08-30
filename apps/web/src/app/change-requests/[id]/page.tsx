@@ -3,7 +3,7 @@ import { requirePageAuth } from "@/lib/page-auth";
 import { requireChangeRequestAccess } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
 import { STATUS_LABELS } from "@automation-studio/domain";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ChatPanel } from "./chat-panel";
 import { ActionBar } from "./action-bar";
 
@@ -42,6 +42,10 @@ export default async function ChangeRequestPage({
   const ci = full.ciChecks[0];
   const isProgram = full.kind === "PROGRAM";
   const isStaff = ctx.role === "DEVELOPER" || ctx.role === "ADMIN";
+  // Customers should not linger on cancelled programs; staff can open archive links
+  if (full.status === "CANCELLED" && !isStaff) {
+    redirect(`/projects/${full.projectId}`);
+  }
   const planningMeta = (full.planningMeta ?? {}) as {
     apiDocsUrl?: string | null;
     docsText?: string | null;
@@ -164,6 +168,7 @@ export default async function ChangeRequestPage({
             role={ctx.role}
             hasPlan={Boolean(plan)}
             kind={full.kind}
+            projectId={full.projectId}
           />
         </aside>
       </section>

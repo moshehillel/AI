@@ -22,18 +22,32 @@ export default async function ProjectDetailPage({
     notFound();
   }
 
+  const isStaff = ctx.role === "DEVELOPER" || ctx.role === "ADMIN";
+
   const project = await db.project.findFirstOrThrow({
     where: { id: projectId, companyId: ctx.company.id },
     include: {
       repository: true,
       changeRequests: {
+        // Cancelled programs are soft-deleted from the main dashboard list
+        where: { status: { not: "CANCELLED" } },
         orderBy: { createdAt: "desc" },
         take: 20,
       },
     },
   });
 
-  const isStaff = ctx.role === "DEVELOPER" || ctx.role === "ADMIN";
+  const cancelledArchive = isStaff
+    ? await db.changeRequest.findMany({
+        where: {
+          projectId: project.id,
+          companyId: ctx.company.id,
+          status: "CANCELLED",
+        },
+        orderBy: { updatedAt: "desc" },
+        take: 20,
+      })
+    : [];
 
   return (
     <main className="mx-auto max-w-6xl px-6 py-8">
@@ -94,6 +108,32 @@ export default async function ProjectDetailPage({
               <li className="muted text-sm">No programs yet.</li>
             ) : null}
           </ul>
+          {cancelledArchive.length > 0 ? (
+            <details className="mt-6">
+              <summary className="muted cursor-pointer text-sm">
+                Cancelled archive ({cancelledArchive.length})
+              </summary>
+              <ul className="mt-3 space-y-2">
+                {cancelledArchive.map((cr) => (
+                  <li key={cr.id}>
+                    <Link
+                      href={`/change-requests/${cr.id}`}
+                      className="block rounded-xl border border-[var(--line)] p-3 opacity-70 hover:bg-white/5"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-medium">
+                          #{cr.number} {cr.title}
+                        </span>
+                        <span className="status-pill">
+                          {STATUS_LABELS[cr.status]}
+                        </span>
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
           {isStaff ? (
             !project.repository ? (
               <p className="mt-6 text-sm text-[var(--warn)]">

@@ -166,3 +166,10 @@ export function isProgramPlanOnly(status: ChangeRequestStatus): boolean {
 export function isTerminalStatus(status: ChangeRequestStatus): boolean {
   return ["DONE", "DEPLOYED", "REJECTED", "CANCELLED"].includes(status);
 }
+
+/** Soft-deleted from customer dashboards — still in DB for audit / admin archive */
+export const DASHBOARD_HIDDEN_STATUSES: ChangeRequestStatus[] = ["CANCELLED"];
+
+export function isHiddenFromDashboard(status: ChangeRequestStatus): boolean {
+  return DASHBOARD_HIDDEN_STATUSES.includes(status);
+}

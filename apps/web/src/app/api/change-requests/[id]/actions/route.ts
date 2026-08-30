@@ -593,7 +593,13 @@ export async function POST(
           ctx.user.id,
           "Cancelled by user",
         );
-        break;
+        // Soft-delete from dashboards; client redirects off this page
+        return NextResponse.json({
+          ok: true,
+          cancelled: true,
+          projectId: cr.projectId,
+          redirectTo: `/projects/${cr.projectId}`,
+        });
       }
     }
 

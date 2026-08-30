@@ -4,6 +4,7 @@ import {
   canTransition,
   assertTransition,
   InvalidTransitionError,
+  isHiddenFromDashboard,
 } from "./status.js";
 import { classifyChangeRequest } from "./classification.js";
 import { buildBranchName, slugify } from "./branch.js";
@@ -35,6 +36,12 @@ describe("status machine", () => {
     assert.equal(canTransition("CLIENT_VERIFY", "AWAITING_FINAL_REVIEW"), true);
     assert.equal(canTransition("AWAITING_FINAL_REVIEW", "DEPLOYING"), true);
     assert.equal(canTransition("DEPLOYING", "DONE"), true);
+  });
+
+  it("hides cancelled programs from dashboard lists", () => {
+    assert.equal(isHiddenFromDashboard("CANCELLED"), true);
+    assert.equal(isHiddenFromDashboard("PLANNING"), false);
+    assert.equal(isHiddenFromDashboard("DONE"), false);
   });
 });
 

@@ -9,12 +9,14 @@ export function ActionBar({
   role,
   hasPlan,
   kind,
+  projectId,
 }: {
   changeRequestId: string;
   status: string;
   role: string;
   hasPlan: boolean;
   kind: string;
+  projectId: string;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -25,11 +27,20 @@ export function ActionBar({
 
   async function postAction(action: string, extra?: Record<string, unknown>) {
     startTransition(async () => {
-      await fetch(`/api/change-requests/${changeRequestId}/actions`, {
+      const res = await fetch(`/api/change-requests/${changeRequestId}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ...extra }),
       });
+      const data = (await res.json().catch(() => ({}))) as {
+        redirectTo?: string;
+        cancelled?: boolean;
+      };
+      if (action === "cancel" && (data.redirectTo || data.cancelled)) {
+        router.push(data.redirectTo ?? `/projects/${projectId}`);
+        router.refresh();
+        return;
+      }
       router.refresh();
     });
   }

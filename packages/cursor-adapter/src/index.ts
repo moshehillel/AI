@@ -61,6 +61,34 @@ function isMockMode(sdk: typeof import("@cursor/sdk") | null): boolean {
   return process.env.CURSOR_MOCK === "1" || !process.env.CURSOR_API_KEY || !sdk;
 }
 
+/**
+ * Pick a model id the account actually has. `auto-smart` is not always available
+ * (Router may be off); this account exposes `default` (Auto) instead.
+ */
+async function resolveModelSelection(
+  sdk: typeof import("@cursor/sdk"),
+  preferred?: string,
+): Promise<{ id: string }> {
+  const requested =
+    preferred?.trim() ||
+    process.env.CURSOR_MODEL_ID?.trim() ||
+    "";
+  try {
+    const models = await sdk.Cursor.models.list({ apiKey: requireApiKey() });
+    const ids = models.map((m) => m.id);
+    if (requested && ids.includes(requested)) {
+      return { id: requested };
+    }
+    for (const candidate of ["default", "auto", "composer-2", "composer-2.5"]) {
+      if (ids.includes(candidate)) return { id: candidate };
+    }
+    if (ids[0]) return { id: ids[0] };
+  } catch (error) {
+    console.warn("[cursor-adapter] models.list failed; falling back", error);
+  }
+  return { id: requested || "default" };
+}
+
 export async function createTaskAgent(
   input: CreateTaskAgentInput,
 ): Promise<{ agentId: string; run: AsyncIterable<NormalizedStreamEvent>; wait: () => Promise<AgentRunResult> }> {
@@ -72,14 +100,15 @@ export async function createTaskAgent(
     return mockCreate(input);
   }
 
+  const model = await resolveModelSelection(sdk!, input.modelId);
   console.info(
-    `[cursor-adapter] LIVE createTaskAgent mode=${input.mode} repo=${input.repoUrl} branch=${input.branch}`,
+    `[cursor-adapter] LIVE createTaskAgent mode=${input.mode} model=${model.id} repo=${input.repoUrl} branch=${input.branch}`,
   );
 
   const { Agent } = sdk!;
   const agent = await Agent.create({
     apiKey: requireApiKey(),
-    model: { id: input.modelId ?? "auto-smart" },
+    model,
     mode: input.mode,
     cloud: {
       repos: [{ url: input.repoUrl, startingRef: input.branch }],

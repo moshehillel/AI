@@ -2,6 +2,7 @@ import { cookies, headers } from "next/headers";
 import { AuthError, resolveAuthContext } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
 import { syncClerkOrgMembership } from "@/lib/clerk-sync";
+import { isOpenAccess } from "@/lib/open-access";
 
 const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
@@ -12,13 +13,44 @@ function demoUserIdFromHint(hint: string | null | undefined) {
   return "seed_employee";
 }
 
+async function seededAuthContext(clerkUserId: string) {
+  const company = await db.company.findFirst({
+    where: { slug: "demo-co" },
+  });
+  const user = await db.user.findFirst({
+    where: { clerkUserId },
+  });
+  if (!company || !user) return null;
+  const membership = await db.companyMembership.findUniqueOrThrow({
+    where: {
+      companyId_userId: { companyId: company.id, userId: user.id },
+    },
+  });
+  return {
+    user,
+    company,
+    membership,
+    role: membership.role,
+  };
+}
+
 /**
- * Dev-friendly auth context:
- * - With Clerk org + synced DB rows → real multi-tenant context
- * - Without Clerk configured / unsynced → fall back to seeded demo company
+ * Auth context resolution:
+ * - OPEN_ACCESS=1 → fixed seeded customer (EMPLOYEE / seed_employee); no Clerk
+ * - ALLOW_DEMO_AUTH=1 → seeded users with optional role cookie switcher
+ * - Clerk org + synced DB → real multi-tenant context
  * - Clerk org present but DB lag → JIT sync from Clerk API
  */
 export async function getRequestAuth() {
+  if (isOpenAccess()) {
+    const ctx = await seededAuthContext("seed_employee");
+    if (ctx) return ctx;
+    throw new AuthError(
+      "Open access is enabled but seed customer data is missing. Run pnpm db:seed.",
+      500,
+    );
+  }
+
   if (!clerkEnabled || process.env.ALLOW_DEMO_AUTH === "1") {
     let hint = process.env.DEMO_ROLE ?? "employee";
     if (process.env.ALLOW_DEMO_AUTH === "1") {
@@ -34,25 +66,8 @@ export async function getRequestAuth() {
       }
     }
 
-    const company = await db.company.findFirst({
-      where: { slug: "demo-co" },
-    });
-    const user = await db.user.findFirst({
-      where: { clerkUserId: demoUserIdFromHint(hint) },
-    });
-    if (company && user) {
-      const membership = await db.companyMembership.findUniqueOrThrow({
-        where: {
-          companyId_userId: { companyId: company.id, userId: user.id },
-        },
-      });
-      return {
-        user,
-        company,
-        membership,
-        role: membership.role,
-      };
-    }
+    const ctx = await seededAuthContext(demoUserIdFromHint(hint));
+    if (ctx) return ctx;
 
     if (!clerkEnabled) {
       throw new AuthError(

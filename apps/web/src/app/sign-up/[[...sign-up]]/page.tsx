@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { SignUp } from "@clerk/nextjs";
+import { isOpenAccess } from "@/lib/open-access";
 
 const clerkEnabled = Boolean(
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
@@ -7,6 +9,10 @@ const clerkEnabled = Boolean(
 const demoAuth = process.env.NEXT_PUBLIC_ALLOW_DEMO_AUTH === "1";
 
 export default function SignUpPage() {
+  if (isOpenAccess()) {
+    redirect("/projects");
+  }
+
   if (!clerkEnabled) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-6">

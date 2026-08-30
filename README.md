@@ -74,7 +74,7 @@ pnpm packages:build
 
 Open http://localhost:3000
 
-Without Clerk keys, the app uses seeded demo users/company when `ALLOW_DEMO_AUTH=1`.
+Without Clerk keys (or with `OPEN_ACCESS=1`), the app opens as the seeded employee on `demo-co` — no login.
 
 ## Deploy (Railway)
 

@@ -11,8 +11,9 @@ Production hosting uses **Railway** with Postgres, Redis, a **web** service, and
 | `web` | Next.js UI + API (`Dockerfile.web`) |
 | `worker` | BullMQ runner (`Dockerfile.worker`) |
 
-First deploy runs in **demo mode** (no Clerk / Cursor / GitHub required):
+First deploy runs in **open access** (no login; single customer on seed data):
 
+- `OPEN_ACCESS=1` / `NEXT_PUBLIC_OPEN_ACCESS=1`
 - `ALLOW_DEMO_AUTH=1` / `NEXT_PUBLIC_ALLOW_DEMO_AUTH=1`
 - `CURSOR_MOCK=1` / `GITHUB_MOCK=1` / `RAILWAY_MOCK=1`
 

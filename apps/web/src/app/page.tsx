@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { isOpenAccess } from "@/lib/open-access";
 
 export const dynamic = "force-dynamic";
 
@@ -7,6 +9,11 @@ export default function HomePage() {
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
   );
   const demoAuth = process.env.NEXT_PUBLIC_ALLOW_DEMO_AUTH === "1";
+  const openAccess = isOpenAccess();
+
+  if (openAccess) {
+    redirect("/projects");
+  }
 
   if (!clerkEnabled || demoAuth) {
     return (
@@ -75,7 +82,6 @@ function Hero({
 
 async function ClerkHome() {
   const { auth } = await import("@clerk/nextjs/server");
-  const { redirect } = await import("next/navigation");
   const session = await auth();
   if (session.userId) {
     redirect(session.orgId ? "/projects" : "/select-org");

@@ -13,6 +13,7 @@ const clerkEnabled = Boolean(
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
 );
 const demoAuth = process.env.NEXT_PUBLIC_ALLOW_DEMO_AUTH === "1";
+const openAccess = process.env.NEXT_PUBLIC_OPEN_ACCESS === "1";
 
 function setDemoUser(role: string) {
   document.cookie = `demo_user=${role}; path=/; max-age=604800; SameSite=Lax`;
@@ -37,8 +38,10 @@ export function AppHeader({ role }: { role?: string | null }) {
         </nav>
       </div>
       <div className="flex items-center gap-3">
-        {role ? <span className="status-pill">{role}</span> : null}
-        {demoAuth || !clerkEnabled ? (
+        {openAccess ? null : role ? (
+          <span className="status-pill">{role}</span>
+        ) : null}
+        {openAccess ? null : demoAuth || !clerkEnabled ? (
           <select
             className="field max-w-40 py-2"
             defaultValue={(role ?? "EMPLOYEE").toLowerCase()}

@@ -2,10 +2,15 @@ import { OrganizationList } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { isOpenAccess } from "@/lib/open-access";
 
 export const dynamic = "force-dynamic";
 
 export default async function SelectOrgPage() {
+  if (isOpenAccess()) {
+    redirect("/projects");
+  }
+
   const session = await auth();
   if (!session.userId) {
     redirect("/sign-in");

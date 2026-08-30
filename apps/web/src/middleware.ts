@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getAppBaseUrl } from "@/lib/app-url";
+import { isOpenAccess } from "@/lib/open-access";
 
 const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 /** Temporary explore mode: skip Clerk gate when demo auth is on. */
 const demoAuthEnabled = process.env.ALLOW_DEMO_AUTH === "1";
+/** Temporary single-customer open access (NetFree / Clerk blocked). */
+const openAccessEnabled = isOpenAccess();
 
 let clerkHandler:
   | ((request: NextRequest) => Promise<NextResponse | Response>)
@@ -31,8 +34,8 @@ async function getClerkHandler() {
   // confusing 404 when Clerk development keys lack a "dev browser" cookie.
   const mw = clerkMiddleware(async (auth, request) => {
     if (isPublicRoute(request)) return;
-    // Demo mode serves seeded users without a Clerk session.
-    if (demoAuthEnabled) return;
+    // Open access / demo: no sign-in gate while Clerk is blocked or exploring.
+    if (openAccessEnabled || demoAuthEnabled) return;
     const session = await auth();
     if (!session.userId) {
       // request.url is localhost behind Railway; use the public origin.
@@ -48,9 +51,8 @@ async function getClerkHandler() {
 }
 
 export default async function middleware(request: NextRequest) {
-  // No Clerk keys → open access; demo auth still uses clerkMiddleware so
-  // ClerkProvider works, but skips the sign-in redirect (see handler above).
-  if (!clerkEnabled) {
+  // No Clerk keys, or temporary open access → all app routes open.
+  if (!clerkEnabled || openAccessEnabled) {
     return NextResponse.next();
   }
   const handler = await getClerkHandler();

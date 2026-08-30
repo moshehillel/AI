@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { AuthError } from "@automation-studio/auth";
+import { isOpenAccess } from "@/lib/open-access";
 import { getRequestAuth } from "@/lib/request-auth";
 
 /**
@@ -12,7 +13,7 @@ export async function requirePageAuth() {
   } catch (error) {
     if (error instanceof AuthError) {
       if (error.status === 401) {
-        redirect("/sign-in");
+        redirect(isOpenAccess() ? "/projects" : "/sign-in");
       }
       if (
         error.status === 400 ||
@@ -20,7 +21,7 @@ export async function requirePageAuth() {
         error.status === 404 ||
         /organization|synced|company|member/i.test(error.message)
       ) {
-        redirect("/select-org");
+        redirect(isOpenAccess() ? "/projects" : "/select-org");
       }
     }
     throw error;

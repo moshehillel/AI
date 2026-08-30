@@ -7,13 +7,15 @@ import {
   AuthError,
   writeAuditEvent,
 } from "@automation-studio/auth";
-import { db, Prisma } from "@automation-studio/db";
+import { db, Prisma, ensurePlanningRepository } from "@automation-studio/db";
 import {
   detectAndRedactSecrets,
   encryptSecret,
   isProgramPlanOnly,
   buildPlanningFollowUp,
   buildPlanningStartPrompt,
+  getDefaultGithubRepoConfig,
+  isLiveCursorConfigured,
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { enqueueJob } from "@automation-studio/jobs";
@@ -209,7 +211,20 @@ export async function POST(
         body.attachment,
       );
 
-      if (full.project.repository) {
+      // Auto-link a planning repo (sibling project or DEFAULT_GITHUB_*) so we
+      // can start live Cursor plan mode instead of the local template fallback.
+      let repository = full.project.repository;
+      if (!repository) {
+        repository = await ensurePlanningRepository(db, {
+          projectId: cr.projectId,
+          companyId: ctx.company.id,
+          defaults: getDefaultGithubRepoConfig(),
+        });
+      }
+
+      const canStartLive = Boolean(repository) && isLiveCursorConfigured();
+
+      if (canStartLive) {
         // Prefer live Cursor plan mode — kick off (or continue) agent startup.
         await db.changeRequest.update({
           where: { id: cr.id },
@@ -266,7 +281,7 @@ export async function POST(
           createdAt: created.createdAt.toISOString(),
         };
       } else {
-        // No repo yet — keyword-aware local planning (not the old rotating script).
+        // No live Cursor path available — keyword-aware local planning.
         const { content, nextMeta, planMarkdown } = buildPlanningFollowUp({
           meta: currentMeta,
           latestUserContent: redacted,
@@ -297,6 +312,9 @@ export async function POST(
             metadata: {
               planningFollowUp: true,
               localPlanFallback: true,
+              reason: !repository
+                ? "no_repository"
+                : "cursor_not_configured",
             },
           },
         });

@@ -14,6 +14,7 @@ import {
   assertTransition,
   programSubmittedEmail,
   finalReviewEmail,
+  resolveDeveloperNotifyEmails,
 } from "@automation-studio/domain";
 import { getAppBaseUrl } from "@/lib/app-url";
 import { queueAndMaybeSendEmail } from "@/lib/notify";
@@ -24,6 +25,7 @@ const bodySchema = z.object({
     "approve_high_risk",
     "submit_review",
     "submit_to_dev",
+    "reopen_planning",
     "start_build",
     "submit_final_review",
     "approve_deploy",
@@ -34,10 +36,59 @@ const bodySchema = z.object({
     "cancel",
     "retry",
   ]),
+  /** Required for submit_to_dev — blocks accidental one-click submits. */
+  confirmSubmit: z.boolean().optional(),
   serverLabel: z.string().max(200).optional(),
   autoDeploy: z.boolean().optional(),
   notes: z.string().max(4000).optional(),
 });
+
+async function notifyDevelopers(input: {
+  companyId: string;
+  changeRequestId: string;
+  subject: string;
+  body: string;
+  metadataKind: string;
+}) {
+  const developers = await db.companyMembership.findMany({
+    where: {
+      companyId: input.companyId,
+      role: { in: ["DEVELOPER", "ADMIN"] },
+    },
+    include: { user: true },
+  });
+  const recipients = resolveDeveloperNotifyEmails(
+    developers.map((m) => m.user.email),
+  );
+  if (recipients.length === 0) {
+    // Still record that notify failed so Admin inbox / logs show the gap.
+    await queueAndMaybeSendEmail({
+      companyId: input.companyId,
+      toEmail: "unconfigured@notify.local",
+      subject: input.subject,
+      body: `${input.body}\n\n(Not delivered: set NOTIFY_EMAIL or DEVELOPER_NOTIFY_EMAIL, and RESEND_API_KEY.)`,
+      entityType: "change_request",
+      entityId: input.changeRequestId,
+      metadata: {
+        kind: input.metadataKind,
+        error: "no_notify_recipients",
+      },
+    });
+    return { recipients: [] as string[], queued: 1 };
+  }
+  for (const toEmail of recipients) {
+    await queueAndMaybeSendEmail({
+      companyId: input.companyId,
+      toEmail,
+      subject: input.subject,
+      body: input.body,
+      entityType: "change_request",
+      entityId: input.changeRequestId,
+      metadata: { kind: input.metadataKind },
+    });
+  }
+  return { recipients, queued: recipients.length };
+}
 
 async function transition(
   changeRequestId: string,
@@ -91,6 +142,12 @@ export async function POST(
         if (cr.status !== "PLANNING" && cr.status !== "AWAITING_PLAN_APPROVAL") {
           throw new AuthError("Program is not in planning", 400);
         }
+        if (body.confirmSubmit !== true) {
+          throw new AuthError(
+            "Confirm submit required — this handoff notifies a developer",
+            400,
+          );
+        }
         await transition(
           cr.id,
           ctx.company.id,
@@ -106,17 +163,10 @@ export async function POST(
             role: "SYSTEM",
             authorId: ctx.user.id,
             content:
-              "Submitted to a developer for building. You'll be notified when a preview is ready to verify.",
+              "Submitted to a developer for building. You'll be notified when a preview is ready to verify. You can reopen planning if this was accidental.",
           },
         });
 
-        const developers = await db.companyMembership.findMany({
-          where: {
-            companyId: ctx.company.id,
-            role: { in: ["DEVELOPER", "ADMIN"] },
-          },
-          include: { user: true },
-        });
         const reviewUrl = `${getAppBaseUrl()}/change-requests/${cr.id}`;
         const emailContent = programSubmittedEmail({
           programTitle: cr.title,
@@ -124,17 +174,43 @@ export async function POST(
           requesterName: ctx.user.name ?? ctx.user.email,
           reviewUrl,
         });
-        for (const member of developers) {
-          await queueAndMaybeSendEmail({
-            companyId: ctx.company.id,
-            toEmail: member.user.email,
-            subject: emailContent.subject,
-            body: emailContent.body,
-            entityType: "change_request",
-            entityId: cr.id,
-            metadata: { kind: "program_submit_to_dev" },
-          });
+        await notifyDevelopers({
+          companyId: ctx.company.id,
+          changeRequestId: cr.id,
+          subject: emailContent.subject,
+          body: emailContent.body,
+          metadataKind: "program_submit_to_dev",
+        });
+        break;
+      }
+      case "reopen_planning": {
+        await requirePermission(ctx, "program:reopen_planning");
+        if (cr.kind !== "PROGRAM") {
+          throw new AuthError("Only programs can reopen planning", 400);
         }
+        if (cr.status !== "AWAITING_DEV_BUILD") {
+          throw new AuthError(
+            "Only submitted programs waiting for a developer can reopen planning",
+            400,
+          );
+        }
+        await transition(
+          cr.id,
+          ctx.company.id,
+          cr.status,
+          "PLANNING",
+          ctx.user.id,
+          "Reopened planning",
+        );
+        await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            authorId: ctx.user.id,
+            content:
+              "Planning reopened. Continue refining with Koda — submit again only when the plan is ready for a developer.",
+          },
+        });
         break;
       }
       case "start_build": {
@@ -256,30 +332,19 @@ export async function POST(
             content: "Submitted for final developer review and deploy approval.",
           },
         });
-        const developers = await db.companyMembership.findMany({
-          where: {
-            companyId: ctx.company.id,
-            role: { in: ["DEVELOPER", "ADMIN"] },
-          },
-          include: { user: true },
-        });
         const reviewUrl = `${getAppBaseUrl()}/change-requests/${cr.id}`;
         const emailContent = finalReviewEmail({
           programTitle: cr.title,
           programNumber: cr.number,
           reviewUrl,
         });
-        for (const member of developers) {
-          await queueAndMaybeSendEmail({
-            companyId: ctx.company.id,
-            toEmail: member.user.email,
-            subject: emailContent.subject,
-            body: emailContent.body,
-            entityType: "change_request",
-            entityId: cr.id,
-            metadata: { kind: "program_final_review" },
-          });
-        }
+        await notifyDevelopers({
+          companyId: ctx.company.id,
+          changeRequestId: cr.id,
+          subject: emailContent.subject,
+          body: emailContent.body,
+          metadataKind: "program_final_review",
+        });
         break;
       }
       case "approve_deploy": {

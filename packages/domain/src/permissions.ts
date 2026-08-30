@@ -11,6 +11,7 @@ export type Permission =
   | "change_request:merge"
   | "change_request:high_risk_approve"
   | "program:submit_to_dev"
+  | "program:reopen_planning"
   | "program:start_build"
   | "program:final_approve"
   | "company:admin"
@@ -25,6 +26,7 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
     "change_request:submit_review",
     "change_request:approve_plan",
     "program:submit_to_dev",
+    "program:reopen_planning",
   ],
   DEVELOPER: [
     "project:read",
@@ -36,6 +38,7 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
     "change_request:merge",
     "change_request:high_risk_approve",
     "program:submit_to_dev",
+    "program:reopen_planning",
     "program:start_build",
     "program:final_approve",
     "inbox:read",
@@ -51,6 +54,7 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
     "change_request:merge",
     "change_request:high_risk_approve",
     "program:submit_to_dev",
+    "program:reopen_planning",
     "program:start_build",
     "program:final_approve",
     "company:admin",

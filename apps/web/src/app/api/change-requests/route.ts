@@ -7,11 +7,13 @@ import {
   writeAuditEvent,
   AuthError,
 } from "@automation-studio/auth";
-import { db } from "@automation-studio/db";
+import { db, ensurePlanningRepository } from "@automation-studio/db";
 import {
   shortTitleFromPrompt,
   slugify,
   buildOpeningPlanningMessage,
+  getDefaultGithubRepoConfig,
+  isLiveCursorConfigured,
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { enqueueJob } from "@automation-studio/jobs";
@@ -162,16 +164,27 @@ export async function POST(request: Request) {
         },
         { jobId: `classify-${changeRequest.id}` },
       );
-    } else if (project?.repository) {
-      // Start real Cursor plan-mode agent (via branch ensure → cursor.start).
-      await enqueueJob(
-        "github.ensure-branch",
-        {
-          changeRequestId: changeRequest.id,
+    } else {
+      // Auto-link planning repo so live Cursor plan mode can start immediately.
+      let repository = project?.repository ?? null;
+      if (!repository) {
+        repository = await ensurePlanningRepository(db, {
+          projectId: body.projectId,
           companyId: ctx.company.id,
-        },
-        { jobId: `plan-branch-${changeRequest.id}` },
-      );
+          defaults: getDefaultGithubRepoConfig(),
+        });
+      }
+
+      if (repository && isLiveCursorConfigured()) {
+        await enqueueJob(
+          "github.ensure-branch",
+          {
+            changeRequestId: changeRequest.id,
+            companyId: ctx.company.id,
+          },
+          { jobId: `plan-branch-${changeRequest.id}` },
+        );
+      }
     }
 
     return NextResponse.json({

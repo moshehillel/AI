@@ -88,4 +88,38 @@ describe("planning Q&A", () => {
     assert.match(md, /QuickBooks/);
     assert.match(md, /mermaid/);
   });
+
+  it("does not put a follow-up question into Goal", () => {
+    const reply = buildPlanningFollowUp({
+      meta: {
+        coveredTopics: ["goals", "systems"],
+        planMarkdown: [
+          "# Plan: Test Project",
+          "",
+          "## Goal",
+          "Connect Provider Soft to HHA so visit data syncs automatically.",
+          "",
+          "## Systems",
+          "- Provider Soft",
+          "- HHA / HHAeXchange",
+        ].join("\n"),
+      },
+      title: "Test Project",
+      latestUserContent: "how will you pull the data from hha?",
+    });
+    assert.doesNotMatch(reply.planMarkdown, /## Goal\nhow will you pull/i);
+    assert.match(reply.content, /API|RPA|export/i);
+    assert.match(reply.planMarkdown, /Provider Soft|HHA/i);
+  });
+
+  it("infers HHA and Provider Soft as systems", () => {
+    const md = synthesizePlanMarkdown({
+      title: "Test Project",
+      meta: {},
+      latestUserContent:
+        "build an interface that connect hha and provider soft with RPA",
+    });
+    assert.match(md, /HHA/);
+    assert.match(md, /Provider Soft/);
+  });
 });

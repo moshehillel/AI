@@ -273,6 +273,34 @@ function mockPlanReply(prompt: string): string {
       "Koda is AI and can make mistakes.",
     ].join("\n");
   }
+  if (
+    /(how (will|do|can|would).*(pull|get|fetch).*(hha|provider)|rpa|api.*(hha|provider))/i.test(
+      lower,
+    )
+  ) {
+    return [
+      "For HHA / Provider Soft I'd prefer an official API or scheduled export first; RPA only if neither exists.",
+      "",
+      "# Plan",
+      "## Goal",
+      "Connect Provider Soft and HHA so records sync reliably.",
+      "",
+      "## Systems",
+      "- Provider Soft",
+      "- HHA / HHAeXchange",
+      "",
+      "## Integrations / APIs",
+      "- API/export first; RPA fallback for UI-only workflows",
+      "",
+      "## Workflow",
+      "1. Read from source (API, export, or RPA)",
+      "2. Validate and map fields",
+      "3. Write to destination",
+      "4. Surface failures / duplicates",
+      "",
+      "Koda is AI and can make mistakes.",
+    ].join("\n");
+  }
   if (/(diagram|digram|mermaid|flowchart)/.test(lower)) {
     return [
       "Here's a diagram of the flow based on your brief:",
@@ -299,13 +327,31 @@ function mockPlanReply(prompt: string): string {
   if (/quickbooks?|\bqb\b/.test(lower)) systems.push("QuickBooks");
   if (/gmail|email|invoice/.test(lower)) systems.push("Email");
   if (/slack/.test(lower)) systems.push("Slack");
+  if (/\bhha\b|hhax|home\s*health/.test(lower)) systems.push("HHA / HHAeXchange");
+  if (/provider\s*soft|providersoft/.test(lower)) systems.push("Provider Soft");
+
+  const goalCandidate = prompt
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .find(
+      (l) =>
+        !/^(you are koda|program title|initial brief|client message|conversation so far|respond as koda)/i.test(
+          l,
+        ) &&
+        !l.endsWith("?") &&
+        l.length > 24,
+    );
 
   return [
     "Here's a draft plan from what you shared:",
     "",
     "# Plan",
     "## Goal",
-    prompt.slice(0, 400).replace(/\n+/g, " ").trim() || "Confirm outcome with the client.",
+    goalCandidate?.slice(0, 400).replace(/\n+/g, " ").trim() ||
+      (systems.length >= 2
+        ? `Connect ${systems.join(" and ")} so data flows reliably.`
+        : "Confirm outcome with the client."),
     "",
     "## Systems",
     ...(systems.length ? systems.map((s) => `- ${s}`) : ["- To be confirmed"]),

@@ -222,7 +222,7 @@ model Repository {
 
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  @@unique([githubOwner, githubRepo])
+  @@index([githubOwner, githubRepo])
 }
 
 model ChangeRequest {

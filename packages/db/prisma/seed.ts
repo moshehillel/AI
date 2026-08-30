@@ -100,6 +100,29 @@ async function main() {
         create: { projectId: project.id, userId },
       });
     }
+
+    const owner = process.env.DEFAULT_GITHUB_OWNER?.trim();
+    const repo = process.env.DEFAULT_GITHUB_REPO?.trim();
+    if (owner && repo) {
+      await prisma.repository.upsert({
+        where: { projectId: project.id },
+        update: {
+          githubOwner: owner,
+          githubRepo: repo,
+          installationId:
+            process.env.DEFAULT_GITHUB_INSTALLATION_ID?.trim() || undefined,
+          defaultBranch: process.env.DEFAULT_GITHUB_BRANCH?.trim() || "main",
+        },
+        create: {
+          projectId: project.id,
+          githubOwner: owner,
+          githubRepo: repo,
+          installationId:
+            process.env.DEFAULT_GITHUB_INSTALLATION_ID?.trim() || null,
+          defaultBranch: process.env.DEFAULT_GITHUB_BRANCH?.trim() || "main",
+        },
+      });
+    }
   }
 
   console.log("Seeded demo company, users, and projects for Koda");

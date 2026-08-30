@@ -1,9 +1,10 @@
-import { db } from "@automation-studio/db";
+import { db, ensurePlanningRepository } from "@automation-studio/db";
 import { createTaskAgent } from "@automation-studio/cursor-adapter";
 import { enqueueJob, type CursorStartJobData } from "@automation-studio/jobs";
 import { writeAuditEvent } from "@automation-studio/auth";
 import {
   assertUnderUsageSoftCap,
+  getDefaultGithubRepoConfig,
   planningAgentInstructions,
   type PlanningMeta,
 } from "@automation-studio/domain";
@@ -37,8 +38,26 @@ export async function handleCursorStart(data: CursorStartJobData) {
     return { blocked: true, reason: cap.reason };
   }
 
-  const repo = cr.project.repository;
-  if (!repo || !cr.branchName) {
+  let repo = cr.project.repository;
+  if (!repo) {
+    repo = await ensurePlanningRepository(db, {
+      projectId: cr.projectId,
+      companyId: data.companyId,
+      defaults: getDefaultGithubRepoConfig(),
+    });
+  }
+
+  // Plan mode can start on the default branch when no feature branch exists yet.
+  let branchName = cr.branchName;
+  if (!branchName && data.mode === "plan" && repo) {
+    branchName = repo.defaultBranch || "main";
+    await db.changeRequest.update({
+      where: { id: cr.id },
+      data: { branchName },
+    });
+  }
+
+  if (!repo || !branchName) {
     throw new Error("Missing repository or branch");
   }
 
@@ -80,7 +99,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
 
   const { agentId, wait } = await createTaskAgent({
     repoUrl,
-    branch: cr.branchName,
+    branch: branchName,
     prompt,
     mode: data.mode,
     metadata: {

@@ -8,6 +8,48 @@ export type QueueEmailInput = {
   metadata?: Record<string, unknown>;
 };
 
+/** Split comma-separated env notify lists. */
+function parseEmailList(raw: string | undefined): string[] {
+  if (!raw?.trim()) return [];
+  return raw
+    .split(/[,;\s]+/)
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.includes("@"));
+}
+
+/**
+ * Real deliverable addresses only — skip seed/demo placeholders.
+ */
+export function isPlaceholderEmail(email: string): boolean {
+  const lower = email.trim().toLowerCase();
+  return (
+    lower.endsWith(".local") ||
+    lower.endsWith("@example.com") ||
+    lower.endsWith("@example.org") ||
+    lower.includes("@demo.local")
+  );
+}
+
+/**
+ * Recipients for developer-facing program notifications.
+ * Prefer DEVELOPER_NOTIFY_EMAIL / NOTIFY_EMAIL (comma-separated), then
+ * company DEVELOPER/ADMIN memberships with real emails.
+ */
+export function resolveDeveloperNotifyEmails(
+  memberEmails: string[],
+): string[] {
+  const configured = [
+    ...parseEmailList(process.env.DEVELOPER_NOTIFY_EMAIL),
+    ...parseEmailList(process.env.NOTIFY_EMAIL),
+  ];
+  const fromMembers = memberEmails
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.includes("@") && !isPlaceholderEmail(e));
+
+  const unique = new Set<string>([...configured, ...fromMembers]);
+  return [...unique];
+}
+
 /**
  * Try Resend when RESEND_API_KEY is set; otherwise return queued-only.
  * Persistence is handled by the caller (OutboundEmail row).
@@ -21,6 +63,14 @@ export async function trySendEmail(
 
   if (!apiKey) {
     return { sent: false, error: "RESEND_API_KEY not configured" };
+  }
+
+  if (isPlaceholderEmail(input.toEmail)) {
+    return {
+      sent: false,
+      provider: "resend",
+      error: "Refusing to send to placeholder email; set NOTIFY_EMAIL",
+    };
   }
 
   try {

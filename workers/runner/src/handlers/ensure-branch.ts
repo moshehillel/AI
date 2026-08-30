@@ -1,7 +1,8 @@
-import { db } from "@automation-studio/db";
+import { db, ensurePlanningRepository } from "@automation-studio/db";
 import {
   buildBranchName,
   buildPlanningStartPrompt,
+  getDefaultGithubRepoConfig,
   slugify,
   type PlanningMeta,
 } from "@automation-studio/domain";
@@ -20,7 +21,14 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     },
   });
 
-  const repo = cr.project.repository;
+  let repo = cr.project.repository;
+  if (!repo) {
+    repo = await ensurePlanningRepository(db, {
+      projectId: cr.projectId,
+      companyId: data.companyId,
+      defaults: getDefaultGithubRepoConfig(),
+    });
+  }
   if (!repo) {
     await transitionChangeRequest({
       changeRequestId: cr.id,

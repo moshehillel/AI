@@ -31,6 +31,10 @@ const demoEnv = {
   NEXT_PUBLIC_ALLOW_DEMO_AUTH: "0",
   // Prefer live agent API when a key is present; bootstrap may still set CURSOR_MOCK=1 explicitly.
   CURSOR_MOCK: "0",
+  // Shared planning/build repo for open-access projects without a connected repository.
+  DEFAULT_GITHUB_OWNER: "moshehillel",
+  DEFAULT_GITHUB_REPO: "AI",
+  DEFAULT_GITHUB_BRANCH: "main",
   GITHUB_MOCK: "1",
   RAILWAY_MOCK: "1",
   NEXT_TELEMETRY_DISABLED: "1",

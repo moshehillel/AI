@@ -67,6 +67,8 @@ export function planningAgentInstructions(): string {
     "Do not implement, write production code, or create files unless the client explicitly asks for a diagram or plan document in chat.",
     "Behave like an expert product-planning partner: thoughtful, conversational, and specific to what the client said.",
     "Answer direct questions directly (including who you are: Koda). Never ignore the user's message to push a scripted questionnaire.",
+    "When the client asks how to integrate systems (APIs, RPA/UI automation, file exports, webhooks), explain trade-offs clearly and recommend an approach based on what they described — do not dump a generic plan template.",
+    "Never set the plan Goal to the client's latest question verbatim. Goals are durable outcomes; questions get answered in prose, then the living plan is updated thoughtfully.",
     "Produce markdown plans. When asked for a diagram / digram / flowchart / architecture view, include a mermaid fenced code block.",
     "Ask clarifying questions only when needed to unblock the plan — one or a few at a time, never a rotating checklist.",
     "Maintain and update a living plan document in your replies: goals, systems, integrations/APIs, workflow steps, edge cases, and acceptance criteria.",
@@ -152,12 +154,59 @@ function inferSystems(text: string): string[] {
     [/\bnetsuite\b/i, "NetSuite"],
     [/\berp\b/i, "ERP"],
     [/\bsheets?\b|spreadsheet/i, "Spreadsheets"],
+    [/\bhha\b|home\s*health\s*agency|hhax|hha\s*exchange/i, "HHA / HHAeXchange"],
+    [/\bprovider\s*soft\b|\bprovidersoft\b/i, "Provider Soft"],
   ];
   for (const [re, label] of map) {
     if (re.test(text) && !systems.includes(label)) systems.push(label);
   }
   return systems;
 }
+
+function looksLikeQuestion(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (t.endsWith("?")) return true;
+  return /^(how|what|why|when|where|who|which|can|could|would|should|do|does|is|are)\b/i.test(
+    t,
+  );
+}
+
+/** Prefer a durable goal; never copy a short question into ## Goal. */
+function deriveGoal(opts: {
+  title?: string;
+  latestUserContent: string;
+  priorPlan?: string | null;
+  systems: string[];
+}): string {
+  const priorGoal = opts.priorPlan?.match(/## Goal\n([\s\S]*?)(?:\n## |\n*$)/)?.[1]
+    ?.trim();
+  if (
+    priorGoal &&
+    priorGoal.length > 8 &&
+    !looksLikeQuestion(priorGoal) &&
+    !/^define the business outcome/i.test(priorGoal)
+  ) {
+    return priorGoal.slice(0, 500);
+  }
+
+  const brief = opts.latestUserContent.trim();
+  if (brief && !looksLikeQuestion(brief) && brief.length > 20) {
+    return brief.slice(0, 500);
+  }
+
+  if (opts.systems.length >= 2) {
+    return `Connect ${opts.systems.join(" and ")} so data flows reliably between them.`;
+  }
+  if (opts.systems.length === 1) {
+    return `Automate the ${opts.systems[0]} workflow described with the client.`;
+  }
+  if (opts.title?.trim() && !/^program\s+\d+/i.test(opts.title)) {
+    return `Deliver the automation for ${opts.title.trim()}.`;
+  }
+  return "Define the business outcome with the client.";
+}
+
 
 /** Build / refresh living plan markdown from conversation context. */
 export function synthesizePlanMarkdown(opts: {
@@ -167,21 +216,43 @@ export function synthesizePlanMarkdown(opts: {
   priorPlan?: string | null;
 }): string {
   const systems = inferSystems(
-    `${opts.latestUserContent}\n${opts.meta.docsText ?? ""}\n${opts.meta.examples ?? ""}`,
+    `${opts.latestUserContent}\n${opts.meta.docsText ?? ""}\n${opts.meta.examples ?? ""}\n${opts.priorPlan ?? ""}\n${opts.meta.planMarkdown ?? ""}`,
   );
+  // Merge systems already listed in prior plan
+  const priorSystems = opts.priorPlan?.match(/## Systems\n([\s\S]*?)(?:\n## |\n*$)/)?.[1];
+  if (priorSystems) {
+    for (const line of priorSystems.split("\n")) {
+      const name = line.replace(/^\s*-\s*/, "").trim();
+      if (
+        name &&
+        !/^to be confirmed/i.test(name) &&
+        !systems.includes(name)
+      ) {
+        systems.push(name);
+      }
+    }
+  }
+
   const title = opts.title?.trim() || "Automation program";
   const brief = opts.latestUserContent.trim();
   const hasWorkflow =
-    brief.length > 60 ||
-    /(then |after |when |trigger|invoice|sync|create|send)/i.test(brief);
+    (brief.length > 60 && !looksLikeQuestion(brief)) ||
+    /(then |after |when |trigger|invoice|sync|create|send|rpa|pull|push)/i.test(
+      brief,
+    );
+
+  const goal = deriveGoal({
+    title: opts.title,
+    latestUserContent: opts.latestUserContent,
+    priorPlan: opts.priorPlan ?? opts.meta.planMarkdown,
+    systems,
+  });
 
   const lines = [
     `# Plan: ${title}`,
     "",
     "## Goal",
-    brief
-      ? brief.slice(0, 500)
-      : "Define the business outcome with the client.",
+    goal,
     "",
     "## Systems",
     systems.length
@@ -191,17 +262,23 @@ export function synthesizePlanMarkdown(opts: {
     "## Integrations / APIs",
     opts.meta.apiDocsUrl
       ? `- Docs: ${opts.meta.apiDocsUrl}`
-      : "- API docs / auth details: attach when available",
+      : systems.some((s) => /hha|provider soft/i.test(s))
+        ? "- Prefer official APIs / exports where available; fall back to attended/unattended RPA only if no API exists"
+        : "- API docs / auth details: attach when available",
     opts.meta.docsText
       ? `- Notes: ${opts.meta.docsText.slice(0, 280)}${opts.meta.docsText.length > 280 ? "…" : ""}`
       : "",
     "",
     "## Workflow",
-    hasWorkflow
+    hasWorkflow || systems.length >= 2
       ? [
-          "1. Trigger from the described source event",
+          systems.some((s) => /provider soft/i.test(s))
+            ? "1. Read/export records from Provider Soft (API or scheduled export / RPA)"
+            : "1. Trigger from the described source event",
           "2. Validate and normalize payload fields",
-          "3. Call downstream system(s) with mapped data",
+          systems.some((s) => /hha/i.test(s))
+            ? "3. Push mapped data into HHA / HHAeXchange"
+            : "3. Call downstream system(s) with mapped data",
           "4. Record success / surface failures for review",
         ].join("\n")
       : "Walk through happy-path steps with the client.",
@@ -247,8 +324,10 @@ export function synthesizePlanMarkdown(opts: {
 function answerDirectly(opts: {
   latestUserContent: string;
   planMarkdown: string;
+  meta?: PlanningMeta;
 }): string | null {
   const lower = opts.latestUserContent.toLowerCase().trim();
+  const context = `${opts.latestUserContent}\n${opts.planMarkdown}\n${opts.meta?.planMarkdown ?? ""}\n${opts.meta?.docsText ?? ""}`;
 
   if (
     /what('?s| is) your name|who are you|are you (an )?ai|what can you do/.test(
@@ -269,6 +348,31 @@ function answerDirectly(opts: {
   if (/^(hi|hello|hey)\b/.test(lower) && lower.length < 40) {
     return [
       "Hey — I'm Koda. Tell me the automation you have in mind, or ask for a plan/diagram anytime.",
+      "",
+      "Koda is AI and can make mistakes.",
+    ].join("\n");
+  }
+
+  if (
+    /(how (will|do|can|would) (you |we |i )?(pull|get|fetch|read|export).*(hha|provider)|rpa|api.*(hha|provider)|(hha|provider).*(api|rpa|pull|data))/i.test(
+      lower,
+    ) ||
+    (/hha|provider\s*soft/i.test(context) &&
+      /(how|pull|api|rpa|data|connect)/i.test(lower) &&
+      looksLikeQuestion(opts.latestUserContent))
+  ) {
+    return [
+      "For HHA / Provider Soft, I'd approach data access in this order:",
+      "",
+      "1. **Official API / partner integration** — if HHAeXchange (or your HHA vendor) and Provider Soft expose APIs or SFTP/CSV exports, we use those first. They're more stable than screen automation.",
+      "2. **Scheduled file export** — many home-health stacks can dump visits/authorizations/payroll to a folder or SFTP on a schedule; we pick up the file, validate, and push downstream.",
+      "3. **RPA (UI automation)** — only if there's no API/export. A bot logs into the UI, navigates the screens, and scrapes or enters data. It works, but it's brittle when the UI changes and usually needs a dedicated Windows worker.",
+      "",
+      "So: **API/export first, RPA as a last resort.** For Provider Soft → HHA specifically, tell me whether either side already has an API key, EDI/export, or if staff only work in the browser today — that decides the path.",
+      "",
+      "I've updated the living plan with that integration approach.",
+      "",
+      opts.planMarkdown,
       "",
       "Koda is AI and can make mistakes.",
     ].join("\n");
@@ -319,13 +423,13 @@ export function buildPlanningFollowUp(opts: {
   }
 
   const lower = opts.latestUserContent.toLowerCase();
-  if (/(crm|salesforce|hubspot|shopify|erp|slack|email|gmail|sheets?|quickbooks?|\bqb\b)/.test(lower)) {
+  if (/(crm|salesforce|hubspot|shopify|erp|slack|email|gmail|sheets?|quickbooks?|\bqb\b|hha|provider\s*soft|hhax)/.test(lower)) {
     covered.add("systems");
   }
-  if (/(api|endpoint|webhook|oauth|token|swagger|openapi)/.test(lower)) {
+  if (/(api|endpoint|webhook|oauth|token|swagger|openapi|rpa)/.test(lower)) {
     covered.add("apis");
   }
-  if (/(then |after that|first |step |when |trigger|invoice|workflow)/.test(lower)) {
+  if (/(then |after that|first |step |when |trigger|invoice|workflow|pull|push|connect)/.test(lower)) {
     covered.add("workflow");
   }
   if (/(error|fail|retry|duplicate|missing|edge)/.test(lower)) {
@@ -334,7 +438,7 @@ export function buildPlanningFollowUp(opts: {
   if (/(accept|must |should |criteria|done when)/.test(lower)) {
     covered.add("acceptance");
   }
-  if (opts.latestUserContent.trim().length > 40) {
+  if (opts.latestUserContent.trim().length > 40 && !looksLikeQuestion(opts.latestUserContent)) {
     covered.add("goals");
   }
 
@@ -358,6 +462,7 @@ export function buildPlanningFollowUp(opts: {
   const direct = answerDirectly({
     latestUserContent: opts.latestUserContent,
     planMarkdown,
+    meta,
   });
   if (direct) {
     return { content: direct, nextMeta: meta, planMarkdown };

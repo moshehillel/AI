@@ -43,6 +43,37 @@ railway up --service worker -d -y -m "Open access no login"
 
 Then open https://koda.advancedautomations.net — onboarding loads with no login.
 
+### Accidental program submit / reopen planning
+
+Submit requires an explicit confirmation step (`confirmSubmit: true`). Chat and
+file attach never submit a program.
+
+If a program is in **Submitted — waiting for developer** (`AWAITING_DEV_BUILD`):
+
+1. Open the program
+2. Click **Continue planning (reopen)** in chat or Actions
+3. Status returns to **Planning with Koda** (`PLANNING`)
+
+### Developer email on submit
+
+On submit, Koda queues (and sends via Resend when configured) a notify email.
+
+Set on Railway **web** (and worker if it ever sends mail):
+
+```bash
+# Recipient (owner) — required while seed users use @demo.local
+railway variable set --service web NOTIFY_EMAIL=you@yourdomain.com
+
+# Delivery — create a Resend API key; without it, rows stay QUEUED in Admin inbox
+railway variable set --service web RESEND_API_KEY=re_...
+railway variable set --service web 'EMAIL_FROM=Koda <onboarding@resend.dev>'
+# Prefer a verified domain sender once Resend domain is set up:
+# railway variable set --service web 'EMAIL_FROM=Koda <noreply@advancedautomations.net>'
+```
+
+Without `RESEND_API_KEY`, notifications are stored in Admin → Notification inbox only
+(open access runs as EMPLOYEE, so use Railway logs / DB / a developer session to inspect).
+
 ### Restore Clerk later
 
 ```bash

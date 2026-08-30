@@ -32,10 +32,15 @@ describe("status machine", () => {
     assert.equal(canTransition("DRAFT", "PLANNING"), true);
     assert.equal(canTransition("PLANNING", "AWAITING_DEV_BUILD"), true);
     assert.equal(canTransition("AWAITING_DEV_BUILD", "BUILDING"), true);
+    assert.equal(canTransition("AWAITING_DEV_BUILD", "PLANNING"), true);
     assert.equal(canTransition("BUILDING", "CLIENT_VERIFY"), true);
     assert.equal(canTransition("CLIENT_VERIFY", "AWAITING_FINAL_REVIEW"), true);
     assert.equal(canTransition("AWAITING_FINAL_REVIEW", "DEPLOYING"), true);
     assert.equal(canTransition("DEPLOYING", "DONE"), true);
+  });
+
+  it("allows reopening planning after accidental submit", () => {
+    assert.equal(canTransition("AWAITING_DEV_BUILD", "PLANNING"), true);
   });
 
   it("hides cancelled programs from dashboard lists", () => {
@@ -103,6 +108,11 @@ describe("permissions", () => {
   it("prevents employees from merging", () => {
     assert.equal(roleHasPermission("EMPLOYEE", "change_request:merge"), false);
     assert.equal(roleHasPermission("DEVELOPER", "change_request:merge"), true);
+  });
+
+  it("lets employees reopen planning after submit", () => {
+    assert.equal(roleHasPermission("EMPLOYEE", "program:reopen_planning"), true);
+    assert.equal(roleHasPermission("DEVELOPER", "program:reopen_planning"), true);
   });
 });
 

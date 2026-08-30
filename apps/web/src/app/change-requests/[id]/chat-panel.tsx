@@ -32,12 +32,16 @@ export function ChatPanel({
   const [attachMode, setAttachMode] = useState<AttachMode>(null);
   const [attachValue, setAttachValue] = useState("");
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const isProgram = kind === "PROGRAM";
   const isPlanning =
     isProgram &&
     (status === "PLANNING" || status === "AWAITING_PLAN_APPROVAL");
+  const canReopenPlanning =
+    isProgram && status === "AWAITING_DEV_BUILD";
 
   useEffect(() => {
     const source = new EventSource(
@@ -162,13 +166,41 @@ export function ChatPanel({
     }
   }
 
+  function postProgramAction(
+    action: "submit_to_dev" | "reopen_planning",
+    extra?: Record<string, unknown>,
+  ) {
+    setActionError(null);
+    startTransition(async () => {
+      const response = await fetch(
+        `/api/change-requests/${changeRequestId}/actions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, ...extra }),
+        },
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setActionError(data.error ?? "Action failed — try again.");
+        return;
+      }
+      setConfirmSubmit(false);
+      router.refresh();
+    });
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-[var(--line)] bg-black/20 px-3 py-2">
         <p className="text-xs muted">
           {isPlanning
             ? "Planning with Koda — real Q&A and a living plan. Attach docs anytime."
-            : "Koda is AI and can make mistakes."}
+            : canReopenPlanning
+              ? "Submitted — waiting for a developer. You can reopen planning if this was accidental."
+              : "Koda is AI and can make mistakes."}
         </p>
         <p className="shrink-0 text-xs muted">Koda is AI and can make mistakes.</p>
       </div>
@@ -311,29 +343,74 @@ export function ChatPanel({
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
         />
-        <button className="btn btn-primary" disabled={pending || !prompt.trim()}>
+        <button
+          className="btn btn-primary"
+          disabled={pending || !prompt.trim()}
+        >
           Send
         </button>
       </form>
 
       {isPlanning ? (
-        <button
-          type="button"
-          className="btn btn-primary mt-3 w-full"
-          disabled={pending}
-          onClick={() => {
-            startTransition(async () => {
-              await fetch(`/api/change-requests/${changeRequestId}/actions`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action: "submit_to_dev" }),
-              });
-              router.refresh();
-            });
-          }}
-        >
-          Submit to developer for building
-        </button>
+        <div className="mt-3 space-y-2">
+          {!confirmSubmit ? (
+            <button
+              type="button"
+              className="btn btn-ghost w-full"
+              disabled={pending}
+              onClick={() => {
+                setActionError(null);
+                setConfirmSubmit(true);
+              }}
+            >
+              Ready to submit to a developer?
+            </button>
+          ) : (
+            <div className="space-y-2 rounded-xl border border-[var(--line)] bg-black/15 p-3">
+              <p className="text-sm">
+                This notifies Advanced Automations that the plan is ready to
+                build. You can reopen planning afterward if needed.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={pending}
+                  onClick={() =>
+                    postProgramAction("submit_to_dev", { confirmSubmit: true })
+                  }
+                >
+                  Yes, submit for building
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={pending}
+                  onClick={() => setConfirmSubmit(false)}
+                >
+                  Keep planning
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {canReopenPlanning ? (
+        <div className="mt-3 space-y-2">
+          <button
+            type="button"
+            className="btn btn-primary w-full"
+            disabled={pending}
+            onClick={() => postProgramAction("reopen_planning")}
+          >
+            Continue planning (reopen)
+          </button>
+        </div>
+      ) : null}
+
+      {actionError ? (
+        <p className="mt-2 text-sm text-[var(--danger)]">{actionError}</p>
       ) : null}
     </div>
   );

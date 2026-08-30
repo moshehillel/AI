@@ -22,10 +22,13 @@ export function ActionBar({
   const [pending, startTransition] = useTransition();
   const [serverLabel, setServerLabel] = useState("Production server");
   const [autoDeploy, setAutoDeploy] = useState(true);
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const isProgram = kind === "PROGRAM";
   const isStaff = role === "DEVELOPER" || role === "ADMIN";
 
   async function postAction(action: string, extra?: Record<string, unknown>) {
+    setActionError(null);
     startTransition(async () => {
       const res = await fetch(`/api/change-requests/${changeRequestId}/actions`, {
         method: "POST",
@@ -35,12 +38,18 @@ export function ActionBar({
       const data = (await res.json().catch(() => ({}))) as {
         redirectTo?: string;
         cancelled?: boolean;
+        error?: string;
       };
+      if (!res.ok) {
+        setActionError(data.error ?? "Action failed — try again.");
+        return;
+      }
       if (action === "cancel" && (data.redirectTo || data.cancelled)) {
         router.push(data.redirectTo ?? `/projects/${projectId}`);
         router.refresh();
         return;
       }
+      setConfirmSubmit(false);
       router.refresh();
     });
   }
@@ -50,12 +59,50 @@ export function ActionBar({
       <h2 className="text-lg">Actions</h2>
 
       {isProgram && (status === "PLANNING" || status === "AWAITING_PLAN_APPROVAL") ? (
+        !confirmSubmit ? (
+          <button
+            className="btn btn-ghost"
+            disabled={pending}
+            onClick={() => {
+              setActionError(null);
+              setConfirmSubmit(true);
+            }}
+          >
+            Ready to submit to a developer?
+          </button>
+        ) : (
+          <div className="space-y-2 rounded-xl border border-[var(--line)] p-3">
+            <p className="text-sm">
+              Confirms handoff for building and notifies the developer. Chat and
+              attach never submit on their own.
+            </p>
+            <button
+              className="btn btn-primary w-full"
+              disabled={pending}
+              onClick={() =>
+                postAction("submit_to_dev", { confirmSubmit: true })
+              }
+            >
+              Yes, submit for building
+            </button>
+            <button
+              className="btn btn-ghost w-full"
+              disabled={pending}
+              onClick={() => setConfirmSubmit(false)}
+            >
+              Keep planning
+            </button>
+          </div>
+        )
+      ) : null}
+
+      {isProgram && status === "AWAITING_DEV_BUILD" ? (
         <button
-          className="btn btn-primary"
+          className="btn btn-ghost"
           disabled={pending}
-          onClick={() => postAction("submit_to_dev")}
+          onClick={() => postAction("reopen_planning")}
         >
-          Submit to developer for building
+          Continue planning (reopen)
         </button>
       ) : null}
 
@@ -212,6 +259,10 @@ export function ActionBar({
         >
           Cancel
         </button>
+      ) : null}
+
+      {actionError ? (
+        <p className="text-sm text-[var(--danger)]">{actionError}</p>
       ) : null}
     </div>
   );

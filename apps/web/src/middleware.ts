@@ -19,6 +19,10 @@ async function getClerkHandler() {
     "/api/webhooks(.*)",
     "/api/github/app-manifest(.*)",
     "/api/health",
+    // App Router metadata icons (extensionless /icon can otherwise hit protect())
+    "/icon(.*)",
+    "/favicon.ico",
+    "/apple-icon(.*)",
   ]);
   const mw = clerkMiddleware(async (auth, request) => {
     if (!isPublicRoute(request)) {

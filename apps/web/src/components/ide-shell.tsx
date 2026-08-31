@@ -181,7 +181,11 @@ export function IdeShell({
     >
       {sidebar}
       <div className="ide-main">{children}</div>
-      {right ? <aside className="ide-right">{right}</aside> : null}
+      {right ? (
+        <aside className="ide-right" aria-label="Plan and context">
+          {right}
+        </aside>
+      ) : null}
     </div>
   );
 }

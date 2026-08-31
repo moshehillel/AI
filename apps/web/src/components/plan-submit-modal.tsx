@@ -2,7 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
-import { resolvePlanMermaid } from "@/lib/plan-diagram";
+import {
+  buildSubmitSummary,
+  getMeaningfulPlanMermaid,
+} from "@/lib/plan-submit-summary";
 
 export function PlanSubmitModal({
   open,
@@ -18,7 +21,8 @@ export function PlanSubmitModal({
   onCancel: () => void;
 }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
-  const chart = resolvePlanMermaid(planMarkdown);
+  const summary = buildSubmitSummary(planMarkdown);
+  const customMermaid = getMeaningfulPlanMermaid(planMarkdown);
 
   useEffect(() => {
     if (!open) return;
@@ -46,17 +50,30 @@ export function PlanSubmitModal({
         <header className="plan-submit-header">
           <p className="plan-submit-kicker">Koda</p>
           <h2 id="plan-submit-title" className="plan-submit-title">
-            Here&apos;s your plan at a glance
+            Here&apos;s what we understood
           </h2>
           <p className="plan-submit-caption">
-            Review the flow below, then send it to a developer for building.
-            You can reopen planning later if something needs to change.
+            Review this summary, then send it to a developer for building. You
+            can reopen planning later if something needs to change.
           </p>
         </header>
 
-        <div className="plan-submit-diagram">
-          <MermaidDiagram chart={chart} />
+        <div className="plan-submit-summary">
+          <ul className="plan-submit-summary-list">
+            {summary.bullets.map((bullet) => (
+              <li key={bullet}>{bullet}</li>
+            ))}
+          </ul>
         </div>
+
+        {customMermaid ? (
+          <div
+            className="plan-submit-diagram"
+            aria-label="Automation workflow diagram"
+          >
+            <MermaidDiagram chart={customMermaid} variant="submit" />
+          </div>
+        ) : null}
 
         <div className="plan-submit-actions">
           <button

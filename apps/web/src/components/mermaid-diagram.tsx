@@ -2,29 +2,38 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 
-let mermaidReady: Promise<typeof import("mermaid").default> | null = null;
+type MermaidVariant = "default" | "submit";
 
-function loadMermaid() {
-  if (!mermaidReady) {
-    mermaidReady = import("mermaid").then((mod) => {
-      mod.default.initialize({
-        startOnLoad: false,
-        theme: "neutral",
-        securityLevel: "strict",
-        fontFamily: "var(--font-body, system-ui, sans-serif)",
-      });
-      return mod.default;
+function loadMermaid(variant: MermaidVariant) {
+  const isSubmit = variant === "submit";
+  return import("mermaid").then((mod) => {
+    mod.default.initialize({
+      startOnLoad: false,
+      theme: "neutral",
+      securityLevel: isSubmit ? "loose" : "strict",
+      fontFamily: "var(--font-body, system-ui, sans-serif)",
+      flowchart: {
+        htmlLabels: true,
+        curve: "basis",
+        padding: isSubmit ? 18 : 8,
+        nodeSpacing: isSubmit ? 42 : 28,
+        rankSpacing: isSubmit ? 52 : 36,
+        useMaxWidth: true,
+      },
     });
-  }
-  return mermaidReady;
+    return mod.default;
+  });
 }
 
 export function MermaidDiagram({
   chart,
   className = "",
+  variant = "default",
 }: {
   chart: string;
   className?: string;
+  /** Larger spacing and html labels for the submit confirmation modal. */
+  variant?: MermaidVariant;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const renderId = useId().replace(/:/g, "");
@@ -35,7 +44,7 @@ export function MermaidDiagram({
     setError(null);
 
     void (async () => {
-      const mermaid = await loadMermaid();
+      const mermaid = await loadMermaid(variant);
       if (cancelled || !containerRef.current) return;
 
       try {
@@ -54,7 +63,7 @@ export function MermaidDiagram({
     return () => {
       cancelled = true;
     };
-  }, [chart, renderId]);
+  }, [chart, renderId, variant]);
 
   return (
     <div className={`mermaid-diagram-wrap ${className}`.trim()}>

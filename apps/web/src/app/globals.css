@@ -1416,8 +1416,8 @@ select {
 }
 
 .plan-submit-modal {
-  width: min(100%, 36rem);
-  max-height: min(92dvh, 720px);
+  width: min(100%, 44rem);
+  max-height: min(92dvh, 820px);
   overflow: auto;
   border: 1px solid var(--ide-line);
   border-radius: 14px;
@@ -1454,13 +1454,64 @@ select {
   color: var(--ide-ink-secondary);
 }
 
-.plan-submit-diagram {
-  margin: 0.85rem 0 1rem;
-  padding: 0.75rem;
+.plan-submit-summary {
+  margin: 0.85rem 0;
+  padding: 0.85rem 1rem;
   border: 1px solid var(--ide-line);
   border-radius: var(--ide-radius-md);
   background: color-mix(in srgb, var(--ide-bg-chat) 70%, white);
-  overflow-x: auto;
+}
+
+.plan-submit-summary-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.plan-submit-summary-list li {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ide-ink);
+  padding-left: 1.1rem;
+  position: relative;
+}
+
+.plan-submit-summary-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ide-mode);
+}
+
+.plan-submit-diagram {
+  margin: 0.85rem 0 1rem;
+  padding: 0.85rem 0.65rem;
+  border: 1px solid var(--ide-line);
+  border-radius: var(--ide-radius-md);
+  background: color-mix(in srgb, var(--ide-bg-chat) 70%, white);
+  overflow: auto;
+  max-height: min(52dvh, 520px);
+}
+
+.plan-submit-diagram .mermaid-diagram-wrap {
+  min-height: 200px;
+}
+
+.plan-submit-diagram .mermaid-diagram svg {
+  min-width: min(100%, 22rem);
+  font-size: 13px;
+}
+
+.plan-submit-diagram .mermaid-diagram .nodeLabel,
+.plan-submit-diagram .mermaid-diagram .label {
+  line-height: 1.35;
 }
 
 .plan-submit-actions {

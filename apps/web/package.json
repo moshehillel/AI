@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test src/lib/plan-diagram.test.ts"
   },
   "dependencies": {
     "@automation-studio/auth": "workspace:*",
@@ -37,6 +38,7 @@
     "eslint": "^9.22.0",
     "eslint-config-next": "^15.2.4",
     "tailwindcss": "^4.0.14",
+    "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   }
 }

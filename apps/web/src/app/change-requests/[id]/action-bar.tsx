@@ -11,6 +11,7 @@ export function ActionBar({
   kind,
   projectId,
   hideProgramBuild = false,
+  hidePlanningSubmit = false,
 }: {
   changeRequestId: string;
   status: string;
@@ -19,6 +20,8 @@ export function ActionBar({
   kind: string;
   projectId: string;
   hideProgramBuild?: boolean;
+  /** Chat composer already owns submit-to-dev in the IDE shell. */
+  hidePlanningSubmit?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -60,7 +63,9 @@ export function ActionBar({
     <div className="flex flex-col gap-2">
       <p className="ide-right-label">Actions</p>
 
-      {isProgram && (status === "PLANNING" || status === "AWAITING_PLAN_APPROVAL") ? (
+      {isProgram &&
+      !hidePlanningSubmit &&
+      (status === "PLANNING" || status === "AWAITING_PLAN_APPROVAL") ? (
         !confirmSubmit ? (
           <button
             className="btn btn-ghost"

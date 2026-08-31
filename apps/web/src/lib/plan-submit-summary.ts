@@ -105,18 +105,26 @@ function humanizeAction(step: string): string {
   return plainSentence(s);
 }
 
+function toContinuationClause(text: string): string {
+  const trimmed = text.replace(/\.$/, "").trim();
+  if (!trimmed) return "";
+  return trimmed.charAt(0).toLowerCase() + trimmed.slice(1);
+}
+
 function summarizeActions(steps: string[]): string {
   const actions = steps.map(humanizeAction).filter(Boolean);
   if (actions.length === 0) return "";
   if (actions.length === 1) return actions[0]!;
-  if (actions.length === 2) {
-    return plainSentence(
-      `${actions[0]!.replace(/\.$/, "")}, then ${actions[1]!}`,
-    );
+
+  const parts = actions.map((action) =>
+    toContinuationClause(action.replace(/^Starts when /i, "")),
+  );
+  if (parts.length === 2) {
+    return plainSentence(`Then ${parts[0]}, and ${parts[1]}`);
   }
-  const last = actions[actions.length - 1]!;
-  const middle = actions.slice(0, -1).join(", ");
-  return plainSentence(`${middle}, and finally ${last.replace(/\.$/, "")}`);
+  const last = parts[parts.length - 1]!;
+  const middle = parts.slice(0, -1).join(", then ");
+  return plainSentence(`Then ${middle}, and finally ${last}`);
 }
 
 function formatSystemsBullet(systems: string[]): string {
@@ -143,11 +151,14 @@ function formatOpenItemsBullet(
     parts.push("which systems are involved");
   }
   if (parts.length === 0) return "";
-  if (parts.length === 1) {
-    return plainSentence(`We still need: ${parts[0]}`);
+  const formatted = parts.map((part, index) =>
+    index === 0 ? part : toContinuationClause(part),
+  );
+  if (formatted.length === 1) {
+    return plainSentence(`We still need: ${formatted[0]}`);
   }
-  const last = parts[parts.length - 1];
-  const rest = parts.slice(0, -1).join(", ");
+  const last = formatted[formatted.length - 1]!;
+  const rest = formatted.slice(0, -1).join(", ");
   return plainSentence(`We still need: ${rest}, and ${last}`);
 }
 

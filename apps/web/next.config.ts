@@ -16,6 +16,8 @@ const nextConfig: NextConfig = {
     "@automation-studio/github",
     "@automation-studio/jobs",
   ],
+  // Native PDF canvas must not be webpack-bundled.
+  serverExternalPackages: ["@napi-rs/canvas", "unpdf"],
   turbopack: {
     root: repoRoot,
   },

@@ -1,6 +1,7 @@
 import { getRequestAuth } from "@/lib/request-auth";
 import { requireChangeRequestAccess, AuthError } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
+import { isCredentialSecretKey } from "@automation-studio/domain";
 
 export const dynamic = "force-dynamic";
 
@@ -37,9 +38,18 @@ export async function GET(
               pullRequests: { orderBy: { createdAt: "desc" }, take: 1 },
               ciChecks: { orderBy: { createdAt: "desc" }, take: 1 },
               plans: { orderBy: { createdAt: "desc" }, take: 1 },
+              secretRefs: {
+                where: { purpose: "CHAT", ciphertext: { not: null } },
+                select: { keyName: true, createdAt: true },
+                orderBy: { createdAt: "asc" },
+              },
             },
           });
           if (!cr) return;
+
+          const credentialSecrets = cr.secretRefs.filter((s) =>
+            isCredentialSecretKey(s.keyName),
+          );
 
           const fingerprint = JSON.stringify({
             status: cr.status,
@@ -48,6 +58,7 @@ export async function GET(
             ci: cr.ciChecks[0]?.status ?? null,
             pr: cr.pullRequests[0]?.url ?? null,
             planId: cr.plans[0]?.id ?? null,
+            secretKeys: credentialSecrets.map((s) => s.keyName),
             updatedAt: cr.updatedAt.toISOString(),
           });
 
@@ -67,6 +78,10 @@ export async function GET(
               pullRequest: cr.pullRequests[0] ?? null,
               ci: cr.ciChecks[0] ?? null,
               plan: cr.plans[0] ?? null,
+              secretKeys: credentialSecrets.map((s) => ({
+                keyName: s.keyName,
+                createdAt: s.createdAt.toISOString(),
+              })),
             });
           }
         };

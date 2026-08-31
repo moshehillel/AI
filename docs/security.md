@@ -20,11 +20,19 @@ Roles:
 
 ## Secrets
 
-`secret_refs` stores references only (env/vault pointers), never plaintext third-party production credentials.
+`secret_refs` stores encrypted CHAT credentials (AES-GCM via `ENCRYPTION_KEY`)
+and env/vault pointers for preview/platform. Plaintext values are never returned
+to customers after save, never written to plan markdown or SSE, and never
+committed to git. Staff with `program:reveal_secrets` can decrypt on the Build
+desk (copy-once). Attachment payloads use `planning-file-*` keys and are not
+customer credentials.
+
+Customers add labeled secrets via **Add secrets / credentials** in planning
+chat. Living plans list prerequisites under **## What you need to provide**.
 
 ## Audit trail
 
-Important actions write `audit_events` (create, classify, branch, plan, preview, submit, approve, merge).
+Important actions write `audit_events` (create, classify, branch, plan, preview, submit, approve, merge, `secret.saved_labeled`, `secret.revealed` with key names only).
 
 ## Webhooks
 

@@ -158,6 +158,21 @@ export async function POST(
         entityId: cr.id,
         metadata: { keys: secrets.map((s) => s.keyName) },
       });
+
+      const meta = (cr.planningMeta ?? {}) as PlanningMeta;
+      const provided = new Set([
+        ...(meta.providedSecretKeys ?? []),
+        ...secrets.map((s) => s.keyName),
+      ]);
+      await db.changeRequest.update({
+        where: { id: cr.id },
+        data: {
+          planningMeta: {
+            ...meta,
+            providedSecretKeys: [...provided],
+          } as Prisma.InputJsonValue,
+        },
+      });
     }
 
     const message = await db.changeRequestMessage.create({
@@ -193,7 +208,7 @@ export async function POST(
         data: {
           changeRequestId: cr.id,
           role: "SYSTEM",
-          content: `Detected and securely stored ${secrets.length} secret(s). They will not appear in chat again. Developers can inject them into the runtime environment when building.`,
+          content: `Detected and securely stored ${secrets.length} secret(s): ${secrets.map((s) => s.keyName).join(", ")}. They will not appear in chat again. Developers can reveal them from the Build desk when building.`,
         },
       });
     }

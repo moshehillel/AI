@@ -20,6 +20,7 @@ import {
   developerBuildPrompt,
   developerTestImprovePrompt,
   agentOpenUrls,
+  isCredentialSecretKey,
   type ProgramBuildSetup,
 } from "@automation-studio/domain";
 import { getAppBaseUrl } from "@/lib/app-url";
@@ -140,13 +141,21 @@ async function loadProgramPlanText(changeRequestId: string) {
     include: {
       plans: { orderBy: { createdAt: "desc" }, take: 1 },
       project: { include: { repository: true } },
+      secretRefs: {
+        where: { purpose: "CHAT", ciphertext: { not: null } },
+        select: { keyName: true },
+        orderBy: { createdAt: "asc" },
+      },
     },
   });
   const planText =
     full.plans[0]?.content ??
     (full.planningMeta as { planMarkdown?: string } | null)?.planMarkdown ??
     full.description;
-  return { full, planText };
+  const secretKeyNames = full.secretRefs
+    .map((s) => s.keyName)
+    .filter(isCredentialSecretKey);
+  return { full, planText, secretKeyNames };
 }
 
 export async function POST(
@@ -268,13 +277,14 @@ export async function POST(
           );
         }
 
-        const { full, planText } = await loadProgramPlanText(cr.id);
+        const { full, planText, secretKeyNames } = await loadProgramPlanText(cr.id);
         const prior = parseBuildSetup(full.buildSetup);
         let agentId = full.cursorAgentId ?? prior.planAgentId ?? null;
         const reviewPrompt = developerPlanReviewPrompt({
           title: full.title,
           planMarkdown: planText,
           description: full.description,
+          secretKeyNames,
         });
 
         if (agentId) {
@@ -362,7 +372,11 @@ export async function POST(
         }
         const fromStatus =
           cr.status === "CHANGES_REQUESTED" ? "CHANGES_REQUESTED" : "AWAITING_DEV_BUILD";
-        const { full: buildFull, planText: buildPlanText } = await loadProgramPlanText(cr.id);
+        const {
+          full: buildFull,
+          planText: buildPlanText,
+          secretKeyNames: buildSecretKeys,
+        } = await loadProgramPlanText(cr.id);
         const priorBuild = parseBuildSetup(buildFull.buildSetup);
         const nextBuildSetup: ProgramBuildSetup = {
           ...priorBuild,
@@ -403,6 +417,7 @@ export async function POST(
           title: full.title,
           planMarkdown: planText,
           serverLabel: nextBuildSetup.serverLabel,
+          secretKeyNames: buildSecretKeys,
         });
         if (full.project.repository) {
           if (!full.branchName) {
@@ -486,7 +501,7 @@ export async function POST(
           );
         }
 
-        const { full, planText } = await loadProgramPlanText(cr.id);
+        const { full, planText, secretKeyNames } = await loadProgramPlanText(cr.id);
         const prior = parseBuildSetup(full.buildSetup);
         const agentId =
           full.cursorAgentId ?? prior.buildAgentId ?? prior.planAgentId;
@@ -516,25 +531,24 @@ export async function POST(
           );
         }
 
+        const testPrompt = developerTestImprovePrompt({
+          title: full.title,
+          planMarkdown: planText,
+          secretKeyNames,
+        });
         if (agentId) {
           await enqueueJob("cursor.follow-up", {
             changeRequestId: cr.id,
             companyId: ctx.company.id,
             mode: "agent",
-            prompt: developerTestImprovePrompt({
-              title: full.title,
-              planMarkdown: planText,
-            }),
+            prompt: testPrompt,
           });
         } else if (full.project.repository) {
           await enqueueJob("cursor.start-agent", {
             changeRequestId: cr.id,
             companyId: ctx.company.id,
             mode: "agent",
-            prompt: developerTestImprovePrompt({
-              title: full.title,
-              planMarkdown: planText,
-            }),
+            prompt: testPrompt,
           });
         }
 

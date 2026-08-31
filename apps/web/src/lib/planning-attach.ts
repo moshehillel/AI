@@ -29,7 +29,9 @@ async function renderPdfPagesAsPng(
       // Use unpdf's bundled serverless PDF.js + @napi-rs/canvas (official
       // pdfjs-dist worker path fails under Node with DataCloneError).
       const result = await renderPageAsImage(buffer, page, {
-        canvasImport: () => import("@napi-rs/canvas"),
+        // Keep native canvas out of the Next/webpack graph.
+        canvasImport: () =>
+          import(/* webpackIgnore: true */ "@napi-rs/canvas"),
         scale: 1.5,
         toDataURL: true,
       });

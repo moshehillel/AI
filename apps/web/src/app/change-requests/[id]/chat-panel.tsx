@@ -10,6 +10,7 @@ import {
   validatePlanningFileSize,
 } from "@automation-studio/domain/planning-files";
 import { MarkdownBody } from "@/components/markdown-body";
+import { PlanSubmitModal } from "@/components/plan-submit-modal";
 
 type Message = {
   id: string;
@@ -226,12 +227,14 @@ function secondsBetween(a: string, b: string): number {
 export function ChatPanel({
   changeRequestId,
   initialMessages,
+  initialPlanContent = "",
   status: initialStatus,
   kind,
   title,
 }: {
   changeRequestId: string;
   initialMessages: Message[];
+  initialPlanContent?: string;
   status: string;
   kind: string;
   title?: string;
@@ -258,6 +261,10 @@ export function ChatPanel({
   ]);
   const [savingSecrets, setSavingSecrets] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [planContent, setPlanContent] = useState(initialPlanContent);
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [thoughtSeconds, setThoughtSeconds] = useState(0);
   const [liveProgress, setLiveProgress] = useState<string | null>(null);
   const [liveDraft, setLiveDraft] = useState<string | null>(null);
@@ -319,6 +326,7 @@ export function ChatPanel({
           messages?: Message[];
           liveProgress?: string | null;
           liveDraft?: string | null;
+          plan?: { content?: string } | null;
         };
         if (data.type === "connected" || data.type === "heartbeat") {
           if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -344,6 +352,9 @@ export function ChatPanel({
           }
           if (typeof data.liveDraft !== "undefined") {
             setLiveDraft(data.liveDraft);
+          }
+          if (data.plan?.content) {
+            setPlanContent(data.plan.content);
           }
           if (data.messages) {
             setMessages(data.messages);
@@ -790,23 +801,33 @@ export function ChatPanel({
     extra?: Record<string, unknown>,
   ) {
     setActionError(null);
+    const isSubmit = action === "submit_to_dev";
+    if (isSubmit) setSubmitting(true);
     startTransition(async () => {
-      const response = await fetch(
-        `/api/change-requests/${changeRequestId}/actions`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, ...extra }),
-        },
-      );
-      if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        setActionError(data.error ?? "Action failed — try again.");
-        return;
+      try {
+        const response = await fetch(
+          `/api/change-requests/${changeRequestId}/actions`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action, ...extra }),
+          },
+        );
+        if (!response.ok) {
+          const data = (await response.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          setActionError(data.error ?? "Action failed — try again.");
+          return;
+        }
+        if (isSubmit) {
+          setShowSubmitModal(false);
+          setConfirmSubmit(false);
+        }
+        router.refresh();
+      } finally {
+        if (isSubmit) setSubmitting(false);
       }
-      router.refresh();
     });
   }
 
@@ -1180,7 +1201,7 @@ export function ChatPanel({
         {attachError ? (
           <p
             className="mb-2 text-sm"
-            style={{ color: "var(--ide-danger)", maxWidth: "52rem", marginInline: "auto" }}
+            style={{ color: "var(--ide-danger)", maxWidth: "var(--measure-chat)", marginInline: "auto" }}
           >
             {attachError}
           </p>
@@ -1296,7 +1317,7 @@ export function ChatPanel({
         </div>
 
         {canReopenPlanning ? (
-          <div className="mx-auto mt-3 max-w-[52rem] px-1">
+          <div className="composer-submit mx-auto mt-3 px-1">
             <button
               type="button"
               className="btn btn-primary w-full"
@@ -1308,15 +1329,67 @@ export function ChatPanel({
           </div>
         ) : null}
 
+        {isPlanning ? (
+          <div className="composer-submit mx-auto mt-3">
+            {!confirmSubmit ? (
+              <button
+                type="button"
+                className="btn btn-ghost w-full"
+                disabled={inputBusy || submitting}
+                onClick={() => {
+                  setActionError(null);
+                  setConfirmSubmit(true);
+                }}
+              >
+                Ready to submit to a developer?
+              </button>
+            ) : (
+              <div className="composer-submit-confirm space-y-2">
+                <p className="text-sm">
+                  Confirms handoff for building and notifies the developer. Chat
+                  and attach never submit on their own.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-primary w-full"
+                  disabled={inputBusy || submitting}
+                  onClick={() => {
+                    setActionError(null);
+                    setShowSubmitModal(true);
+                  }}
+                >
+                  Yes, review plan &amp; submit
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost w-full"
+                  disabled={inputBusy || submitting}
+                  onClick={() => setConfirmSubmit(false)}
+                >
+                  Keep planning
+                </button>
+              </div>
+            )}
+          </div>
+        ) : null}
+
         {actionError ? (
-          <p
-            className="mx-auto mt-2 max-w-[52rem] text-sm"
-            style={{ color: "var(--ide-danger)" }}
-          >
-            {actionError}
-          </p>
+          <p className="composer-action-error text-sm">{actionError}</p>
         ) : null}
       </div>
+
+      <PlanSubmitModal
+        open={showSubmitModal}
+        planMarkdown={planContent}
+        pending={submitting}
+        onConfirm={() =>
+          postProgramAction("submit_to_dev", { confirmSubmit: true })
+        }
+        onCancel={() => {
+          if (submitting) return;
+          setShowSubmitModal(false);
+        }}
+      />
     </div>
   );
 }

@@ -234,6 +234,7 @@ export default async function ChangeRequestPage({
           content: m.content,
           createdAt: m.createdAt.toISOString(),
         }))}
+        initialPlanContent={plan?.content ?? ""}
         status={full.status}
         kind={full.kind}
         title={`#${full.number} ${full.title}`}

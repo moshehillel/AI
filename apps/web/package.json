@@ -17,6 +17,7 @@
     "@automation-studio/jobs": "workspace:*",
     "@clerk/nextjs": "^6.12.5",
     "@napi-rs/canvas": "^1.0.8",
+    "mermaid": "^11.17.2",
     "next": "^15.2.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

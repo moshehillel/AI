@@ -190,6 +190,7 @@ export default async function ChangeRequestPage({
           kind={full.kind}
           projectId={full.projectId}
           hideProgramBuild={showDevWorkbench}
+          hidePlanningSubmit
         />
       </div>
 

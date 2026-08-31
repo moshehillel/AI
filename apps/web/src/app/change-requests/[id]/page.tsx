@@ -1,7 +1,11 @@
 import { requirePageAuth } from "@/lib/page-auth";
 import { requireChangeRequestAccess } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
-import { STATUS_LABELS, parseBuildSetup } from "@automation-studio/domain";
+import {
+  STATUS_LABELS,
+  parseBuildSetup,
+  isCredentialSecretKey,
+} from "@automation-studio/domain";
 import { notFound, redirect } from "next/navigation";
 import { ChatPanel } from "./chat-panel";
 import { ActionBar } from "./action-bar";
@@ -58,6 +62,9 @@ export default async function ChangeRequestPage({
     examples?: string | null;
   };
   const buildSetup = parseBuildSetup(full.buildSetup);
+  const credentialSecrets = full.secretRefs.filter((s) =>
+    isCredentialSecretKey(s.keyName),
+  );
   const showDevWorkbench =
     isStaff &&
     isProgram &&
@@ -143,10 +150,10 @@ export default async function ChangeRequestPage({
             </a>
           </p>
         ) : null}
-        {full.secretRefs.length > 0 ? (
+        {credentialSecrets.length > 0 ? (
           <p className="text-[12px]">
             <span className="muted">Secure secrets:</span>{" "}
-            {full.secretRefs.map((s) => s.keyName).join(", ")}
+            {credentialSecrets.map((s) => s.keyName).join(", ")}
           </p>
         ) : null}
         {preview?.url ? (
@@ -195,6 +202,10 @@ export default async function ChangeRequestPage({
             branchName={full.branchName}
             previewUrl={preview?.url}
             hasPlan={Boolean(plan)}
+            initialSecrets={credentialSecrets.map((s) => ({
+              keyName: s.keyName,
+              createdAt: s.createdAt.toISOString(),
+            }))}
           />
         </div>
       ) : null}

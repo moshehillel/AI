@@ -155,4 +155,35 @@ describe("planning Q&A", () => {
     assert.match(md, /HHA/);
     assert.match(md, /Provider Soft/);
   });
+
+  it("includes What you need to provide with HHA/Provider Soft credentials", () => {
+    const md = synthesizePlanMarkdown({
+      title: "HHA sync",
+      meta: {},
+      latestUserContent:
+        "connect Provider Soft to HHA with RPA for visit sync",
+    });
+    assert.match(md, /## What you need to provide/);
+    assert.match(md, /Add secrets \/ credentials/);
+    assert.match(md, /HHA/);
+    assert.match(md, /Provider Soft/);
+    assert.match(md, /VPN|remote desktop/i);
+  });
+
+  it("marks provided secrets as received without values", () => {
+    const md = synthesizePlanMarkdown({
+      title: "HHA sync",
+      meta: { providedSecretKeys: ["HHA_PASSWORD"] },
+      latestUserContent: "Provider Soft to HHA",
+    });
+    assert.match(md, /\[x\] HHA_PASSWORD — received securely/);
+    assert.doesNotMatch(md, /password123|sk-/i);
+  });
+
+  it("planning instructions require What you need to provide", () => {
+    const prompt = planningAgentInstructions();
+    assert.match(prompt, /What you need to provide/);
+    assert.match(prompt, /Add secrets \/ credentials/);
+  });
+
 });

@@ -54,6 +54,35 @@ If a program is in **Submitted — waiting for developer** (`AWAITING_DEV_BUILD`
 2. Click **Continue planning (reopen)** in chat or Actions
 3. Status returns to **Planning with Koda** (`PLANNING`)
 
+
+### Customer secrets (plan prerequisites + secure paste)
+
+Living plans include **## What you need to provide** (accounts, API keys,
+logins, sample files, VPN access). Koda keeps this list updated while planning.
+
+**Customer — add credentials**
+
+1. Open a program in Planning
+2. Click **Add secrets / credentials** under the composer
+3. Enter a clear name (e.g. `HHA_PASSWORD`) and the value
+4. Click **Save securely** — chat shows only `Secret saved: HHA_PASSWORD`
+5. Values are AES-GCM encrypted in `secret_refs` (`ENCRYPTION_KEY`); never
+   appear in chat logs, plan markdown, or SSE snapshots
+
+Do **not** paste passwords into the normal chat box. Auto-detection still
+redacts common patterns if they slip through.
+
+**Developer — retrieve for Build**
+
+1. Unlock staff: `/staff?token=<STAFF_ACCESS_TOKEN>`
+2. Open the submitted program → **Build desk**
+3. Under **Customer secrets**, click **Reveal** then **Copy once**
+4. Use the value in the build environment / Cursor session manually
+5. Never commit secrets to git or PR bodies; audit logs store key names only
+
+Open in Cursor / Build / Test & Improve prompts include secret **names** only
+(so you know what to look up). Decrypt happens only on the Build desk.
+
 ### Developer flow: Open in Cursor → Build → Test & Improve
 
 While `OPEN_ACCESS=1`, the public site is always the seeded **EMPLOYEE**.

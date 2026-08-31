@@ -21,16 +21,23 @@ describe("build setup", () => {
       title: "Invoice sync",
       planMarkdown: "## Goal\nSync invoices",
       description: "From QuickBooks",
+      secretKeyNames: ["QB_TOKEN"],
     });
     assert.match(prompt, /Invoice sync/);
     assert.match(prompt, /Sync invoices/);
     assert.match(prompt, /PLAN mode/i);
+    assert.match(prompt, /QB_TOKEN/);
+    assert.match(prompt, /names only/i);
   });
 
   it("builds build and test-improve prompts", () => {
     assert.match(
-      developerBuildPrompt({ title: "A", planMarkdown: "# Plan" }),
-      /BUILD/i,
+      developerBuildPrompt({
+        title: "A",
+        planMarkdown: "# Plan",
+        secretKeyNames: ["HHA_PASSWORD"],
+      }),
+      /HHA_PASSWORD/,
     );
     assert.match(
       developerTestImprovePrompt({ title: "A", planMarkdown: "# Plan" }),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 type BuildSetup = {
   serverLabel?: string;
@@ -13,6 +13,8 @@ type BuildSetup = {
   buildAgentId?: string | null;
 };
 
+type SecretMeta = { keyName: string; createdAt?: string };
+
 export function DeveloperWorkbench({
   changeRequestId,
   status,
@@ -20,6 +22,7 @@ export function DeveloperWorkbench({
   branchName,
   previewUrl,
   hasPlan,
+  initialSecrets = [],
 }: {
   changeRequestId: string;
   status: string;
@@ -27,6 +30,7 @@ export function DeveloperWorkbench({
   branchName?: string | null;
   previewUrl?: string | null;
   hasPlan: boolean;
+  initialSecrets?: SecretMeta[];
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -43,6 +47,26 @@ export function DeveloperWorkbench({
     openInCursorUrl: buildSetup.openInCursorUrl ?? undefined,
     openInWebUrl: buildSetup.openInWebUrl ?? undefined,
   });
+  const [secrets, setSecrets] = useState<SecretMeta[]>(initialSecrets);
+  const [revealed, setRevealed] = useState<{
+    keyName: string;
+    value: string;
+  } | null>(null);
+  const [revealBusy, setRevealBusy] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    setSecrets(initialSecrets);
+  }, [initialSecrets]);
+
+  useEffect(() => {
+    if (!revealed) return;
+    const t = setTimeout(() => {
+      setRevealed(null);
+      setCopied(false);
+    }, 60_000);
+    return () => clearTimeout(t);
+  }, [revealed]);
 
   const awaitingBuild =
     status === "AWAITING_DEV_BUILD" || status === "CHANGES_REQUESTED";
@@ -93,6 +117,51 @@ export function DeveloperWorkbench({
     });
   }
 
+  async function revealSecret(keyName: string) {
+    setRevealBusy(keyName);
+    setActionError(null);
+    setCopied(false);
+    try {
+      const res = await fetch(
+        `/api/change-requests/${changeRequestId}/secrets/reveal`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyName }),
+        },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        keyName?: string;
+        value?: string;
+      };
+      if (!res.ok || !data.value || !data.keyName) {
+        setActionError(data.error ?? "Could not reveal secret.");
+        setRevealed(null);
+        return;
+      }
+      setRevealed({ keyName: data.keyName, value: data.value });
+    } catch {
+      setActionError("Could not reveal secret.");
+    } finally {
+      setRevealBusy(null);
+    }
+  }
+
+  async function copyRevealed() {
+    if (!revealed) return;
+    try {
+      await navigator.clipboard.writeText(revealed.value);
+      setCopied(true);
+      setTimeout(() => {
+        setRevealed(null);
+        setCopied(false);
+      }, 1500);
+    } catch {
+      setActionError("Clipboard copy failed — select and copy manually.");
+    }
+  }
+
   return (
     <div className="dev-workbench panel space-y-4 p-5">
       <div>
@@ -111,6 +180,65 @@ export function DeveloperWorkbench({
         </p>
       ) : null}
 
+      <div className="space-y-2 rounded-xl border border-[var(--line)] bg-black/15 p-3">
+        <p className="text-sm muted">Customer secrets</p>
+        {secrets.length === 0 ? (
+          <p className="text-sm muted">
+            None yet. When the customer uses Add secrets / credentials, names
+            appear here. Reveal / copy-once for build — never commit values.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {secrets.map((s) => (
+              <li
+                key={s.keyName}
+                className="flex flex-wrap items-center justify-between gap-2 text-sm"
+              >
+                <code className="text-xs">{s.keyName}</code>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={Boolean(revealBusy) || pending}
+                  onClick={() => void revealSecret(s.keyName)}
+                >
+                  {revealBusy === s.keyName ? "Decrypting…" : "Reveal"}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {revealed ? (
+          <div className="space-y-2 rounded-lg border border-[var(--warn)]/40 bg-black/25 p-3">
+            <p className="text-xs muted">
+              Revealed <code>{revealed.keyName}</code> — copy once, then it
+              clears. Never paste into git / PR bodies.
+            </p>
+            <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-all text-xs">
+              {revealed.value}
+            </pre>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void copyRevealed()}
+              >
+                {copied ? "Copied — clearing…" : "Copy once"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setRevealed(null);
+                  setCopied(false);
+                }}
+              >
+                Hide
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
       <div className="space-y-2">
         <button
           type="button"
@@ -121,7 +249,8 @@ export function DeveloperWorkbench({
           Open in Cursor
         </button>
         <p className="muted text-xs">
-          Opens / resumes the plan in Cursor — not as a Koda-only workspace.
+          Opens / resumes the plan in Cursor — secret <em>names</em> are
+          included; decrypt values here on the Build desk.
         </p>
         {cursorLinks.openInCursorUrl || cursorLinks.openInWebUrl ? (
           <div className="flex flex-wrap gap-2">

@@ -92,8 +92,8 @@ export function LivePlanPanel({
         ) : (
           <p className="muted text-[12px] leading-relaxed">
             {compact
-              ? "Attachments and notes from this planning session appear in chat. The plan tab stays focused on the draft."
-              : "Use chat attachments for docs, examples, and files. Nothing from internal tooling is shown here."}
+              ? "Attachments, notes, and securely stored secret names from this session appear in chat. Use Add secrets / credentials for passwords — values never show in the plan."
+              : "Use chat attachments for docs, examples, and files. Use Add secrets / credentials for passwords and API keys. Nothing from internal tooling is shown here."}
           </p>
         )}
       </div>

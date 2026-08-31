@@ -126,6 +126,11 @@ export default async function ProjectsPage() {
               </p>
             )}
           </div>
+          <p className="onboard-teaser rise" style={{ animationDelay: "320ms" }}>
+            <span className="onboard-teaser-label">Coming soon</span>
+            — a full version of Koda: build your own advanced automations without
+            knowing anything.
+          </p>
         </div>
       </section>
 

@@ -1875,6 +1875,19 @@ html:has(.onboard) body {
   margin-top: 1.6rem;
 }
 
+.onboard-teaser {
+  margin: 1rem 0 0;
+  max-width: 26rem;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: rgba(143, 160, 184, 0.82);
+}
+
+.onboard-teaser-label {
+  color: rgba(25, 199, 212, 0.78);
+  font-weight: 500;
+}
+
 .onboard-form {
   display: flex;
   flex-direction: column;

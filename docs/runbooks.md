@@ -43,16 +43,52 @@ railway up --service worker -d -y -m "Open access no login"
 
 Then open https://koda.advancedautomations.net — onboarding loads with no login.
 
-### Accidental program submit / reopen planning
+### Program lifecycle (plan → build → verify → deploy)
 
-Submit requires an explicit confirmation step (`confirmSubmit: true`). Chat and
-file attach never submit a program.
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> PLANNING
+  PLANNING --> AWAITING_DEV_BUILD: Customer submits plan\n(planning locks)
+  AWAITING_DEV_BUILD --> BUILDING: Developer starts build
+  BUILDING --> TESTING: Grant Test & Improve (optional)
+  BUILDING --> CLIENT_VERIFY: Ready for client testing
+  TESTING --> CLIENT_VERIFY: Ready for client testing
+  CLIENT_VERIFY --> AWAITING_FINAL_REVIEW: Customer submits for final review
+  AWAITING_FINAL_REVIEW --> DONE: Developer approves & deploys
+  AWAITING_DEV_BUILD --> PLANNING: Staff reopens planning only
+```
 
-If a program is in **Submitted — waiting for developer** (`AWAITING_DEV_BUILD`):
+| Phase | Status | Customer sees |
+| --- | --- | --- |
+| Planning | `PLANNING` | Living plan chat, attach docs/secrets, submit modal with lock warning |
+| Submitted / building | `AWAITING_DEV_BUILD`, `BUILDING`, `TESTING` | “Submitted — your developer is building. Planning is closed.” Chat composer disabled |
+| Test & request changes | `CLIENT_VERIFY`, `PREVIEW_READY`, `CHANGES_REQUESTED` | New chat phase (not planning). Ask how to test, request edits. Agent edits live repo branch |
+| Final review | `AWAITING_FINAL_REVIEW` | Chat closed; developer reviews in queue |
+| Complete | `DONE` / `DEPLOYED` | Program complete |
 
-1. Open the program
-2. Click **Continue planning (reopen)** in chat or Actions
-3. Status returns to **Planning with Koda** (`PLANNING`)
+Submit requires **two confirmations** plus checkbox: “I understand I cannot change the plan after submit.”
+Customers cannot reopen planning — only staff (`DEVELOPER` / `ADMIN`) via Actions.
+
+Developer flow:
+
+1. **Open in Cursor** — review plan (plan mode)
+2. **Build** — agent/build mode on branch
+3. **Grant Test & Improve** (optional) — developer workspace
+4. **Ready for client testing** — opens `CLIENT_VERIFY`, posts phase-break message, starts verify chat for customer
+5. Customer **Submit for final review** → notify email (`NOTIFY_EMAIL`)
+6. **Approve & deploy** from review queue / Build desk
+
+### Accidental program submit / staff reopen planning
+
+Submit requires explicit confirmation (`confirmSubmit: true`) and acknowledgment
+(`confirmNoPlanChange: true`). Chat and file attach never submit a program.
+
+Customers **cannot** reopen planning after submit. If the plan was wrong:
+
+1. Staff unlocks at `/staff`
+2. Open the program → Actions → **Reopen planning (staff)**
+3. Status returns to `PLANNING` for the customer
 
 
 ### Customer secrets (plan prerequisites + secure paste)
@@ -110,7 +146,10 @@ Then for each submitted program:
    switches to agent/build mode on the plan
 4. Confirm **Grant Test & Improve workspace** → status `TESTING`, workspace
    panel with Continue in Cursor + Deploy
-5. Customer verifies in Koda chat only — they never see Cursor / Git / Railway
+5. Click **Ready for client testing** → status `CLIENT_VERIFY`, customer
+   Test & request changes chat opens (planning stays closed)
+6. Customer verifies in Koda chat only — they never see Cursor / Git / Railway
+7. Customer **Submit for final review** → developer notify email
 
 ### Developer email on submit
 

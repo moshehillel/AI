@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MermaidDiagram } from "@/components/mermaid-diagram";
 import {
   buildSubmitSummary,
@@ -21,11 +21,15 @@ export function PlanSubmitModal({
   onCancel: () => void;
 }) {
   const confirmRef = useRef<HTMLButtonElement>(null);
+  const [understood, setUnderstood] = useState(false);
   const summary = buildSubmitSummary(planMarkdown);
   const customMermaid = getMeaningfulPlanMermaid(planMarkdown);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setUnderstood(false);
+      return;
+    }
     confirmRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !pending) onCancel();
@@ -53,10 +57,31 @@ export function PlanSubmitModal({
             Here&apos;s what we understood
           </h2>
           <p className="plan-submit-caption">
-            Review this summary, then send it to a developer for building. You
-            can reopen planning later if something needs to change.
+            Review this summary carefully. After you submit,{" "}
+            <strong>you cannot continue planning</strong> or change the plan
+            here. Make sure you are fully comfortable with the plan first — your
+            developer will build from this version.
           </p>
         </header>
+
+        <div
+          className="plan-submit-warning"
+          role="note"
+          style={{
+            margin: "0 0 1rem",
+            padding: "0.75rem 1rem",
+            borderRadius: "0.75rem",
+            border: "1px solid color-mix(in oklab, var(--ide-warn) 45%, transparent)",
+            background:
+              "color-mix(in oklab, var(--ide-warn) 10%, transparent)",
+            fontSize: "0.875rem",
+            lineHeight: 1.5,
+          }}
+        >
+          When the build is ready, a separate <strong>Test & request changes</strong>{" "}
+          chat will open so you can try the preview and ask for edits. That is
+          not planning mode — the plan itself stays locked after submit.
+        </div>
 
         <div className="plan-submit-summary">
           <ul className="plan-submit-summary-list">
@@ -75,12 +100,29 @@ export function PlanSubmitModal({
           </div>
         ) : null}
 
+        <label
+          className="plan-submit-ack flex items-start gap-2 text-sm"
+          style={{ marginBottom: "1rem", cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            checked={understood}
+            disabled={pending}
+            onChange={(e) => setUnderstood(e.target.checked)}
+            style={{ marginTop: "0.2rem" }}
+          />
+          <span>
+            I understand I cannot change the plan after submit. I am comfortable
+            sending this plan to a developer for building.
+          </span>
+        </label>
+
         <div className="plan-submit-actions">
           <button
             ref={confirmRef}
             type="button"
             className="btn btn-primary w-full"
-            disabled={pending}
+            disabled={pending || !understood}
             onClick={onConfirm}
           >
             {pending ? "Submitting…" : "Yes, submit for building"}

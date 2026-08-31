@@ -16,6 +16,8 @@ export type ProgramBuildSetup = {
   openInWebUrl?: string | null;
   openInCursorUrl?: string | null;
   lastOpenedInCursorAt?: string | null;
+  verifyPhaseOpenedAt?: string | null;
+  verifyPhaseOpenedBy?: string | null;
 };
 
 export function parseBuildSetup(raw: unknown): ProgramBuildSetup {
@@ -107,6 +109,62 @@ export function developerTestImprovePrompt(input: {
     "",
     secretKeysSection(input.secretKeyNames),
   ].join("\n");
+}
+
+/** When developer marks the build ready for customer testing. */
+export function developerReadyForClientTestingPrompt(input: {
+  title: string;
+  planMarkdown: string;
+  previewUrl?: string | null;
+}): string {
+  return [
+    "The customer verification phase is now open in Koda.",
+    "They can ask how things work, request test scripts, and describe changes in plain English.",
+    "Implement requested edits on the branch. Do not mention vendors or internal tooling in customer-facing replies.",
+    input.previewUrl ? `Preview URL for testing: ${input.previewUrl}` : "",
+    "",
+    `Program: ${input.title}`,
+    "",
+    "# Approved plan",
+    input.planMarkdown.trim() || input.title,
+    "",
+    "Keep the preview working. When the customer is satisfied they will submit for final review.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Customer messages during Test & request changes (agent/build mode). */
+export function clientVerifyAgentInstructions(): string {
+  return [
+    "You are Koda helping a customer test their new automation and request changes.",
+    "Planning is closed — do not rewrite the plan. Focus on how the build works, testing steps, and implementing requested edits on the code branch.",
+    "Speak in plain English. Never mention GitHub, Cursor, Railway, or other vendor names.",
+    "When they describe a change, implement it on the branch and explain what you changed in simple terms.",
+    "If they ask how to test, give concrete steps they can follow without exposing infrastructure details.",
+  ].join("\n");
+}
+
+export function clientVerifyFollowUpPrompt(input: {
+  title: string;
+  planMarkdown: string;
+  customerMessage: string;
+  previewUrl?: string | null;
+}): string {
+  return [
+    clientVerifyAgentInstructions(),
+    "",
+    `Program: ${input.title}`,
+    input.previewUrl ? `Preview: ${input.previewUrl}` : "",
+    "",
+    "# Plan (reference only — do not reopen planning)",
+    input.planMarkdown.trim() || input.title,
+    "",
+    "# Customer message",
+    input.customerMessage.trim(),
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** Dashboard URL for an agent (developer-facing only). */

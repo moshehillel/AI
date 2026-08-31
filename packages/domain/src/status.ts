@@ -142,7 +142,7 @@ export const STATUS_LABELS: Record<ChangeRequestStatus, string> = {
   PLANNING: "Planning with Koda",
   AWAITING_PLAN_APPROVAL: "Waiting for your plan approval",
   AWAITING_HIGH_RISK_APPROVAL: "Waiting for developer approval",
-  AWAITING_DEV_BUILD: "Submitted — waiting for developer",
+  AWAITING_DEV_BUILD: "Submitted — your developer is building. Planning is closed.",
   BUILDING: "Building your program…",
   IMPLEMENTING: "Making the change…",
   TESTING: "Test & improve in progress…",
@@ -162,15 +162,51 @@ export const STATUS_LABELS: Record<ChangeRequestStatus, string> = {
   CANCELLED: "Cancelled",
 };
 
-/** Statuses where Programs must stay in plan-only AI mode */
-export const PROGRAM_PLAN_ONLY_STATUSES: ChangeRequestStatus[] = [
+/** Statuses where the customer can plan with Koda (living plan updates). */
+export const PROGRAM_PLANNING_STATUSES: ChangeRequestStatus[] = [
   "DRAFT",
   "PLANNING",
-  "AWAITING_DEV_BUILD",
+  "AWAITING_PLAN_APPROVAL",
 ];
+
+/** Statuses where Programs must stay in plan-only AI mode (no code edits). */
+export const PROGRAM_PLAN_ONLY_STATUSES: ChangeRequestStatus[] = [
+  ...PROGRAM_PLANNING_STATUSES,
+];
+
+export function isProgramPlanning(status: ChangeRequestStatus): boolean {
+  return PROGRAM_PLANNING_STATUSES.includes(status);
+}
 
 export function isProgramPlanOnly(status: ChangeRequestStatus): boolean {
   return PROGRAM_PLAN_ONLY_STATUSES.includes(status);
+}
+
+/** After submit — customer cannot chat until developer opens verification. */
+export const PROGRAM_BUILD_LOCKED_STATUSES: ChangeRequestStatus[] = [
+  "AWAITING_DEV_BUILD",
+  "BUILDING",
+  "TESTING",
+  "IMPLEMENTING",
+];
+
+export function isProgramBuildLocked(status: ChangeRequestStatus): boolean {
+  return PROGRAM_BUILD_LOCKED_STATUSES.includes(status);
+}
+
+/** Test & request changes — agent/build mode on the live repo branch. */
+export const PROGRAM_VERIFY_STATUSES: ChangeRequestStatus[] = [
+  "CLIENT_VERIFY",
+  "PREVIEW_READY",
+  "CHANGES_REQUESTED",
+];
+
+export function isProgramVerifyPhase(status: ChangeRequestStatus): boolean {
+  return PROGRAM_VERIFY_STATUSES.includes(status);
+}
+
+export function canProgramCustomerChat(status: ChangeRequestStatus): boolean {
+  return isProgramPlanning(status) || isProgramVerifyPhase(status);
 }
 
 export function isTerminalStatus(status: ChangeRequestStatus): boolean {

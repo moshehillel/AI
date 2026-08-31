@@ -19,6 +19,7 @@ import {
   developerPlanReviewPrompt,
   developerBuildPrompt,
   developerTestImprovePrompt,
+  developerReadyForClientTestingPrompt,
   agentOpenUrls,
   isCredentialSecretKey,
   type ProgramBuildSetup,
@@ -37,6 +38,7 @@ const bodySchema = z.object({
     "open_in_cursor",
     "start_build",
     "grant_test_improve",
+    "ready_for_client_testing",
     "submit_final_review",
     "approve_deploy",
     "approve",
@@ -49,6 +51,8 @@ const bodySchema = z.object({
   ]),
   /** Required for submit_to_dev — blocks accidental one-click submits. */
   confirmSubmit: z.boolean().optional(),
+  /** Required for submit_to_dev — customer acknowledges planning closes after submit. */
+  confirmNoPlanChange: z.boolean().optional(),
   /** Required for grant_test_improve — explicit permission step. */
   confirmGrant: z.boolean().optional(),
   serverLabel: z.string().max(200).optional(),
@@ -185,6 +189,12 @@ export async function POST(
             400,
           );
         }
+        if (body.confirmNoPlanChange !== true) {
+          throw new AuthError(
+            "Confirm that you understand planning closes after submit",
+            400,
+          );
+        }
         await transition(
           cr.id,
           ctx.company.id,
@@ -200,7 +210,7 @@ export async function POST(
             role: "SYSTEM",
             authorId: ctx.user.id,
             content:
-              "Submitted to a developer for building. You'll be notified when a preview is ready to verify. You can reopen planning if this was accidental.",
+              "Submitted to a developer for building. Planning is closed — you cannot change the plan from here. When your build is ready, a new Test & request changes chat will open so you can try it and ask for edits.",
           },
         });
 
@@ -473,10 +483,96 @@ export async function POST(
               changeRequestId: cr.id,
               role: "SYSTEM",
               content:
-                "Preview is ready for verification. Ask Koda how things work, request test scripts, or request changes until you're satisfied — then submit for final review.",
+                "— Test & request changes —\n\nPreview is ready. Planning is closed. Ask how things work, request test scripts, or describe changes in plain English — then submit for final review when satisfied.",
             },
           });
         }
+        break;
+      }
+
+      case "ready_for_client_testing": {
+        await requirePermission(ctx, "program:start_build");
+        if (cr.kind !== "PROGRAM") {
+          throw new AuthError("Only programs support client testing", 400);
+        }
+        if (
+          !["BUILDING", "TESTING", "PREVIEW_READY", "CHANGES_REQUESTED"].includes(
+            cr.status,
+          )
+        ) {
+          throw new AuthError(
+            "Build must be in progress before opening client testing",
+            400,
+          );
+        }
+
+        const { full, planText } = await loadProgramPlanText(cr.id);
+        const preview = await db.previewEnvironment.findFirst({
+          where: { changeRequestId: cr.id },
+          orderBy: { createdAt: "desc" },
+        });
+        const prior = parseBuildSetup(full.buildSetup);
+        const nextSetup: ProgramBuildSetup = {
+          ...prior,
+          verifyPhaseOpenedAt: new Date().toISOString(),
+          verifyPhaseOpenedBy: ctx.user.id,
+        };
+        await db.changeRequest.update({
+          where: { id: cr.id },
+          data: { buildSetup: nextSetup },
+        });
+
+        if (cr.status !== "CLIENT_VERIFY") {
+          await transition(
+            cr.id,
+            ctx.company.id,
+            cr.status,
+            "CLIENT_VERIFY",
+            ctx.user.id,
+            "Ready for client testing",
+          );
+        }
+
+        await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            authorId: ctx.user.id,
+            content:
+              "— Test & request changes —\n\nYour developer marked this build ready to try. Planning is closed. Ask how it works, request test steps, or describe changes in plain English. When you are satisfied, submit for final review.",
+            metadata: { verifyPhaseBreak: true },
+          },
+        });
+
+        const verifyPrompt = developerReadyForClientTestingPrompt({
+          title: full.title,
+          planMarkdown: planText,
+          previewUrl: preview?.url,
+        });
+        if (full.cursorAgentId) {
+          await enqueueJob("cursor.follow-up", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+            mode: "agent",
+            prompt: verifyPrompt,
+          });
+        } else if (full.project.repository) {
+          await enqueueJob("cursor.start-agent", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+            mode: "agent",
+            prompt: verifyPrompt,
+          });
+        }
+
+        await writeAuditEvent({
+          companyId: ctx.company.id,
+          actorId: ctx.user.id,
+          action: "program.ready_for_client_testing",
+          entityType: "change_request",
+          entityId: cr.id,
+          metadata: { previewUrl: preview?.url ?? null },
+        });
         break;
       }
 

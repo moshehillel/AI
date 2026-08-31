@@ -5,6 +5,11 @@ import {
   assertTransition,
   InvalidTransitionError,
   isHiddenFromDashboard,
+  isProgramPlanning,
+  isProgramBuildLocked,
+  isProgramVerifyPhase,
+  canProgramCustomerChat,
+  isProgramPlanOnly,
 } from "./status.js";
 import { classifyChangeRequest } from "./classification.js";
 import { buildBranchName, slugify } from "./branch.js";
@@ -49,6 +54,19 @@ describe("status machine", () => {
     assert.equal(isHiddenFromDashboard("CANCELLED"), true);
     assert.equal(isHiddenFromDashboard("PLANNING"), false);
     assert.equal(isHiddenFromDashboard("DONE"), false);
+  });
+
+  it("defines program lifecycle chat phases", () => {
+    assert.equal(isProgramPlanning("PLANNING"), true);
+    assert.equal(isProgramPlanOnly("PLANNING"), true);
+    assert.equal(isProgramPlanOnly("AWAITING_DEV_BUILD"), false);
+    assert.equal(isProgramBuildLocked("AWAITING_DEV_BUILD"), true);
+    assert.equal(isProgramBuildLocked("BUILDING"), true);
+    assert.equal(canProgramCustomerChat("PLANNING"), true);
+    assert.equal(canProgramCustomerChat("AWAITING_DEV_BUILD"), false);
+    assert.equal(isProgramVerifyPhase("CLIENT_VERIFY"), true);
+    assert.equal(canProgramCustomerChat("CLIENT_VERIFY"), true);
+    assert.equal(canProgramCustomerChat("AWAITING_FINAL_REVIEW"), false);
   });
 });
 
@@ -112,8 +130,9 @@ describe("permissions", () => {
     assert.equal(roleHasPermission("DEVELOPER", "change_request:merge"), true);
   });
 
-  it("lets employees reopen planning after submit", () => {
-    assert.equal(roleHasPermission("EMPLOYEE", "program:reopen_planning"), true);
+  it("lets employees submit programs but not reopen planning", () => {
+    assert.equal(roleHasPermission("EMPLOYEE", "program:submit_to_dev"), true);
+    assert.equal(roleHasPermission("EMPLOYEE", "program:reopen_planning"), false);
     assert.equal(roleHasPermission("DEVELOPER", "program:reopen_planning"), true);
   });
 

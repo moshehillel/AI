@@ -306,6 +306,25 @@ export function DeveloperWorkbench({
         </div>
       ) : null}
 
+      {(building || status === "TESTING" || status === "PREVIEW_READY") &&
+      !["CLIENT_VERIFY"].includes(status) ? (
+        <div className="space-y-3 rounded-xl border border-[var(--line)] bg-black/15 p-3">
+          <p className="text-sm muted">3. Client testing</p>
+          <p className="text-sm">
+            Opens the customer Test &amp; request changes chat. Planning stays
+            closed — they can try the preview and ask for edits.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary w-full"
+            disabled={pending}
+            onClick={() => run("ready_for_client_testing")}
+          >
+            Ready for client testing
+          </button>
+        </div>
+      ) : null}
+
       {(building || status === "TESTING") && !buildSetup.testImproveGranted ? (
         <div className="space-y-3 rounded-xl border border-[var(--line)] bg-black/15 p-3">
           <p className="text-sm muted">2. Permission</p>

@@ -29,7 +29,6 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
     "change_request:submit_review",
     "change_request:approve_plan",
     "program:submit_to_dev",
-    "program:reopen_planning",
   ],
   DEVELOPER: [
     "project:read",

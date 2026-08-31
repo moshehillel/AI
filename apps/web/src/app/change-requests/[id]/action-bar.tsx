@@ -103,13 +103,13 @@ export function ActionBar({
         )
       ) : null}
 
-      {isProgram && status === "AWAITING_DEV_BUILD" ? (
+      {isProgram && status === "AWAITING_DEV_BUILD" && isStaff ? (
         <button
           className="btn btn-ghost"
           disabled={pending}
           onClick={() => postAction("reopen_planning")}
         >
-          Continue planning (reopen)
+          Reopen planning (staff)
         </button>
       ) : null}
 

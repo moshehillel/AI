@@ -12,10 +12,13 @@ import {
   detectAndRedactSecrets,
   encryptSecret,
   isProgramPlanOnly,
+  canProgramCustomerChat,
+  isProgramVerifyPhase,
   buildPlanningFollowUp,
   buildPlanningStartPrompt,
   getDefaultGithubRepoConfig,
   isLiveCursorConfigured,
+  clientVerifyFollowUpPrompt,
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { enqueueJob } from "@automation-studio/jobs";
@@ -163,6 +166,17 @@ export async function POST(
     const cr = await requireChangeRequestAccess(ctx, id);
     const body = bodySchema.parse(await request.json());
 
+    if (cr.kind === "PROGRAM" && !canProgramCustomerChat(cr.status)) {
+      throw new AuthError(
+        cr.status === "AWAITING_DEV_BUILD" ||
+        cr.status === "BUILDING" ||
+        cr.status === "TESTING"
+          ? "Planning is closed while your developer builds. You will get a Test & request changes chat when the preview is ready."
+          : "Chat is not available in this phase. Submit for final review or wait for your developer.",
+        400,
+      );
+    }
+
     const attachments = normalizeAttachments(body);
     const primaryAttachment = attachments[0];
     const fileAttachmentRefs = attachments
@@ -278,6 +292,18 @@ export async function POST(
     const forcePlan =
       cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status);
 
+    const fullForVerify =
+      cr.kind === "PROGRAM" && isProgramVerifyPhase(cr.status)
+        ? await db.changeRequest.findFirst({
+            where: { id: cr.id },
+            include: {
+              project: { include: { repository: true } },
+              plans: { orderBy: { createdAt: "desc" }, take: 1 },
+              previews: { orderBy: { createdAt: "desc" }, take: 1 },
+            },
+          })
+        : null;
+
     let assistantMessage: {
       id: string;
       role: string;
@@ -286,16 +312,79 @@ export async function POST(
     } | null = null;
 
     if (cr.cursorAgentId) {
+      const verifyPrompt =
+        fullForVerify && isProgramVerifyPhase(cr.status)
+          ? clientVerifyFollowUpPrompt({
+              title: cr.title,
+              planMarkdown:
+                fullForVerify.plans[0]?.content ??
+                (cr.planningMeta as { planMarkdown?: string } | null)
+                  ?.planMarkdown ??
+                cr.description,
+              customerMessage: redacted,
+              previewUrl: fullForVerify.previews[0]?.url,
+            })
+          : redacted;
       await enqueueJob("cursor.follow-up", {
         changeRequestId: cr.id,
         companyId: ctx.company.id,
-        prompt: redacted,
+        prompt: verifyPrompt,
         mode: forcePlan ? "plan" : "agent",
         attachmentRef: fileAttachmentRefs[0],
         attachmentRefs: fileAttachmentRefs.length
           ? fileAttachmentRefs
           : undefined,
       });
+    } else if (fullForVerify && isProgramVerifyPhase(cr.status)) {
+      const repository = fullForVerify.project.repository;
+      if (!repository) {
+        throw new AuthError(
+          "No repository linked — developer must connect a repo before verification chat",
+          400,
+        );
+      }
+      const planMarkdown =
+        fullForVerify.plans[0]?.content ??
+        (cr.planningMeta as { planMarkdown?: string } | null)?.planMarkdown ??
+        cr.description;
+      const verifyStartPrompt = clientVerifyFollowUpPrompt({
+        title: cr.title,
+        planMarkdown,
+        customerMessage: redacted,
+        previewUrl: fullForVerify.previews[0]?.url,
+      });
+      if (fullForVerify.branchName) {
+        await enqueueJob("cursor.start-agent", {
+          changeRequestId: cr.id,
+          companyId: ctx.company.id,
+          mode: "agent",
+          prompt: verifyStartPrompt,
+          attachmentRef: fileAttachmentRefs[0],
+          attachmentRefs: fileAttachmentRefs.length
+            ? fileAttachmentRefs
+            : undefined,
+        });
+      } else {
+        await enqueueJob("github.ensure-branch", {
+          changeRequestId: cr.id,
+          companyId: ctx.company.id,
+        });
+      }
+      const created = await db.changeRequestMessage.create({
+        data: {
+          changeRequestId: cr.id,
+          role: "SYSTEM",
+          content:
+            "Koda is connecting to your build… replies about testing and changes will appear here shortly.",
+          metadata: { verifySessionStarting: true },
+        },
+      });
+      assistantMessage = {
+        id: created.id,
+        role: created.role,
+        content: created.content,
+        createdAt: created.createdAt.toISOString(),
+      };
     } else if (cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status)) {
       const full = await db.changeRequest.findFirstOrThrow({
         where: { id: cr.id },

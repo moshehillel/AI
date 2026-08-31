@@ -290,7 +290,18 @@ export function ChatPanel({
   const isPlanning =
     isProgram &&
     (status === "PLANNING" || status === "AWAITING_PLAN_APPROVAL");
-  const canReopenPlanning = isProgram && status === "AWAITING_DEV_BUILD";
+  const isBuildLocked =
+    isProgram &&
+    (status === "AWAITING_DEV_BUILD" ||
+      status === "BUILDING" ||
+      status === "TESTING" ||
+      status === "IMPLEMENTING");
+  const isVerifyPhase =
+    isProgram &&
+    (status === "CLIENT_VERIFY" ||
+      status === "PREVIEW_READY" ||
+      status === "CHANGES_REQUESTED");
+  const chatLocked = isBuildLocked;
   const working = (WORKING_STATUSES as readonly string[]).includes(status);
   const connectingSession = isConnectingSession(messages);
   const waitingOnReply =
@@ -304,7 +315,9 @@ export function ChatPanel({
     (waitingOnReply || liveLink === "reconnecting") && !replyTimedOut;
   const inputBusy = pending || preparingFile || savingSecrets || interrupting;
   const canSend =
-    !inputBusy && (Boolean(prompt.trim()) || stagedFiles.length > 0);
+    !inputBusy &&
+    !chatLocked &&
+    (Boolean(prompt.trim()) || stagedFiles.length > 0);
   const label = thinkingLabel({
     liveLink: waitingOnReply ? "connected" : liveLink,
     connectingSession,
@@ -489,6 +502,15 @@ export function ChatPanel({
     for (let i = 0; i < messages.length; i += 1) {
       const message = messages[i]!;
       if (message.role === "SYSTEM") {
+        if (message.content.startsWith("— Test & request changes —")) {
+          items.push({
+            type: "thought",
+            id: `verify-break-${message.id}`,
+            title: "Test & request changes",
+            summary: message.content.replace(/^— Test & request changes —\n\n/, ""),
+          });
+          continue;
+        }
         items.push({
           type: "thought",
           id: `sys-${message.id}`,
@@ -511,14 +533,16 @@ export function ChatPanel({
             type: "thought",
             id: `thought-${message.id}`,
             title: `Thought ${secs}s`,
-            summary: "Reviewed your note and updated the living plan.",
+            summary: isVerifyPhase
+              ? "Reviewed your note and updated the build."
+              : "Reviewed your note and updated the living plan.",
           });
         }
       }
       items.push({ type: "message", message });
     }
     return items;
-  }, [messages]);
+  }, [messages, isVerifyPhase]);
 
   const placeholder = isProgram
     ? isPlanning
@@ -838,12 +862,14 @@ export function ChatPanel({
   }
 
   function postProgramAction(
-    action: "submit_to_dev" | "reopen_planning",
+    action: "submit_to_dev" | "submit_final_review",
     extra?: Record<string, unknown>,
   ) {
     setActionError(null);
     const isSubmit = action === "submit_to_dev";
+    const isFinal = action === "submit_final_review";
     if (isSubmit) setSubmitting(true);
+    if (isFinal) setSubmitting(true);
     startTransition(async () => {
       try {
         const response = await fetch(
@@ -867,20 +893,26 @@ export function ChatPanel({
         }
         router.refresh();
       } finally {
-        if (isSubmit) setSubmitting(false);
+        if (isSubmit || isFinal) setSubmitting(false);
       }
     });
   }
 
-  const planningStatus =
-    isPlanning
-      ? showThinking
-        ? "Planning"
-        : "Ready"
-      : canReopenPlanning
-        ? "Submitted"
+  const planningStatus = isPlanning
+    ? showThinking
+      ? "Planning"
+      : "Ready"
+    : isBuildLocked
+      ? "Submitted — building"
+      : isVerifyPhase
+        ? "Test & request changes"
         : status.replaceAll("_", " ");
 
+  const chatTitle = isVerifyPhase
+    ? "Test & request changes"
+    : isPlanning
+      ? "Planning"
+      : (title ?? "Chat");
   return (
     <div className="agent-chat">
       <div className="ide-main-header">
@@ -901,7 +933,7 @@ export function ChatPanel({
             />
             <circle cx="8" cy="5" r="1.4" fill="currentColor" opacity="0.55" />
           </svg>
-          <span>{title ?? "Planning"}</span>
+          <span>{chatTitle}</span>
         </div>
         <span className="status-pill">{planningStatus}</span>
       </div>
@@ -990,6 +1022,24 @@ export function ChatPanel({
               This is taking longer than expected and no reply arrived. Click{" "}
               <strong>Interrupt</strong> below, then send your message again. If
               you attached files, try one at a time or a smaller PDF.
+            </p>
+          </div>
+        ) : null}
+
+        {isBuildLocked ? (
+          <div
+            className="agent-msg agent-msg-assistant rise"
+            role="status"
+            style={{
+              borderColor:
+                "color-mix(in oklab, var(--ide-accent) 35%, transparent)",
+            }}
+          >
+            <p className="agent-msg-body" style={{ margin: 0 }}>
+              <strong>Submitted — your developer is building.</strong> Planning
+              is closed. You cannot change the plan or chat here until they mark
+              the build ready for testing. A new Test & request changes chat
+              will open when the preview is ready.
             </p>
           </div>
         ) : null}
@@ -1287,27 +1337,38 @@ export function ChatPanel({
             <span className="pill-mode" title="Plan mode stays on until you submit to a developer">
               Plan
             </span>
+          ) : isVerifyPhase ? (
+            <span
+              className="pill-mode"
+              title="Ask for tests and changes — planning stays closed"
+            >
+              Verify
+            </span>
           ) : null}
           <textarea
             ref={textareaRef}
             className="pill-input"
             rows={1}
             placeholder={
-              pending
-                ? "Sending…"
-                : waitingOnReply
-                  ? queued
-                    ? "Edit queue above, or Interrupt to send now…"
-                    : "Type to queue the next message…"
-                  : preparingFile
-                    ? "File ready when prepared — add a note or press Send…"
-                    : stagedFiles.length
-                      ? "Add a message (optional) and press Send…"
-                      : placeholder
+              chatLocked
+                ? "Planning is closed while your developer builds…"
+                : pending
+                  ? "Sending…"
+                  : waitingOnReply
+                    ? queued
+                      ? "Edit queue above, or Interrupt to send now…"
+                      : "Type to queue the next message…"
+                    : preparingFile
+                      ? "File ready when prepared — add a note or press Send…"
+                      : stagedFiles.length
+                        ? "Add a message (optional) and press Send…"
+                        : placeholder
             }
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            disabled={pending || savingSecrets || interrupting}
+            disabled={
+              chatLocked || pending || savingSecrets || interrupting
+            }
             aria-busy={inputBusy}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -1366,21 +1427,31 @@ export function ChatPanel({
               : liveLink === "reconnecting"
                 ? "Reconnecting…"
                 : "Connecting…"}
-            {isPlanning ? " · Planning with Koda" : ""}
+            {isPlanning
+              ? " · Planning with Koda"
+              : isVerifyPhase
+                ? " · Test & request changes"
+                : isBuildLocked
+                  ? " · Planning closed"
+                  : ""}
           </span>
           <span className="composer-foot-branch">{showThinking ? "Working" : "Ready"}</span>
         </div>
 
-        {canReopenPlanning ? (
-          <div className="composer-submit mx-auto mt-3 px-1">
+        {isVerifyPhase ? (
+          <div className="composer-submit mx-auto mt-3 px-1 space-y-2">
             <button
               type="button"
               className="btn btn-primary w-full"
-              disabled={inputBusy}
-              onClick={() => postProgramAction("reopen_planning")}
+              disabled={inputBusy || submitting}
+              onClick={() => postProgramAction("submit_final_review")}
             >
-              Continue planning (reopen)
+              Submit for final review
             </button>
+            <p className="text-xs muted text-center">
+              When you are satisfied with testing, submit for your developer to
+              approve and deploy.
+            </p>
           </div>
         ) : null}
 
@@ -1401,8 +1472,9 @@ export function ChatPanel({
             ) : (
               <div className="composer-submit-confirm space-y-2">
                 <p className="text-sm">
-                  Confirms handoff for building and notifies the developer. Chat
-                  and attach never submit on their own.
+                  After submit you <strong>cannot change the plan</strong>. Your
+                  developer builds from this version. Chat and attach never
+                  submit on their own.
                 </p>
                 <button
                   type="button"
@@ -1438,7 +1510,10 @@ export function ChatPanel({
         planMarkdown={planContent}
         pending={submitting}
         onConfirm={() =>
-          postProgramAction("submit_to_dev", { confirmSubmit: true })
+          postProgramAction("submit_to_dev", {
+            confirmSubmit: true,
+            confirmNoPlanChange: true,
+          })
         }
         onCancel={() => {
           if (submitting) return;

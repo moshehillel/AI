@@ -185,6 +185,14 @@ function goalCandidateFromUserText(text: string): string | null {
   ) {
     return null;
   }
+  // File excerpts / CSV dumps must never become the Goal.
+  if (
+    /^File:\s+.+\((PDF|CSV\/TSV|document)\)/i.test(withoutAttach) ||
+    /^Extracted text for planning:/im.test(withoutAttach) ||
+    /^Headers:\s*.+\nExcerpt \(first rows\):/im.test(withoutAttach)
+  ) {
+    return null;
+  }
   if (looksLikeQuestion(withoutAttach)) return null;
   if (withoutAttach.length <= 20) return null;
   // Cap tightly so huge pastes never become the Goal even if they sneak through.

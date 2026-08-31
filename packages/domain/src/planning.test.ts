@@ -125,6 +125,26 @@ describe("planning Q&A", () => {
     assert.match(reply.planMarkdown, /## Goal\n.+/);
   });
 
+  it("does not put CSV/PDF file excerpts into Goal", () => {
+    const excerpt = [
+      "File: invoices.csv (CSV/TSV)",
+      "Rows: 40 · Columns: 3",
+      "Headers: date,amount,vendor",
+      "Excerpt (first rows):",
+      "date,amount,vendor",
+      "2024-01-01,10,Acme",
+    ].join("\n");
+    const reply = buildPlanningFollowUp({
+      meta: { coveredTopics: ["goals"] },
+      title: "Invoice sync",
+      latestUserContent: `Attached file (invoices.csv):\n${excerpt}`,
+      attachmentKind: "file",
+    });
+    assert.doesNotMatch(reply.planMarkdown, /## Goal\nFile:/i);
+    assert.doesNotMatch(reply.planMarkdown, /## Goal\ndate,amount/i);
+    assert.match(reply.planMarkdown, /## Goal\n.+/);
+  });
+
   it("infers HHA and Provider Soft as systems", () => {
     const md = synthesizePlanMarkdown({
       title: "Test Project",

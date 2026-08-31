@@ -2,6 +2,14 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import {
+  PLANNING_FILE_ACCEPT,
+  classifyPlanningFile,
+  formatPlanningFileRejection,
+  looksLikeBinaryText,
+  summarizeTextForPlanning,
+  validatePlanningFileSize,
+} from "@automation-studio/domain/planning-files";
 
 type Message = {
   id: string;
@@ -134,7 +142,16 @@ export function ChatPanel({
         if (json.assistantMessage) setAwaitingReply(false);
       } else {
         setAwaitingReply(false);
-        setAttachError("Could not send — try again.");
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string | { formErrors?: string[] };
+        };
+        const err =
+          typeof data.error === "string"
+            ? data.error
+            : Array.isArray(data.error?.formErrors)
+              ? data.error.formErrors[0]
+              : null;
+        setAttachError(err || "Could not send — try again.");
       }
     });
   }
@@ -150,19 +167,99 @@ export function ChatPanel({
     });
   }
 
-  async function onFilePicked(file: File | null) {
-    if (!file) return;
+  async function prepareFileAttachment(file: File): Promise<{
+    value: string;
+    fileName: string;
+  } | null> {
+    const sizeError = validatePlanningFileSize(file.size);
+    if (sizeError) {
+      setAttachError(sizeError);
+      return null;
+    }
+
+    const kind = classifyPlanningFile({
+      fileName: file.name,
+      mimeType: file.type,
+    });
+    if (kind === "unsupported") {
+      setAttachError(
+        formatPlanningFileRejection({
+          fileName: file.name,
+          mimeType: file.type,
+        }),
+      );
+      return null;
+    }
+
+    // PDFs need server-side extraction (binary); never file.text() them.
+    if (kind === "pdf") {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(
+        `/api/change-requests/${changeRequestId}/extract-file`,
+        { method: "POST", body: form },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        excerpt?: string;
+        fileName?: string;
+      };
+      if (!res.ok || !data.excerpt) {
+        setAttachError(data.error || "Could not read that PDF.");
+        return null;
+      }
+      return {
+        value: data.excerpt.slice(0, 20000),
+        fileName: data.fileName || file.name,
+      };
+    }
+
     try {
       const text = await file.text();
+      if (looksLikeBinaryText(text)) {
+        setAttachError(
+          `“${file.name}” looks binary. Upload a CSV/text export or a text-based PDF.`,
+        );
+        return null;
+      }
+      if (!text.trim()) {
+        setAttachError("That file looks empty.");
+        return null;
+      }
+      return {
+        value: summarizeTextForPlanning({
+          fileName: file.name,
+          raw: text,
+          kind,
+        }).slice(0, 20000),
+        fileName: file.name,
+      };
+    } catch {
+      setAttachError("Could not read that file.");
+      return null;
+    }
+  }
+
+  async function onFilePicked(file: File | null) {
+    if (!file) return;
+    setAttachError(null);
+    setAwaitingReply(true);
+    try {
+      const prepared = await prepareFileAttachment(file);
+      if (!prepared) {
+        setAwaitingReply(false);
+        return;
+      }
       sendMessage({
         attachment: {
           kind: "file",
-          value: text.slice(0, 20000),
-          fileName: file.name,
+          value: prepared.value,
+          fileName: prepared.fileName,
         },
       });
     } catch {
-      setAttachError("Could not read that file as text.");
+      setAwaitingReply(false);
+      setAttachError("Could not upload that file.");
     }
   }
 
@@ -272,7 +369,7 @@ export function ChatPanel({
               ref={fileRef}
               type="file"
               className="hidden"
-              accept=".txt,.md,.json,.yaml,.yml,.csv,.xml,.html,.ts,.js,.py"
+              accept={PLANNING_FILE_ACCEPT}
               onChange={(e) => {
                 void onFilePicked(e.target.files?.[0] ?? null);
                 e.target.value = "";

@@ -357,7 +357,15 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     if (error instanceof z.ZodError) {
-      return NextResponse.json({ error: error.flatten() }, { status: 400 });
+      const flat = error.flatten();
+      const firstField = Object.values(flat.fieldErrors).flat()[0];
+      return NextResponse.json(
+        {
+          error: firstField || flat.formErrors[0] || "Invalid message or attachment",
+          details: flat,
+        },
+        { status: 400 },
+      );
     }
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }

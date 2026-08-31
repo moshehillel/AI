@@ -11,14 +11,18 @@ loadEnv({ path: path.join(repoRoot, ".env") });
 const nextConfig: NextConfig = {
   transpilePackages: [
     "@automation-studio/auth",
-    "@automation-studio/cursor-adapter",
     "@automation-studio/db",
     "@automation-studio/domain",
     "@automation-studio/github",
     "@automation-studio/jobs",
   ],
-  // Native PDF canvas must not be webpack-bundled.
-  serverExternalPackages: ["@napi-rs/canvas", "unpdf"],
+  // Native PDF canvas + Cursor SDK must not be webpack-bundled.
+  serverExternalPackages: [
+    "@napi-rs/canvas",
+    "unpdf",
+    "@automation-studio/cursor-adapter",
+    "@cursor/sdk",
+  ],
   turbopack: {
     root: repoRoot,
   },

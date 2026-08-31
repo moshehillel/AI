@@ -109,10 +109,7 @@ export function developerTestImprovePrompt(input: {
   ].join("\n");
 }
 
-<<<<<<< Updated upstream
-=======
 /** Dashboard URL for an agent (developer-facing only). */
->>>>>>> Stashed changes
 export function agentWebUrl(agentId: string): string {
   return `https://cursor.com/agents/${agentId}`;
 }

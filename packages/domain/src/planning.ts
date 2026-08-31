@@ -209,11 +209,7 @@ function goalCandidateFromUserText(text: string): string | null {
   return withoutAttach.slice(0, 280).replace(/\s+/g, " ").trim();
 }
 
-<<<<<<< Updated upstream
-/** Parse prior "## What you need to provide" bullet lines. */
-=======
 /** Parse prior "## What you need to provide" bullet lines (text after optional checkbox). */
->>>>>>> Stashed changes
 function parsePriorNeedItems(priorPlan?: string | null): string[] {
   if (!priorPlan) return [];
   const section = priorPlan.match(
@@ -232,13 +228,10 @@ function parsePriorNeedItems(priorPlan?: string | null): string[] {
   return items;
 }
 
-<<<<<<< Updated upstream
-=======
 /**
  * Infer accounts / keys / access the client must supply before build.
  * Values never belong here — only what to provide (and how).
  */
->>>>>>> Stashed changes
 export function inferWhatYouNeedToProvide(opts: {
   systems: string[];
   meta: PlanningMeta;
@@ -249,13 +242,6 @@ export function inferWhatYouNeedToProvide(opts: {
   const push = (line: string) => {
     if (line && !items.includes(line)) items.push(line);
   };
-<<<<<<< Updated upstream
-  for (const custom of opts.meta.neededItems ?? []) push(custom);
-  for (const prior of parsePriorNeedItems(opts.priorPlan)) push(prior);
-  const systems = opts.systems;
-  const context = `${opts.latestUserContent}\n${opts.meta.docsText ?? ""}\n${opts.priorPlan ?? ""}`;
-  const wantsRpa = /\brpa\b|ui automation|screen.?scrape|browser login/i.test(context);
-=======
 
   for (const custom of opts.meta.neededItems ?? []) push(custom);
   for (const prior of parsePriorNeedItems(opts.priorPlan)) push(prior);
@@ -266,7 +252,6 @@ export function inferWhatYouNeedToProvide(opts: {
     context,
   );
 
->>>>>>> Stashed changes
   if (systems.some((s) => /hha/i.test(s))) {
     push(
       wantsRpa
@@ -294,26 +279,16 @@ export function inferWhatYouNeedToProvide(opts: {
     push("VPN / remote desktop access if the bot must run on an internal network");
     push("Dedicated test login (not a personal production account) when possible");
   }
-<<<<<<< Updated upstream
-  if (systems.length === 0 && items.length === 0 && opts.latestUserContent.trim().length > 40) {
-=======
   if (
     systems.length === 0 &&
     items.length === 0 &&
     opts.latestUserContent.trim().length > 40
   ) {
->>>>>>> Stashed changes
     push("Confirm systems involved and how we authenticate to each");
   }
   if (items.length === 0) {
     push("Accounts, API keys, sample files, or access needed for this automation (to be confirmed)");
   }
-<<<<<<< Updated upstream
-  push("Sample files or screenshots of the current workflow (optional — upload as a file)");
-  for (const key of opts.meta.providedSecretKeys ?? []) {
-    push(`${key} — received securely`);
-  }
-=======
 
   push("Sample files or screenshots of the current workflow (optional — upload as a file)");
 
@@ -321,7 +296,6 @@ export function inferWhatYouNeedToProvide(opts: {
     push(`${key} — received securely`);
   }
 
->>>>>>> Stashed changes
   return items;
 }
 

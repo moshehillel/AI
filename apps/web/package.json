@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@automation-studio/auth": "workspace:*",
-    "@automation-studio/cursor-adapter": "workspace:*",
     "@automation-studio/db": "workspace:*",
     "@automation-studio/domain": "workspace:*",
     "@automation-studio/github": "workspace:*",

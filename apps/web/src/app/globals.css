@@ -64,9 +64,10 @@
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   --font-display: var(--font-body);
   --frame-page: 56rem;
-  --frame-work: 100%;
-  /* Chat column — modest bump from ~672px to ~832px */
-  --measure-chat: 52rem;
+  /* Chat + plan work area — widened from ~960px */
+  --frame-work: 75rem;
+  /* Chat bubble reading measure — widened from ~640px / ~832px */
+  --measure-chat: 60rem;
 }
 
 * {
@@ -142,7 +143,8 @@ select {
 }
 
 .ide-shell-with-right {
-  grid-template-columns: var(--ide-sidebar-w) minmax(0, 1fr) var(--ide-right-w);
+  /* Center chat ~70% vs plan sidebar ~30% (left programs nav stays 240px) */
+  grid-template-columns: var(--ide-sidebar-w) minmax(0, 7fr) minmax(0, 3fr);
 }
 
 @media (max-width: 960px) {
@@ -1108,10 +1110,20 @@ select {
 }
 
 /* Shared primitives */
-.app-frame,
-.app-frame-work,
+.app-frame {
+  width: min(100%, var(--frame-page));
+  margin-inline: auto;
+  padding: 1.25rem 1.25rem 2rem;
+}
+
+.app-frame-work {
+  width: min(100%, var(--frame-work));
+  margin-inline: auto;
+  padding: 1.25rem 1.25rem 2rem;
+}
+
 .app-frame-narrow {
-  width: min(100%, 72rem);
+  width: min(100%, 40rem);
   margin-inline: auto;
   padding: 1.25rem 1.25rem 2rem;
 }

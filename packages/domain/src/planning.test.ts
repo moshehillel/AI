@@ -4,8 +4,10 @@ import {
   buildOpeningPlanningMessage,
   buildPlanningFollowUp,
   buildPlanningStartPrompt,
+  chatAlreadyCoversOpenItems,
   planningAgentInstructions,
   splitPlanFromReply,
+  stripDuplicateStillNeededSection,
   synthesizePlanMarkdown,
 } from "./planning.js";
 
@@ -35,7 +37,7 @@ describe("planning Q&A", () => {
     assert.match(reply.content, /I'm \*\*Koda\*\*/i);
     assert.doesNotMatch(reply.content, /API docs/);
     assert.doesNotMatch(reply.content, /^Got it\./m);
-    assert.match(reply.content, /What I still need from you/i);
+    assert.match(reply.content, /What would you like to automate/i);
   });
 
   it("returns a mermaid diagram when asked for a digram", () => {
@@ -46,7 +48,7 @@ describe("planning Q&A", () => {
     });
     assert.match(reply.content, /mermaid/);
     assert.match(reply.planMarkdown, /# Plan:/);
-    assert.match(reply.content, /What I still need from you/i);
+    assert.match(reply.content, /Quick question|match how work moves/i);
   });
 
   it("synthesizes a real plan from an invoice → QuickBooks description", () => {
@@ -58,7 +60,7 @@ describe("planning Q&A", () => {
     });
     assert.doesNotMatch(reply.content, /^# Plan:/m);
     assert.match(reply.content, /Plan panel|QuickBooks/i);
-    assert.match(reply.content, /What I still need from you/i);
+    assert.match(reply.content, /Plan panel|submit when you're ready|Still open|Quick question|browser|file export/i);
     assert.match(reply.planMarkdown, /## Workflow/);
     assert.doesNotMatch(reply.content, /^Got it\./m);
   });
@@ -71,11 +73,11 @@ describe("planning Q&A", () => {
     assert.doesNotMatch(prompt, /Cursor/);
   });
 
-  it("planning instructions require plain English and clear numbered asks", () => {
+  it("planning instructions discourage repeating the same footer every turn", () => {
     const prompt = planningAgentInstructions();
     assert.match(prompt, /plain, simple English|school admin/i);
-    assert.match(prompt, /What I still need from you/);
-    assert.match(prompt, /numbered questions|1\., 2\., 3\./i);
+    assert.match(prompt, /do not repeat every turn|not on every turn/i);
+    assert.match(prompt, /What you need to provide/);
     assert.match(prompt, /Do NOT paste the full living plan/i);
   });
 
@@ -126,7 +128,7 @@ describe("planning Q&A", () => {
       /connection|screen automation|file export|browser/i,
     );
     assert.match(reply.planMarkdown, /Provider Soft|HHA/i);
-    assert.match(reply.content, /What I still need from you/i);
+    assert.match(reply.content, /browser|file export|Quick question|1\./i);
   });
 
   it("does not put HTML attachment dumps into Goal", () => {
@@ -218,12 +220,50 @@ describe("planning Q&A", () => {
     ].join("\n");
     const split = splitPlanFromReply(raw);
     assert.match(split.chatContent, /Updated the workflow/);
-    assert.match(split.chatContent, /What I still need from you/i);
+    assert.match(split.chatContent, /Does this look right/i);
     assert.doesNotMatch(split.chatContent, /## Goal/);
     assert.match(split.planMarkdown, /## Goal/);
   });
 
-  it("follow-ups ask numbered questions instead of dumping the plan", () => {
+  it("stripDuplicateStillNeededSection removes redundant footer when body already lists open items", () => {
+    const raw = [
+      "Here's what we still need from you, grouped by priority.",
+      "",
+      "## Still needed",
+      "- Provider Soft login",
+      "",
+      "## What I still need from you",
+      "1. Please add Provider Soft login under Add secrets.",
+    ].join("\n");
+    const cleaned = stripDuplicateStillNeededSection(raw);
+    assert.match(cleaned, /Still needed/);
+    assert.doesNotMatch(cleaned, /What I still need from you/i);
+    assert.ok(chatAlreadyCoversOpenItems(raw));
+  });
+
+  it("plan summary replies skip the forced footer template", () => {
+    const reply = buildPlanningFollowUp({
+      meta: {
+        coveredTopics: ["goals", "systems"],
+        planMarkdown: [
+          "# Plan: HHA sync",
+          "",
+          "## Goal",
+          "Connect Provider Soft to HHA.",
+          "",
+          "## Systems",
+          "- Provider Soft",
+          "- HHA / HHAeXchange",
+        ].join("\n"),
+      },
+      title: "HHA sync",
+      latestUserContent: "show me the current plan",
+    });
+    assert.match(reply.content, /Plan panel/i);
+    assert.doesNotMatch(reply.content, /What I still need from you/i);
+  });
+
+  it("follow-ups ask questions instead of dumping the plan", () => {
     const reply = buildPlanningFollowUp({
       meta: { coveredTopics: [] },
       title: "School Program",
@@ -231,12 +271,10 @@ describe("planning Q&A", () => {
         "Connect Provider Soft to HHA so visit notes sync for our school program office.",
     });
     assert.doesNotMatch(reply.content, /^# Plan:/m);
-    assert.match(reply.content, /What I still need from you/i);
-    assert.match(reply.content, /1\./);
-    assert.match(reply.planMarkdown, /## What you need to provide/);
     assert.match(
       reply.content,
-      /Add secrets|browser|file export|Provider Soft/i,
+      /Add secrets|browser|file export|Provider Soft|Plan panel/i,
     );
+    assert.match(reply.planMarkdown, /## What you need to provide/);
   });
 });

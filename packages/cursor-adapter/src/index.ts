@@ -363,8 +363,26 @@ function mockPlanReply(prompt: string): string {
       "",
       "I help you plan automations in plain language. The full plan lives in the Plan panel.",
       "",
-      "## What I still need from you",
-      "1. What would you like to automate?",
+      "**Quick question:** What would you like to automate?",
+    ].join("\n");
+  }
+  if (
+    /\b(show (me )?(the )?(current )?plan|plan summary|status summary|where are we|what('?s| is) the plan)\b/.test(
+      lower,
+    )
+  ) {
+    return [
+      "Here's where the plan stands — full detail is in the **Plan panel**.",
+      "",
+      "Review **What you need to provide** there for the open checklist.",
+      "",
+      "```plan",
+      "# Plan",
+      "## Goal",
+      "Automate the workflow described in chat.",
+      "## What you need to provide",
+      "- [ ] Logins or sample files needed for this automation (to be confirmed)",
+      "```",
     ].join("\n");
   }
   if (
@@ -380,7 +398,6 @@ function mockPlanReply(prompt: string): string {
       "",
       "I've updated the Plan panel with this approach.",
       "",
-      "## What I still need from you",
       "1. Today, do staff only log into these systems in a browser, or do you already get file exports?",
       "2. Which direction should data flow first — Provider Soft → HHA, HHA → Provider Soft, or both?",
       "",
@@ -414,9 +431,7 @@ function mockPlanReply(prompt: string): string {
       "  B --> C[Destination]",
       "```",
       "",
-      "## What I still need from you",
-      "1. Does this match how work moves in your office today?",
-      "2. What should happen when a record fails or is incomplete?",
+      "**Quick question:** Does this match how work moves in your office today?",
       "",
       "```plan",
       "# Plan (draft)",
@@ -459,9 +474,8 @@ function mockPlanReply(prompt: string): string {
   return [
     "Thanks — I've updated the living plan in the Plan panel based on what you shared.",
     "",
-    "## What I still need from you",
     systems.length
-      ? "1. Does this capture what you want, or should we change anything?"
+      ? "**Quick question:** Does this capture what you want, or should we change anything?"
       : "1. What systems are involved, and what should happen step by step?",
     "",
     "```plan",

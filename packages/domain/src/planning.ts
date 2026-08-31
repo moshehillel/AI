@@ -50,7 +50,7 @@ export function buildOpeningPlanningMessage(opts: {
     return [
       brand,
       "",
-      "I've got your starting notes. I'll keep a living plan in the Plan panel and ask clear numbered questions here when I still need something from you.",
+      "I've got your starting notes. I'll keep a living plan in the Plan panel and ask clear questions here when I still need something from you.",
       "",
       "Use **+** to attach docs, examples, or files. For passwords and API keys, choose **Add secrets / credentials** so values stay private and never appear in chat.",
     ].join("\n");
@@ -59,7 +59,7 @@ export function buildOpeningPlanningMessage(opts: {
   return [
     brand,
     "",
-    "Tell me what you want to automate in your own words. I'll draft a plan in the Plan panel, answer in plain English here, and ask clear numbered questions when I still need details from you.",
+    "Tell me what you want to automate in your own words. I'll draft a plan in the Plan panel, answer in plain English here, and ask questions when I still need details from you.",
     "",
     "Use **+** to attach docs or files. For passwords and API keys, choose **Add secrets / credentials** so values stay private and never appear in chat.",
   ].join("\n");
@@ -86,11 +86,13 @@ export function planningAgentInstructions(): string {
     "- Use markdown headings in chat when helpful (## for section titles) so important lines stand out — but keep chat short.",
     "Plan markdown (inside ```plan) must include: Goal, Systems, Integrations / APIs, Workflow, Edge cases, Acceptance criteria, and a section titled exactly \"## What you need to provide\".",
     "Always keep \"## What you need to provide\" current: accounts, passwords, API keys, sample files, VPN/remote access, and logins the client must supply before build. Tell them to use Add secrets / credentials for passwords and keys — never ask them to paste secret values into chat.",
-    "ASK CLEARLY WHAT YOU NEED (critical — every meaningful turn):",
-    "- End nearly every planning reply with a short section titled exactly \"## What I still need from you\" (or bold WHAT I STILL NEED FROM YOU).",
-    "- Under it, ask clear numbered questions (1., 2., 3.) about open items required to finish the plan — drawn from \"## What you need to provide\" and any missing workflow details.",
-    "- Prefer 1–3 questions. One question is fine when only one thing blocks progress. Never dump a long rotating checklist.",
-    "- Phrase questions so a school admin knows exactly what to answer or upload (e.g. \"1. Do staff only log into Provider Soft in a browser, or do you already have a file export?\").",
+    "FOLLOW-UPS (do not repeat every turn):",
+    "- The Plan panel holds the full \"## What you need to provide\" checklist — do not re-paste that whole list in chat each turn.",
+    "- Only add numbered follow-up questions when there are NEW open items, the client asked what's still missing, or 1–3 specific blockers remain.",
+    "- If you already summarized open items in this message (e.g. Still needed, Quick decisions, Already have), do NOT add another \"## What I still need from you\" block — merge or omit.",
+    "- For plan or status summaries (\"show me the plan\", \"where are we\"), answer with the summary only — no forced footer template.",
+    "- Vary closings: one clear question, \"Let me know when you've attached X\", or no question when nothing new to ask.",
+    "- Prefer 1–3 specific questions. Phrase them so a school admin knows exactly what to answer or upload.",
     "- If nothing is missing and the plan is ready, say so clearly and note they can Submit to developer for building.",
     "When the client asks for a diagram / digram / flowchart / architecture view: show the mermaid diagram in chat, add 1–3 plain clarifying questions, and put the durable plan update in the ```plan fence (not a huge plan dump in chat).",
     "Never echo or repeat secret values if the client pastes them anyway; acknowledge only the secret name (e.g. Secret saved: HHA_PASSWORD).",
@@ -100,6 +102,81 @@ export function planningAgentInstructions(): string {
 }
 
 const DISCLAIMER_RE = /\n*Koda is AI and can make mistakes\.?\s*/gi;
+const STILL_NEEDED_HEADING_RE =
+  /^#{1,2}\s+\*?\*?What I still need from you\*?\*?\s*$/gim;
+const OPEN_ITEMS_HEADING_RE =
+  /^#{1,2}\s+(Still needed|Open items|Quick decisions|Already have|Here'?s what we still need)/im;
+
+/** True when chat already lists open items / follow-ups (avoid duplicate footers). */
+export function chatAlreadyCoversOpenItems(text: string): boolean {
+  if (!text.trim()) return false;
+  if (OPEN_ITEMS_HEADING_RE.test(text)) return true;
+  const headings = [...text.matchAll(STILL_NEEDED_HEADING_RE)];
+  return headings.length > 0;
+}
+
+/** Remove a trailing duplicate \"What I still need from you\" block when the body already covers open items. */
+export function stripDuplicateStillNeededSection(text: string): string {
+  let out = (text || "").trim();
+  if (!out) return out;
+
+  const headings = [...out.matchAll(STILL_NEEDED_HEADING_RE)];
+  if (headings.length > 1) {
+    const last = headings[headings.length - 1];
+    if (last?.index != null) {
+      out = out.slice(0, last.index).trimEnd();
+    }
+  }
+
+  const hasEquivalentOpenSection =
+    OPEN_ITEMS_HEADING_RE.test(out) ||
+    /Here'?s what we still need from you/i.test(out);
+  if (hasEquivalentOpenSection) {
+    out = out
+      .replace(
+        /\n#{1,2}\s+\*?\*?What I still need from you\*?\*?\s*\n[\s\S]*$/i,
+        "",
+      )
+      .trim();
+  }
+
+  return out.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function userAskedForPlanSummary(text: string): boolean {
+  return /\b(show (me )?(the )?(current )?plan|plan summary|status summary|where are we|what('?s| is) the plan|recap (the )?plan|summarize (the )?plan)\b/i.test(
+    text,
+  );
+}
+
+function userAskedWhatsMissing(text: string): boolean {
+  return /\b(what('?s| is) (still )?missing|what do you (still )?need|what('?s| is) left|what else (do you )?need|what am i missing)\b/i.test(
+    text,
+  );
+}
+
+function summarizePlanForChat(planMarkdown: string): string {
+  const goal = planMarkdown
+    .match(/## Goal\n([\s\S]*?)(?:\n## |\n*$)/)?.[1]
+    ?.trim();
+  const systems = planMarkdown
+    .match(/## Systems\n([\s\S]*?)(?:\n## |\n*$)/)?.[1]
+    ?.trim();
+  const parts: string[] = [];
+  if (goal) parts.push(`**Goal:** ${goal}`);
+  if (systems) {
+    const list = systems
+      .split("\n")
+      .map((l) => l.replace(/^\s*-\s*/, "").trim())
+      .filter(Boolean)
+      .join(", ");
+    if (list) parts.push(`**Systems:** ${list}`);
+  }
+  parts.push(
+    "Accounts, files, and credentials are tracked under **What you need to provide** in the Plan panel.",
+  );
+  return parts.join("\n\n");
+}
 
 /** Remove repeated AI disclaimer lines from chat bodies (chrome already shows one). */
 export function stripAiDisclaimer(text: string): string {
@@ -124,8 +201,10 @@ export function splitPlanFromReply(
 
   const fenced = text.match(PLAN_FENCE_RE);
   if (fenced?.[1]?.trim()) {
-    const chatContent = stripAiDisclaimer(
-      text.replace(PLAN_FENCE_RE, "").replace(/\n{3,}/g, "\n\n").trim(),
+    const chatContent = stripDuplicateStillNeededSection(
+      stripAiDisclaimer(
+        text.replace(PLAN_FENCE_RE, "").replace(/\n{3,}/g, "\n\n").trim(),
+      ),
     );
     return {
       chatContent:
@@ -144,7 +223,7 @@ export function splitPlanFromReply(
         "I've updated the living plan in the Plan panel — take a look and tell me what to refine.";
     }
     return {
-      chatContent: stripAiDisclaimer(chatContent),
+      chatContent: stripDuplicateStillNeededSection(stripAiDisclaimer(chatContent)),
       planMarkdown,
     };
   }
@@ -163,7 +242,7 @@ export function splitPlanFromReply(
   }
 
   return {
-    chatContent: text,
+    chatContent: stripDuplicateStillNeededSection(text),
     planMarkdown: priorPlan?.trim() || text,
   };
 }
@@ -220,7 +299,7 @@ export function buildPlanningStartPrompt(opts: {
 
   parts.push(
     "",
-    "Respond as Koda in plain English. Chat = short answer + numbered \"What I still need from you\" questions. Put the full living plan only inside a ```plan fence. If they asked a direct question, answer it first. Include mermaid in chat when a diagram was requested.",
+    "Respond as Koda in plain English. Keep chat short. Put the full living plan only inside a ```plan fence. Answer direct questions first. Add numbered follow-ups only when something new is still needed — not on every turn. Include mermaid in chat when a diagram was requested.",
   );
 
   return parts.filter((p) => p !== "").join("\n");
@@ -492,13 +571,89 @@ export function buildStillNeededQuestions(opts: {
   return questions.slice(0, 3);
 }
 
-/** Format numbered still-needed questions for chat. */
-export function formatStillNeededSection(questions: string[]): string {
+/** Format numbered still-needed questions with varied closings (not the same footer every turn). */
+export function formatFollowUpClosing(questions: string[], seed = 0): string {
   const numbered = questions.map((q, i) => {
     const cleaned = q.replace(/^\d+\.\s*/, "").trim();
     return `${i + 1}. ${cleaned}`;
   });
-  return ["## What I still need from you", ...numbered].join("\n");
+  if (numbered.length === 0) return "";
+
+  const variant = Math.abs(seed) % 4;
+
+  if (numbered.length === 1) {
+    const one = numbered[0]!;
+    if (variant === 0) {
+      return `**Quick question:** ${one.replace(/^\d+\.\s*/, "")}`;
+    }
+    if (variant === 1) return one;
+    if (variant === 2) {
+      return ["## What I still need from you", one].join("\n");
+    }
+    return `${one}\n\nLet me know here or attach files with **+**.`;
+  }
+
+  if (variant === 0) {
+    return ["## What I still need from you", ...numbered].join("\n");
+  }
+  if (variant === 1) {
+    return ["A few things would help next:", ...numbered].join("\n");
+  }
+  if (variant === 2) {
+    return [...numbered, "", "Reply here or use **+** to attach docs."].join("\n");
+  }
+  return ["**Still open:**", ...numbered].join("\n");
+}
+
+/** Decide whether to append follow-up questions to a chat reply. */
+export function shouldAppendFollowUpQuestions(opts: {
+  userText: string;
+  questions: string[];
+  bodyPrefix?: string;
+}): boolean {
+  if (opts.questions.length === 0) return false;
+  if (userAskedForPlanSummary(opts.userText)) return false;
+
+  const combined = `${opts.bodyPrefix ?? ""}\n${opts.userText}`.trim();
+  if (chatAlreadyCoversOpenItems(combined)) return false;
+
+  if (userAskedWhatsMissing(opts.userText)) return true;
+
+  const allGeneric = opts.questions.every((q) =>
+    /look right|change anything before you submit|what would you like to automate|what should this automation do|what systems are involved/i.test(
+      q,
+    ),
+  );
+  if (allGeneric && opts.userText.trim().length > 60) return false;
+
+  return opts.questions.length <= 3;
+}
+
+/** Format numbered still-needed questions for chat (legacy name — uses varied closings). */
+export function formatStillNeededSection(questions: string[]): string {
+  return formatFollowUpClosing(questions, questions.join("").length);
+}
+
+function formatFollowUpClosingIfNeeded(opts: {
+  userText: string;
+  questions: string[];
+  bodyPrefix?: string;
+}): string {
+  if (!shouldAppendFollowUpQuestions(opts)) {
+    if (
+      opts.questions.some((q) =>
+        /look right|submit it to a developer/i.test(q),
+      ) &&
+      opts.userText.trim().length > 60
+    ) {
+      return "If anything in the Plan panel looks off, tell me what to change — or submit when you're ready.";
+    }
+    return "";
+  }
+  return formatFollowUpClosing(
+    opts.questions,
+    opts.userText.length + (opts.bodyPrefix?.length ?? 0),
+  );
 }
 
 /** Prefer a durable goal; never copy a short question or attachment dump into ## Goal. */
@@ -678,9 +833,7 @@ function answerDirectly(opts: {
       "",
       "I help you plan business automations in plain language: what should happen, which systems are involved, and what we need from you before building. When the plan looks right, you can submit it to a developer.",
       "",
-      formatStillNeededSection([
-        "What would you like to automate?",
-      ]),
+      "**Quick question:** What would you like to automate?",
     ].join("\n");
   }
 
@@ -688,9 +841,7 @@ function answerDirectly(opts: {
     return [
       "Hey — I'm Koda. Tell me the automation you have in mind, or ask for a diagram anytime.",
       "",
-      formatStillNeededSection([
-        "What should this automation do for your team?",
-      ]),
+      "What should this automation do for your team?",
     ].join("\n");
   }
 
@@ -713,7 +864,6 @@ function answerDirectly(opts: {
       "",
       "I've updated the Plan panel with this approach.",
       "",
-      "## What I still need from you",
       "1. Today, do staff only log into these systems in a browser, or do you already get file exports?",
       "2. Which direction should data flow first — Provider Soft → HHA, HHA → Provider Soft, or both?",
     ].join("\n");
@@ -735,9 +885,7 @@ function answerDirectly(opts: {
       "",
       "I've also refreshed the living plan in the Plan panel.",
       "",
-      "## What I still need from you",
-      "1. Does this match how work moves in your office today?",
-      "2. What should happen when a record fails or is incomplete?",
+      "**Quick question:** Does this match how work moves in your office today?",
     ].join("\n");
   }
 
@@ -822,6 +970,21 @@ export function buildPlanningFollowUp(opts: {
             ? "I've added that file to the plan."
             : null;
 
+  if (userAskedForPlanSummary(opts.latestUserContent)) {
+    return {
+      content: [
+        attachAck,
+        "Here's where the plan stands — full detail is in the **Plan panel**.",
+        "",
+        summarizePlanForChat(planMarkdown),
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      nextMeta: meta,
+      planMarkdown,
+    };
+  }
+
   const systems = inferSystems(opts.latestUserContent);
   const substantive = opts.latestUserContent.trim().length > 80 || systems.length > 0;
 
@@ -838,12 +1001,26 @@ export function buildPlanningFollowUp(opts: {
       covered,
     });
 
+    const bodyPrefix = [
+      attachAck,
+      `Thanks — I've updated the living plan for **${systemsLabel}** in the Plan panel.`,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const closing = formatFollowUpClosingIfNeeded({
+      userText: opts.latestUserContent,
+      questions: needQuestions,
+      bodyPrefix,
+    });
+
     return {
       content: [
-        attachAck,
-        `Thanks — I've updated the living plan for **${systemsLabel}** in the Plan panel.`,
-        "",
-        formatStillNeededSection(needQuestions),
+        bodyPrefix,
+        closing
+          ? ""
+          : "Take a look when you have a moment — the open checklist lives in the Plan panel.",
+        closing,
       ]
         .filter(Boolean)
         .join("\n"),
@@ -858,10 +1035,13 @@ export function buildPlanningFollowUp(opts: {
       "",
       "In a few sentences, tell me what should happen: what starts the work, the steps, and where the result should go.",
       "",
-      formatStillNeededSection([
-        "What systems are involved (for example Provider Soft, HHA, email, spreadsheets)?",
-        "What does a successful run look like for your team?",
-      ]),
+      formatFollowUpClosing(
+        [
+          "What systems are involved (for example Provider Soft, HHA, email, spreadsheets)?",
+          "What does a successful run look like for your team?",
+        ],
+        0,
+      ),
     ]
       .filter((line) => line !== "")
       .join("\n"),

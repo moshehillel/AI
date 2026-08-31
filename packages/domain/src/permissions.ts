@@ -16,6 +16,7 @@ export type Permission =
   | "program:open_in_cursor"
   | "program:grant_test_improve"
   | "program:final_approve"
+  | "program:reveal_secrets"
   | "company:admin"
   | "members:manage"
   | "inbox:read";
@@ -45,6 +46,7 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
     "program:open_in_cursor",
     "program:grant_test_improve",
     "program:final_approve",
+    "program:reveal_secrets",
     "inbox:read",
   ],
   ADMIN: [
@@ -63,6 +65,7 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
     "program:open_in_cursor",
     "program:grant_test_improve",
     "program:final_approve",
+    "program:reveal_secrets",
     "company:admin",
     "members:manage",
     "inbox:read",

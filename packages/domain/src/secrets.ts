@@ -9,6 +9,35 @@ export type DetectedSecret = {
   label: string;
 };
 
+/** Max length for customer-labeled secret key names. */
+export const SECRET_KEY_NAME_MAX = 64;
+
+/**
+ * Normalize a customer label into an env-style key (e.g. "HHA password" → HHA_PASSWORD).
+ * Never includes the secret value.
+ */
+export function normalizeSecretKeyName(raw: string): string {
+  const cleaned = raw
+    .trim()
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toUpperCase()
+    .slice(0, SECRET_KEY_NAME_MAX);
+  if (!cleaned) return "SECRET";
+  if (!/^[A-Z]/.test(cleaned)) return `SECRET_${cleaned}`.slice(0, SECRET_KEY_NAME_MAX);
+  return cleaned;
+}
+
+/** Attachment payloads use planning-file-* keys — not customer credentials. */
+export function isCredentialSecretKey(keyName: string): boolean {
+  return Boolean(keyName) && !keyName.startsWith("planning-file-");
+}
+
+/** Redacted chat ack — never include the value. */
+export function secretSavedMessage(keyName: string): string {
+  return `Secret saved: ${normalizeSecretKeyName(keyName)}`;
+}
+
 const PATTERNS: Array<{
   name: string;
   label: string;

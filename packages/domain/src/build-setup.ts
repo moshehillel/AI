@@ -23,10 +23,28 @@ export function parseBuildSetup(raw: unknown): ProgramBuildSetup {
   return raw as ProgramBuildSetup;
 }
 
+function secretKeysSection(secretKeyNames?: string[]): string {
+  const keys = (secretKeyNames ?? []).filter(Boolean);
+  if (keys.length === 0) {
+    return [
+      "# Customer secrets",
+      "None stored yet. Check Build desk in Koda for Reveal / copy-once when the customer adds credentials.",
+      "Never invent credentials. Never put secret values into commits, PR bodies, or customer-facing chat.",
+    ].join("\n");
+  }
+  return [
+    "# Customer secrets (names only — values are NOT included here)",
+    "Decrypt / copy values only from the staff Build desk in Koda (Reveal / copy-once).",
+    "Never log secret values, never commit them to git, and never paste them into PR bodies.",
+    ...keys.map((k) => `- ${k}`),
+  ].join("\n");
+}
+
 export function developerPlanReviewPrompt(input: {
   title: string;
   planMarkdown: string;
   description?: string;
+  secretKeyNames?: string[];
 }): string {
   return [
     "You are helping a developer review a customer-approved automation plan.",
@@ -42,6 +60,8 @@ export function developerPlanReviewPrompt(input: {
     input.planMarkdown.trim() ||
       "(No plan markdown yet — ask the developer what to build.)",
     "",
+    secretKeysSection(input.secretKeyNames),
+    "",
     "Present the plan clearly. Wait for the developer to click Build / switch to agent mode before implementing.",
   ]
     .filter(Boolean)
@@ -52,6 +72,7 @@ export function developerBuildPrompt(input: {
   title: string;
   planMarkdown: string;
   serverLabel?: string;
+  secretKeyNames?: string[];
 }): string {
   return [
     "Switch to BUILD / agent mode. Implement the approved program plan on the isolated branch.",
@@ -62,6 +83,8 @@ export function developerBuildPrompt(input: {
     "",
     "# Approved plan",
     input.planMarkdown.trim() || input.title,
+    "",
+    secretKeysSection(input.secretKeyNames),
   ]
     .filter(Boolean)
     .join("\n");
@@ -70,6 +93,7 @@ export function developerBuildPrompt(input: {
 export function developerTestImprovePrompt(input: {
   title: string;
   planMarkdown: string;
+  secretKeyNames?: string[];
 }): string {
   return [
     "Test & Improve workspace is now open for this program.",
@@ -80,16 +104,15 @@ export function developerTestImprovePrompt(input: {
     "",
     "# Plan",
     input.planMarkdown.trim() || input.title,
+    "",
+    secretKeysSection(input.secretKeyNames),
   ].join("\n");
 }
 
-
-/** Dashboard URL for an agent (developer-facing only). */
 export function agentWebUrl(agentId: string): string {
   return `https://cursor.com/agents/${agentId}`;
 }
 
-/** Deep link that opens / resumes the agent in the Cursor app. */
 export function agentCursorDeepLink(agentId: string): string {
   return `https://cursor.com/background-agent?bcId=${encodeURIComponent(agentId)}`;
 }

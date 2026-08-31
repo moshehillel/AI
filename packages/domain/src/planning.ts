@@ -16,6 +16,10 @@ export type PlanningMeta = {
   planMarkdown?: string | null;
   /** Pending encrypted file payload key (SecretRef) for the next Cursor agent turn. */
   pendingAttachmentRef?: string | null;
+  /** Credential SecretRef keyNames the customer has already provided (never values). */
+  providedSecretKeys?: string[];
+  /** Extra prerequisite lines Koda / staff added beyond inferred defaults. */
+  neededItems?: string[];
 };
 
 export const PLANNING_TOPICS: PlanningTopic[] = [
@@ -42,7 +46,7 @@ export function buildOpeningPlanningMessage(opts: {
       "",
       "I've got your starting notes. I'll shape a living plan with you — ask me anything, request a diagram, or refine the workflow. I'll only ask clarifying questions when I need them.",
       "",
-      "You can attach API docs, paste examples, or upload a file anytime.",
+      "You can attach API docs, paste examples, or upload a file anytime. For passwords and API keys, use **Add secrets / credentials** so values stay encrypted and never appear in chat.",
       "",
       "Koda is AI and can make mistakes.",
     ].join("\n");
@@ -53,7 +57,7 @@ export function buildOpeningPlanningMessage(opts: {
     "",
     "Tell me what you want to automate in your own words. I'll draft a plan, answer questions directly, and draw diagrams when you ask. Clarifying questions only when needed.",
     "",
-    "You can attach an API docs URL, paste examples, or upload a file whenever it's useful.",
+    "You can attach an API docs URL, paste examples, or upload a file whenever it's useful. For passwords and API keys, use **Add secrets / credentials** so values stay encrypted and never appear in chat.",
     "",
     "Koda is AI and can make mistakes.",
   ].join("\n");
@@ -73,7 +77,9 @@ export function planningAgentInstructions(): string {
     "Never set the plan Goal to the client's latest question verbatim. Goals are durable outcomes; questions get answered in prose, then the living plan is updated thoughtfully.",
     "Produce markdown plans. When asked for a diagram / digram / flowchart / architecture view, include a mermaid fenced code block.",
     "Ask clarifying questions only when needed to unblock the plan — one or a few at a time, never a rotating checklist.",
-    "Maintain and update a living plan document in your replies: goals, systems, integrations/APIs, workflow steps, edge cases, and acceptance criteria.",
+    "Maintain and update a living plan document in your replies: goals, systems, integrations/APIs, workflow steps, edge cases, acceptance criteria, and a section titled exactly \"## What you need to provide\".",
+    "Always keep \"## What you need to provide\" current: list accounts, API keys, passwords, sample files, VPN/remote access, and logins (e.g. Provider Soft / HHA RPA) the client must supply before build. Update the list as planning progresses. Tell them to use Add secrets / credentials for passwords and keys — never ask them to paste secret values into chat.",
+    "Never echo or repeat secret values if the client pastes them anyway; acknowledge only the secret name (e.g. Secret saved: HHA_PASSWORD).",
     "When the plan feels solid, briefly note they can Submit to developer for building.",
     "Never mention underlying AI vendors, source-control hosts, cloud hosts, job queues, or other internal tooling by name.",
     "Remind briefly that Koda is AI and can make mistakes when appropriate.",
@@ -203,6 +209,80 @@ function goalCandidateFromUserText(text: string): string | null {
   return withoutAttach.slice(0, 280).replace(/\s+/g, " ").trim();
 }
 
+/** Parse prior "## What you need to provide" bullet lines. */
+function parsePriorNeedItems(priorPlan?: string | null): string[] {
+  if (!priorPlan) return [];
+  const section = priorPlan.match(
+    /## What you need to provide\n([\s\S]*?)(?:\n## |\n*$)/,
+  )?.[1];
+  if (!section) return [];
+  const items: string[] = [];
+  for (const line of section.split("\n")) {
+    const m = line.match(/^\s*-\s*(?:\[[ xX]\]\s*)?(.+)$/);
+    if (!m?.[1]) continue;
+    const text = m[1].trim();
+    if (!text || /^to be confirmed/i.test(text)) continue;
+    if (/—\s*received securely/i.test(text)) continue;
+    if (!items.includes(text)) items.push(text);
+  }
+  return items;
+}
+
+export function inferWhatYouNeedToProvide(opts: {
+  systems: string[];
+  meta: PlanningMeta;
+  latestUserContent: string;
+  priorPlan?: string | null;
+}): string[] {
+  const items: string[] = [];
+  const push = (line: string) => {
+    if (line && !items.includes(line)) items.push(line);
+  };
+  for (const custom of opts.meta.neededItems ?? []) push(custom);
+  for (const prior of parsePriorNeedItems(opts.priorPlan)) push(prior);
+  const systems = opts.systems;
+  const context = `${opts.latestUserContent}\n${opts.meta.docsText ?? ""}\n${opts.priorPlan ?? ""}`;
+  const wantsRpa = /\brpa\b|ui automation|screen.?scrape|browser login/i.test(context);
+  if (systems.some((s) => /hha/i.test(s))) {
+    push(
+      wantsRpa
+        ? "HHA / HHAeXchange login for RPA (username + password) — use Add secrets / credentials"
+        : "HHA / HHAeXchange API credentials or login — use Add secrets / credentials",
+    );
+  }
+  if (systems.some((s) => /provider soft/i.test(s))) {
+    push(
+      wantsRpa
+        ? "Provider Soft login for RPA (username + password) — use Add secrets / credentials"
+        : "Provider Soft API credentials, export access, or login — use Add secrets / credentials",
+    );
+  }
+  if (systems.some((s) => /quickbooks/i.test(s))) {
+    push("QuickBooks app credentials / OAuth client — use Add secrets / credentials");
+  }
+  if (systems.some((s) => /salesforce|hubspot|shopify|stripe|netsuite/i.test(s))) {
+    push("Downstream system API keys or OAuth credentials — use Add secrets / credentials");
+  }
+  if (!opts.meta.apiDocsUrl && systems.length > 0) {
+    push("API docs URL, OpenAPI/Swagger, or partner integration notes (attach when available)");
+  }
+  if (wantsRpa) {
+    push("VPN / remote desktop access if the bot must run on an internal network");
+    push("Dedicated test login (not a personal production account) when possible");
+  }
+  if (systems.length === 0 && items.length === 0 && opts.latestUserContent.trim().length > 40) {
+    push("Confirm systems involved and how we authenticate to each");
+  }
+  if (items.length === 0) {
+    push("Accounts, API keys, sample files, or access needed for this automation (to be confirmed)");
+  }
+  push("Sample files or screenshots of the current workflow (optional — upload as a file)");
+  for (const key of opts.meta.providedSecretKeys ?? []) {
+    push(`${key} — received securely`);
+  }
+  return items;
+}
+
 /** Prefer a durable goal; never copy a short question or attachment dump into ## Goal. */
 function deriveGoal(opts: {
   title?: string;
@@ -322,6 +402,17 @@ export function synthesizePlanMarkdown(opts: {
     "- Happy path completes end-to-end in a test environment",
     "- Failures are visible and recoverable",
     "- Secrets never appear in chat logs",
+    "",
+    "## What you need to provide",
+    ...inferWhatYouNeedToProvide({
+      systems,
+      meta: opts.meta,
+      latestUserContent: opts.latestUserContent,
+      priorPlan: opts.priorPlan ?? opts.meta.planMarkdown,
+    }).map((item) => {
+      const received = /—\s*received securely/i.test(item);
+      return received ? `- [x] ${item}` : `- [ ] ${item}`;
+    }),
   ];
 
   if (wantsDiagram(brief) || systems.length >= 2) {

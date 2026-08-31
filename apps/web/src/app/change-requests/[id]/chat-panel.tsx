@@ -163,17 +163,22 @@ function IconChevron({ open }: { open: boolean }) {
 function ThoughtBlock({
   title,
   summary,
+  steps,
   openDefault = false,
   live = false,
 }: {
   title: string;
   summary?: string;
+  steps?: string[];
   openDefault?: boolean;
   live?: boolean;
 }) {
   const [open, setOpen] = useState(openDefault || live);
+  useEffect(() => {
+    if (live) setOpen(true);
+  }, [live]);
   return (
-    <div className="thought-block">
+    <div className={`thought-block ${live ? "is-live" : ""}`}>
       <button
         type="button"
         className="thought-toggle"
@@ -190,7 +195,25 @@ function ThoughtBlock({
           </span>
         ) : null}
       </button>
-      {open && summary ? <div className="thought-body">{summary}</div> : null}
+      {open ? (
+        <div className="thought-body">
+          {summary ? <p className="thought-summary">{summary}</p> : null}
+          {steps && steps.length > 0 ? (
+            <ul className="thought-checklist">
+              {steps.map((step, i) => (
+                <li key={`${step}-${i}`}>
+                  <span
+                    className={`thought-check ${
+                      live && i === steps.length - 1 ? "" : "is-done"
+                    }`}
+                  />
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -234,9 +257,12 @@ export function ChatPanel({
     { keyName: "", value: "" },
   ]);
   const [savingSecrets, setSavingSecrets] = useState(false);
-  const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [thoughtSeconds, setThoughtSeconds] = useState(0);
+  const [liveProgress, setLiveProgress] = useState<string | null>(null);
+  const [liveDraft, setLiveDraft] = useState<string | null>(null);
+  const [progressSteps, setProgressSteps] = useState<string[]>([]);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const thinkingStarted = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -266,6 +292,7 @@ export function ChatPanel({
     working,
     status,
   });
+  const liveThoughtSummary = liveProgress || label;
   const queuedPreview = queued
     ? queued.content.trim() ||
       (queued.stagedFiles.length
@@ -290,6 +317,8 @@ export function ChatPanel({
           type: string;
           status?: string;
           messages?: Message[];
+          liveProgress?: string | null;
+          liveDraft?: string | null;
         };
         if (data.type === "connected" || data.type === "heartbeat") {
           if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -302,11 +331,30 @@ export function ChatPanel({
           reconnectTimer = null;
           setLiveLink("connected");
           if (data.status) setStatus(data.status);
+          if (typeof data.liveProgress !== "undefined") {
+            setLiveProgress(data.liveProgress);
+            if (data.liveProgress) {
+              setProgressSteps((prev) => {
+                if (prev[prev.length - 1] === data.liveProgress) return prev;
+                return [...prev.slice(-5), data.liveProgress!];
+              });
+            } else {
+              setProgressSteps([]);
+            }
+          }
+          if (typeof data.liveDraft !== "undefined") {
+            setLiveDraft(data.liveDraft);
+          }
           if (data.messages) {
             setMessages(data.messages);
             const stillAwaiting = isAwaitingAssistantReply(data.messages);
             setAwaitingReply(stillAwaiting);
-            if (!stillAwaiting) setTurnInterrupted(false);
+            if (!stillAwaiting) {
+              setTurnInterrupted(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            }
           }
         }
       } catch {
@@ -332,7 +380,7 @@ export function ChatPanel({
       top: scrollerRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages, showThinking, label]);
+  }, [messages, showThinking, label, liveDraft, liveProgress]);
 
   useEffect(() => {
     if (showThinking) {
@@ -758,7 +806,6 @@ export function ChatPanel({
         setActionError(data.error ?? "Action failed — try again.");
         return;
       }
-      setConfirmSubmit(false);
       router.refresh();
     });
   }
@@ -855,12 +902,20 @@ export function ChatPanel({
         })}
 
         {showThinking ? (
-          <ThoughtBlock
-            title={`Thought ${thoughtSeconds || 1}s`}
-            summary={label}
-            openDefault
-            live
-          />
+          <>
+            <ThoughtBlock
+              title={`Thought ${thoughtSeconds || 1}s`}
+              summary={liveThoughtSummary}
+              steps={progressSteps}
+              openDefault
+              live
+            />
+            {liveDraft ? (
+              <div className="agent-msg agent-msg-assistant agent-msg-streaming rise">
+                <MarkdownBody content={liveDraft} className="agent-msg-body" />
+              </div>
+            ) : null}
+          </>
         ) : null}
 
         {status === "FAILED" ? (
@@ -935,8 +990,10 @@ export function ChatPanel({
         ) : null}
 
         {isPlanning ? (
-          <div className="attach-chips">
-            {(
+          <div className="attach-menu-anchor">
+            {attachMenuOpen ? (
+              <div className="attach-menu" role="menu">
+                {(
               [
                 ["api_docs_url", "API docs URL"],
                 ["docs_text", "Paste docs"],
@@ -948,9 +1005,10 @@ export function ChatPanel({
               <button
                 key={kind}
                 type="button"
-                className={`chip ${attachMode === kind ? "chip-active" : ""}`}
+                className="attach-menu-item"
                 onClick={() => {
                   setAttachError(null);
+                  setAttachMenuOpen(false);
                   if (kind === "file") {
                     setAttachMode(null);
                     fileRef.current?.click();
@@ -966,6 +1024,8 @@ export function ChatPanel({
                 {chipLabel}
               </button>
             ))}
+              </div>
+            ) : null}
             <input
               ref={fileRef}
               type="file"
@@ -1138,10 +1198,11 @@ export function ChatPanel({
             type="button"
             className="pill-attach"
             disabled={!isPlanning || inputBusy}
-            title="Attach files (sent with your message)"
+            title="Attach"
+            aria-expanded={attachMenuOpen}
             onClick={() => {
               if (!isPlanning) return;
-              fileRef.current?.click();
+              setAttachMenuOpen((v) => !v);
             }}
           >
             <IconPlus />
@@ -1231,55 +1292,8 @@ export function ChatPanel({
                 : "Connecting…"}
             {isPlanning ? " · Planning with Koda" : ""}
           </span>
-          <span>Koda is AI and can make mistakes.</span>
+          <span className="composer-foot-branch">{showThinking ? "Working" : "Ready"}</span>
         </div>
-
-        {isPlanning ? (
-          <div className="mx-auto mt-3 max-w-[52rem] space-y-2 px-1">
-            {!confirmSubmit ? (
-              <button
-                type="button"
-                className="btn btn-ghost w-full"
-                disabled={inputBusy}
-                onClick={() => {
-                  setActionError(null);
-                  setConfirmSubmit(true);
-                }}
-              >
-                Ready to submit to a developer?
-              </button>
-            ) : (
-              <div className="attach-panel space-y-2">
-                <p className="text-sm" style={{ color: "var(--ide-ink-secondary)" }}>
-                  This notifies Advanced Automations that the plan is ready to
-                  build. You can reopen planning afterward if needed.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={inputBusy}
-                    onClick={() =>
-                      postProgramAction("submit_to_dev", {
-                        confirmSubmit: true,
-                      })
-                    }
-                  >
-                    Yes, submit for building
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    disabled={inputBusy}
-                    onClick={() => setConfirmSubmit(false)}
-                  >
-                    Keep planning
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : null}
 
         {canReopenPlanning ? (
           <div className="mx-auto mt-3 max-w-[52rem] px-1">

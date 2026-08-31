@@ -1292,6 +1292,89 @@ select {
   color: var(--ide-chrome-ink);
 }
 
+.ide-right-section-tight {
+  padding: 8px 12px;
+}
+
+.plan-doc-scroll {
+  flex: 1;
+  min-height: 0;
+  max-height: min(52vh, 520px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.plan-panel-flash {
+  animation: plan-flash 1.2s ease;
+}
+
+@keyframes plan-flash {
+  0% {
+    background: color-mix(in oklab, var(--ide-accent) 12%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.agent-msg-streaming {
+  opacity: 0.88;
+}
+
+.thought-summary {
+  margin: 0 0 6px;
+}
+
+.thought-block.is-live .thought-toggle {
+  color: var(--ide-ink);
+}
+
+.attach-menu-anchor {
+  position: relative;
+  max-width: min(100%, 52rem);
+  margin: 0 auto 8px;
+}
+
+.attach-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  min-width: 200px;
+  padding: 4px;
+  border: 1px solid var(--ide-line);
+  border-radius: var(--ide-radius-md);
+  background: var(--ide-bg-elevated);
+  box-shadow: var(--ide-composer-shadow);
+}
+
+.attach-menu-item {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--ide-ink);
+  padding: 8px 10px;
+  font-size: 13px;
+  text-align: left;
+  border-radius: var(--ide-radius-sm);
+  cursor: pointer;
+}
+
+.attach-menu-item:hover {
+  background: var(--ide-bg-hover);
+}
+
+.composer-foot-branch {
+  font-variant-numeric: tabular-nums;
+  color: var(--ide-muted);
+}
+
+.md-plan-hint {
+  color: var(--ide-ink-secondary);
+  font-size: 12px;
+}
+
 .dev-workbench {
   border: 1px solid var(--ide-line);
   border-radius: var(--ide-radius-md);

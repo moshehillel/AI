@@ -1,7 +1,13 @@
 "use client";
 
 import { Fragment, type ReactNode } from "react";
-import { stripAiDisclaimer } from "@automation-studio/domain";
+
+function stripAiDisclaimer(text: string): string {
+  return text
+    .replace(/\n*Koda is AI and can make mistakes\.?\s*/gi, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
 
 type Block =
   | { type: "heading"; level: 1 | 2 | 3; text: string }

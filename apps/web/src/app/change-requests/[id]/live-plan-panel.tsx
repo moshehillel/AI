@@ -65,7 +65,10 @@ export function LivePlanPanel({
 
       <div className="ide-right-section">
         <p className="ide-right-label">On this program</p>
-        <div className="space-y-1 text-[12px]" style={{ color: "var(--ide-ink-secondary)" }}>
+        <div
+          className="space-y-1 text-[12px]"
+          style={{ color: "var(--ide-chrome-ink-secondary)" }}
+        >
           <div className="flex items-center justify-between gap-2">
             <span>Living plan</span>
             <span className="muted text-[11px]">

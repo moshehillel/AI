@@ -1,47 +1,66 @@
 @import "tailwindcss";
 
-/* Cursor-like IDE chrome — light grey / off-white agent UI */
+/*
+ * IDE layout: dark surrounding chrome + light agent chat (Cursor-like reading pane).
+ * Chat text stays high-contrast dark-on-light; sidebars use light-on-dark.
+ */
 :root {
-  --ide-bg: #f3f3f3;
-  --ide-bg-chat: #f8f8f8;
+  /* Light chat / center pane */
+  --ide-bg-chat: #ffffff;
   --ide-bg-elevated: #ffffff;
-  --ide-bg-hover: rgba(0, 0, 0, 0.04);
-  --ide-bg-active: rgba(59, 130, 246, 0.08);
+  --ide-bg-user-bubble: #f2f2f2;
+  --ide-bg-hover: rgba(0, 0, 0, 0.045);
+  --ide-bg-active: rgba(59, 130, 246, 0.1);
   --ide-ink: #1a1a1a;
-  --ide-ink-secondary: #5c5c5c;
-  --ide-muted: #8a8a8a;
-  --ide-line: #e8e8e8;
-  --ide-line-strong: #dadada;
+  --ide-ink-secondary: #3c3c3c;
+  --ide-muted: #666666;
+  --ide-line: #e6e6e6;
+  --ide-line-strong: #d0d0d0;
   --ide-accent: #3b82f6;
   --ide-accent-soft: #dbeafe;
-  --ide-mode: #7c5cff;
-  --ide-mode-bg: rgba(124, 92, 255, 0.12);
+  --ide-mode: #6d28d9;
+  --ide-mode-bg: rgba(109, 40, 217, 0.1);
   --ide-danger: #dc2626;
   --ide-warn: #b45309;
   --ide-success: #16a34a;
   --ide-add: #16a34a;
   --ide-del: #dc2626;
+
+  /* Dark frame (left / right sidebars + shell) */
+  --ide-chrome-bg: #1a1a1a;
+  --ide-chrome-elevated: #242424;
+  --ide-chrome-hover: rgba(255, 255, 255, 0.06);
+  --ide-chrome-active: rgba(59, 130, 246, 0.2);
+  --ide-chrome-ink: #ececec;
+  --ide-chrome-ink-secondary: #c2c2c2;
+  --ide-chrome-muted: #9a9a9a;
+  --ide-chrome-line: rgba(255, 255, 255, 0.1);
+
+  /* Shell bg alias (outside chat) */
+  --ide-bg: var(--ide-chrome-bg);
+
   --ide-radius-sm: 6px;
   --ide-radius-md: 10px;
   --ide-radius-pill: 999px;
   --ide-sidebar-w: 240px;
   --ide-right-w: 280px;
-  --ide-composer-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.06);
+  --ide-composer-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.08);
+  /* Plain Cursor-like UI sans — no marketing/display faces in chat */
   --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
-  /* Legacy aliases used by staff/admin surfaces — map to light IDE */
-  --bg-deep: var(--ide-bg);
-  --bg-mid: var(--ide-bg-chat);
-  --bg-panel: var(--ide-bg-elevated);
+  /* Legacy aliases for staff/admin (light readable surfaces) */
+  --bg-deep: #f3f3f3;
+  --bg-mid: #f8f8f8;
+  --bg-panel: #ffffff;
   --accent: var(--ide-accent);
   --accent-soft: #2563eb;
   --accent-warm: #c2410c;
-  --ink: var(--ide-ink);
-  --muted: var(--ide-muted);
+  --ink: #1a1a1a;
+  --muted: #666666;
   --danger: var(--ide-danger);
   --warn: var(--ide-warn);
-  --line: var(--ide-line);
+  --line: #e6e6e6;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   --font-display: var(--font-body);
   --frame-page: 56rem;
@@ -57,10 +76,11 @@ html,
 body {
   margin: 0;
   min-height: 100%;
-  color: var(--ide-ink);
-  background: var(--ide-bg);
+  color: var(--ink);
+  background: var(--bg-deep);
   font-family: var(--font-body);
   font-size: 13px;
+  font-weight: 400;
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
 }
@@ -71,6 +91,8 @@ html:has(.ide-shell) body {
   height: 100%;
   max-height: 100dvh;
   overflow: hidden;
+  color: var(--ide-chrome-ink);
+  background: var(--ide-chrome-bg);
 }
 
 a {
@@ -114,7 +136,8 @@ select {
   /* Leave room for the fixed AI disclaimer bar */
   padding-bottom: 2.25rem;
   box-sizing: border-box;
-  background: var(--ide-bg);
+  background: var(--ide-chrome-bg);
+  color: var(--ide-chrome-ink);
 }
 
 .ide-shell-with-right {
@@ -145,8 +168,9 @@ select {
   max-height: 100%;
   min-height: 0;
   overflow: hidden;
-  border-right: 1px solid var(--ide-line);
-  background: var(--ide-bg);
+  border-right: 1px solid var(--ide-chrome-line);
+  background: var(--ide-chrome-bg);
+  color: var(--ide-chrome-ink);
 }
 
 .ide-sidebar-top {
@@ -154,7 +178,7 @@ select {
   flex-direction: column;
   gap: 2px;
   padding: 10px 10px 8px;
-  border-bottom: 1px solid var(--ide-line);
+  border-bottom: 1px solid var(--ide-chrome-line);
 }
 
 .ide-nav-item {
@@ -165,22 +189,23 @@ select {
   border: none;
   border-radius: var(--ide-radius-sm);
   background: transparent;
-  color: var(--ide-ink);
+  color: var(--ide-chrome-ink);
   padding: 7px 10px;
   text-align: left;
   cursor: pointer;
   font-size: 13px;
+  font-weight: 400;
 }
 
 .ide-nav-item:hover {
-  background: var(--ide-bg-hover);
+  background: var(--ide-chrome-hover);
 }
 
 .ide-nav-item svg {
   width: 15px;
   height: 15px;
   flex-shrink: 0;
-  opacity: 0.7;
+  opacity: 0.75;
 }
 
 .ide-nav-section {
@@ -195,7 +220,7 @@ select {
   align-items: center;
   gap: 6px;
   padding: 6px 8px 4px;
-  color: var(--ide-muted);
+  color: var(--ide-chrome-muted);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.02em;
@@ -209,16 +234,16 @@ select {
   width: 100%;
   border-radius: var(--ide-radius-sm);
   padding: 6px 8px;
-  color: var(--ide-ink);
+  color: var(--ide-chrome-ink);
   position: relative;
 }
 
 .ide-list-item:hover {
-  background: var(--ide-bg-hover);
+  background: var(--ide-chrome-hover);
 }
 
 .ide-list-item.is-active {
-  background: var(--ide-bg-active);
+  background: var(--ide-chrome-active);
 }
 
 .ide-list-item.is-active::before {
@@ -240,11 +265,12 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+  font-weight: 400;
 }
 
 .ide-list-item-meta {
   flex-shrink: 0;
-  color: var(--ide-muted);
+  color: var(--ide-chrome-muted);
   font-size: 11px;
 }
 
@@ -254,14 +280,14 @@ select {
   justify-content: space-between;
   gap: 8px;
   padding: 10px 12px;
-  border-top: 1px solid var(--ide-line);
+  border-top: 1px solid var(--ide-chrome-line);
 }
 
 .ide-brand {
   font-weight: 600;
   font-size: 14px;
   letter-spacing: -0.02em;
-  color: var(--ide-ink);
+  color: var(--ide-chrome-ink);
 }
 
 .ide-main {
@@ -273,7 +299,8 @@ select {
   min-height: 0;
   overflow: hidden;
   background: var(--ide-bg-chat);
-  border-right: 1px solid var(--ide-line);
+  color: var(--ide-ink);
+  border-right: 1px solid var(--ide-chrome-line);
 }
 
 .ide-main-header {
@@ -286,6 +313,7 @@ select {
   padding: 8px 16px;
   border-bottom: 1px solid var(--ide-line);
   background: var(--ide-bg-chat);
+  color: var(--ide-ink);
 }
 
 .ide-main-title {
@@ -295,6 +323,7 @@ select {
   min-width: 0;
   font-size: 13px;
   font-weight: 500;
+  color: var(--ide-ink);
 }
 
 .ide-main-title span {
@@ -309,13 +338,14 @@ select {
   height: 100%;
   max-height: 100%;
   min-height: 0;
-  background: var(--ide-bg);
+  background: var(--ide-chrome-bg);
+  color: var(--ide-chrome-ink);
   overflow-x: hidden;
   overflow-y: auto;
 }
 
 .ide-right-section {
-  border-bottom: 1px solid var(--ide-line);
+  border-bottom: 1px solid var(--ide-chrome-line);
   padding: 10px 12px;
 }
 
@@ -328,7 +358,7 @@ select {
 }
 
 .ide-right-label {
-  color: var(--ide-muted);
+  color: var(--ide-chrome-muted);
   font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.04em;
@@ -349,20 +379,21 @@ select {
   border-radius: var(--ide-radius-sm);
   border: 1px solid transparent;
   background: transparent;
-  color: var(--ide-ink-secondary);
+  color: var(--ide-chrome-ink-secondary);
   padding: 4px 8px;
   font-size: 12px;
+  font-weight: 400;
   cursor: pointer;
 }
 
 .ide-tab:hover {
-  background: var(--ide-bg-hover);
+  background: var(--ide-chrome-hover);
 }
 
 .ide-tab.is-active {
-  background: var(--ide-bg-elevated);
-  border-color: var(--ide-line);
-  color: var(--ide-ink);
+  background: var(--ide-chrome-elevated);
+  border-color: var(--ide-chrome-line);
+  color: var(--ide-chrome-ink);
 }
 
 /* ─── Agent chat ─── */
@@ -374,6 +405,9 @@ select {
   height: 100%;
   max-height: 100%;
   overflow: hidden;
+  background: var(--ide-bg-chat);
+  color: var(--ide-ink);
+  font-family: var(--font-body);
 }
 
 .agent-chat-scroll {
@@ -383,6 +417,7 @@ select {
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 16px 20px 12px;
+  background: var(--ide-bg-chat);
 }
 
 .agent-msg {
@@ -391,19 +426,19 @@ select {
 }
 
 .agent-msg-user {
-  background: var(--ide-bg-elevated);
+  background: var(--ide-bg-user-bubble);
   border: 1px solid var(--ide-line);
-  border-radius: 12px;
-  padding: 12px 14px;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 
 .agent-msg-assistant {
   padding: 2px 2px 4px;
+  background: transparent;
 }
 
 .agent-msg-system {
-  color: var(--ide-muted);
+  color: var(--ide-ink-secondary);
   font-size: 12px;
   padding: 4px 2px;
 }
@@ -411,9 +446,12 @@ select {
 .agent-msg-body {
   margin: 0;
   white-space: pre-wrap;
-  font-size: 13.5px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  font-weight: 400;
   line-height: 1.55;
   color: var(--ide-ink);
+  letter-spacing: 0;
 }
 
 .agent-msg-actions {
@@ -430,14 +468,15 @@ select {
   color: inherit;
   padding: 2px;
   cursor: pointer;
-  opacity: 0.65;
+  opacity: 0.7;
 }
 
 .agent-msg-actions button:hover {
   opacity: 1;
+  color: var(--ide-ink-secondary);
 }
 
-/* Thought / worked blocks — Cursor style */
+/* Thought / worked blocks — plain secondary text on light chat */
 .thought-block {
   max-width: min(100%, var(--measure-chat));
   margin: 0 auto 10px;
@@ -452,27 +491,29 @@ select {
   width: 100%;
   border: none;
   background: transparent;
-  color: var(--ide-muted);
+  color: var(--ide-ink-secondary);
   padding: 8px 2px;
   font-size: 12px;
+  font-weight: 400;
   cursor: pointer;
   text-align: left;
 }
 
 .thought-toggle:hover {
-  color: var(--ide-ink-secondary);
+  color: var(--ide-ink);
 }
 
 .thought-toggle svg {
   width: 12px;
   height: 12px;
-  opacity: 0.7;
+  opacity: 0.75;
 }
 
 .thought-body {
   padding: 0 2px 10px 18px;
-  color: var(--ide-muted);
+  color: var(--ide-ink-secondary);
   font-size: 12px;
+  font-weight: 400;
   line-height: 1.5;
 }
 
@@ -519,12 +560,12 @@ select {
   max-width: min(100%, 52rem);
   margin: 0 auto;
   padding: 0 4px 8px;
-  color: var(--ide-muted);
+  color: var(--ide-ink-secondary);
   font-size: 12px;
 }
 
 .composer-status strong {
-  color: var(--ide-ink-secondary);
+  color: var(--ide-ink);
   font-weight: 500;
 }
 
@@ -765,6 +806,17 @@ select {
   background: var(--ide-bg-hover);
 }
 
+.ide-sidebar .btn-ghost,
+.ide-right .btn-ghost {
+  border-color: var(--ide-chrome-line);
+  color: var(--ide-chrome-ink);
+}
+
+.ide-sidebar .btn-ghost:hover:not(:disabled),
+.ide-right .btn-ghost:hover:not(:disabled) {
+  background: var(--ide-chrome-hover);
+}
+
 .btn-danger {
   background: color-mix(in oklab, var(--ide-danger) 10%, white);
   border-color: color-mix(in oklab, var(--ide-danger) 35%, var(--ide-line));
@@ -794,6 +846,11 @@ select {
   color: var(--ide-muted);
 }
 
+.ide-sidebar .muted,
+.ide-right .muted {
+  color: var(--ide-chrome-muted);
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -801,9 +858,17 @@ select {
   padding: 0.2rem 0.55rem;
   border-radius: var(--ide-radius-pill);
   border: 1px solid var(--ide-line);
-  background: var(--ide-bg);
+  background: var(--ide-bg-chat);
   font-size: 11px;
+  font-weight: 400;
   color: var(--ide-ink-secondary);
+}
+
+.ide-sidebar .status-pill,
+.ide-right .status-pill {
+  border-color: var(--ide-chrome-line);
+  background: var(--ide-chrome-elevated);
+  color: var(--ide-chrome-ink-secondary);
 }
 
 .koda-disclaimer {
@@ -812,8 +877,8 @@ select {
   right: 0;
   bottom: 0;
   z-index: 40;
-  border-top: 1px solid var(--ide-line);
-  background: color-mix(in oklab, var(--ide-bg) 92%, white);
+  border-top: 1px solid var(--ide-chrome-line);
+  background: color-mix(in oklab, var(--ide-chrome-bg) 92%, black);
   backdrop-filter: blur(8px);
   padding: 0.4rem 1rem;
   text-align: center;
@@ -822,7 +887,7 @@ select {
 .koda-disclaimer p {
   margin: 0;
   font-size: 11px;
-  color: var(--ide-muted);
+  color: var(--ide-chrome-muted);
 }
 
 .chip {
@@ -855,9 +920,14 @@ select {
   padding: 0 2px 8px;
   font-family: var(--font-body);
   font-size: 12.5px;
+  font-weight: 400;
   line-height: 1.55;
-  color: var(--ide-ink-secondary);
+  color: var(--ide-chrome-ink-secondary);
   white-space: pre-wrap;
+}
+
+.ide-right .plan-doc-body {
+  color: var(--ide-chrome-ink);
 }
 
 .dev-workbench {

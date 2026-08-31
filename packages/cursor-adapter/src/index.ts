@@ -361,9 +361,10 @@ function mockPlanReply(prompt: string): string {
     return [
       "I'm **Koda** — Advanced Automations' AI Builder.",
       "",
-      "Tell me what you want to automate and I'll draft a living plan (with diagrams when you ask).",
+      "I help you plan automations in plain language. The full plan lives in the Plan panel.",
       "",
-      "Koda is AI and can make mistakes.",
+      "## What I still need from you",
+      "1. What would you like to automate?",
     ].join("\n");
   }
   if (
@@ -372,31 +373,40 @@ function mockPlanReply(prompt: string): string {
     )
   ) {
     return [
-      "For HHA / Provider Soft I'd prefer an official API or scheduled export first; RPA only if neither exists.",
+      "Here's the simple order I'd use to move data between Provider Soft and HHA:",
       "",
-      "# Plan",
+      "1. **Official connection or file export** — if either system can share data securely or save files on a schedule, we use that first.",
+      "2. **Screen automation** — only if there is no better option. A bot logs into the website and clicks through screens.",
+      "",
+      "I've updated the Plan panel with this approach.",
+      "",
+      "## What I still need from you",
+      "1. Today, do staff only log into these systems in a browser, or do you already get file exports?",
+      "2. Which direction should data flow first — Provider Soft → HHA, HHA → Provider Soft, or both?",
+      "",
+      "```plan",
+      "# Plan: Provider Soft ↔ HHA",
       "## Goal",
       "Connect Provider Soft and HHA so records sync reliably.",
-      "",
       "## Systems",
       "- Provider Soft",
       "- HHA / HHAeXchange",
-      "",
       "## Integrations / APIs",
-      "- API/export first; RPA fallback for UI-only workflows",
-      "",
+      "- Prefer secure data connection or scheduled file export; screen automation only if needed",
       "## Workflow",
-      "1. Read from source (API, export, or RPA)",
-      "2. Validate and map fields",
-      "3. Write to destination",
-      "4. Surface failures / duplicates",
-      "",
-      "Koda is AI and can make mistakes.",
+      "1. Read records from the source system",
+      "2. Check and match fields",
+      "3. Send to the destination system",
+      "4. Show errors clearly when something fails",
+      "## What you need to provide",
+      "- [ ] Provider Soft login — use Add secrets / credentials",
+      "- [ ] HHA / HHAeXchange login — use Add secrets / credentials",
+      "```",
     ].join("\n");
   }
   if (/(diagram|digram|mermaid|flowchart)/.test(lower)) {
     return [
-      "Here's a diagram of the flow based on your brief:",
+      "Here's a simple diagram of the flow based on your brief:",
       "",
       "```mermaid",
       "flowchart LR",
@@ -404,15 +414,19 @@ function mockPlanReply(prompt: string): string {
       "  B --> C[Destination]",
       "```",
       "",
+      "## What I still need from you",
+      "1. Does this match how work moves in your office today?",
+      "2. What should happen when a record fails or is incomplete?",
+      "",
+      "```plan",
       "# Plan (draft)",
       "## Goal",
       "Automate the workflow described in chat.",
       "## Workflow",
-      "1. Receive trigger",
-      "2. Transform / validate",
-      "3. Write to destination",
-      "",
-      "Koda is AI and can make mistakes.",
+      "1. Something starts the work",
+      "2. Data is checked and prepared",
+      "3. Result is sent to the right place",
+      "```",
     ].join("\n");
   }
 
@@ -436,37 +450,34 @@ function mockPlanReply(prompt: string): string {
         l.length > 24,
     );
 
+  const goal =
+    goalCandidate?.slice(0, 400).replace(/\n+/g, " ").trim() ||
+    (systems.length >= 2
+      ? `Connect ${systems.join(" and ")} so data flows reliably.`
+      : "Confirm outcome with the client.");
+
   return [
-    "Here's a draft plan from what you shared:",
+    "Thanks — I've updated the living plan in the Plan panel based on what you shared.",
     "",
+    "## What I still need from you",
+    systems.length
+      ? "1. Does this capture what you want, or should we change anything?"
+      : "1. What systems are involved, and what should happen step by step?",
+    "",
+    "```plan",
     "# Plan",
     "## Goal",
-    goalCandidate?.slice(0, 400).replace(/\n+/g, " ").trim() ||
-      (systems.length >= 2
-        ? `Connect ${systems.join(" and ")} so data flows reliably.`
-        : "Confirm outcome with the client."),
-    "",
+    goal,
     "## Systems",
     ...(systems.length ? systems.map((s) => `- ${s}`) : ["- To be confirmed"]),
-    "",
     "## Workflow",
-    "1. Trigger from the source event",
-    "2. Validate and map fields",
-    "3. Call the destination system",
-    "4. Handle errors / notify as needed",
-    "",
-    "## Edge cases",
-    "- Missing fields, API errors, duplicates",
-    "",
-    "## Acceptance criteria",
-    "- Happy path works in a test environment",
-    "- Failures are visible",
-    "",
-    systems.length
-      ? "Ask me to refine any section, or request a diagram."
-      : "What systems are involved, and what should happen step by step?",
-    "",
-    "Koda is AI and can make mistakes.",
+    "1. Something triggers the work",
+    "2. Data is checked and prepared",
+    "3. Result goes to the right system",
+    "4. Errors are shown clearly",
+    "## What you need to provide",
+    "- [ ] Logins or sample files needed for this automation (to be confirmed)",
+    "```",
   ].join("\n");
 }
 

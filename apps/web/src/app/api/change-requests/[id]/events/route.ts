@@ -51,6 +51,11 @@ export async function GET(
             isCredentialSecretKey(s.keyName),
           );
 
+          const meta = (cr.planningMeta ?? {}) as {
+            liveProgress?: string | null;
+            liveDraft?: string | null;
+          };
+
           const fingerprint = JSON.stringify({
             status: cr.status,
             messageCount: cr.messages.length,
@@ -58,7 +63,10 @@ export async function GET(
             ci: cr.ciChecks[0]?.status ?? null,
             pr: cr.pullRequests[0]?.url ?? null,
             planId: cr.plans[0]?.id ?? null,
+            planUpdated: cr.plans[0]?.updatedAt?.toISOString() ?? null,
             secretKeys: credentialSecrets.map((s) => s.keyName),
+            liveProgress: meta.liveProgress ?? null,
+            liveDraft: meta.liveDraft ?? null,
             updatedAt: cr.updatedAt.toISOString(),
           });
 
@@ -78,6 +86,8 @@ export async function GET(
               pullRequest: cr.pullRequests[0] ?? null,
               ci: cr.ciChecks[0] ?? null,
               plan: cr.plans[0] ?? null,
+              liveProgress: meta.liveProgress ?? null,
+              liveDraft: meta.liveDraft ?? null,
               secretKeys: credentialSecrets.map((s) => ({
                 keyName: s.keyName,
                 createdAt: s.createdAt.toISOString(),
@@ -91,7 +101,7 @@ export async function GET(
           void tick().catch((error) => {
             send({ type: "error", message: String(error) });
           });
-        }, 2000);
+        }, 1000);
 
         const heartbeat = setInterval(() => {
           send({ type: "heartbeat", at: new Date().toISOString() });

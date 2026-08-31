@@ -1,25 +1,30 @@
 export const dynamic = "force-dynamic";
 import { AppHeader } from "@/components/app-header";
 import { requirePageAuth } from "@/lib/page-auth";
+import { isOpenAccess } from "@/lib/access-mode";
 import { db } from "@automation-studio/db";
 import { STATUS_LABELS } from "@automation-studio/domain";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 export default async function ReviewQueuePage() {
   const ctx = await requirePageAuth();
 
   if (ctx.role !== "DEVELOPER" && ctx.role !== "ADMIN") {
+    if (isOpenAccess()) {
+      redirect("/staff?next=/review");
+    }
     return (
       <main className="app-frame">
         <AppHeader role={ctx.role} />
         <div className="panel space-y-3 p-6">
           <p>Developer access is required to view the review queue.</p>
           <p className="muted text-sm">
-            While open access is on, unlock developer tools at{" "}
+            Sign in with a developer or admin account, or unlock staff tools at{" "}
             <Link className="underline" href="/staff">
               /staff
-            </Link>{" "}
-            with your staff token.
+            </Link>
+            .
           </p>
         </div>
       </main>

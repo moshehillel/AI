@@ -1,15 +1,20 @@
 export const dynamic = "force-dynamic";
 import { AppHeader } from "@/components/app-header";
 import { requirePageAuth } from "@/lib/page-auth";
+import { isOpenAccess } from "@/lib/access-mode";
 import { db } from "@automation-studio/db";
 import {
   getCompanyUsageTotals,
   parseCompanySettings,
 } from "@automation-studio/domain";
+import { redirect } from "next/navigation";
 
 export default async function UsagePage() {
   const ctx = await requirePageAuth();
   if (ctx.role === "EMPLOYEE") {
+    if (isOpenAccess()) {
+      redirect("/staff?next=/usage");
+    }
     return (
       <main className="app-frame">
         <AppHeader role={ctx.role} />

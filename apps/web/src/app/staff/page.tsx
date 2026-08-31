@@ -1,15 +1,23 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState, useTransition } from "react";
+import { Suspense, useEffect, useState, useTransition } from "react";
 
 function StaffUnlockForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const [token, setToken] = useState(params.get("token") ?? "");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const next = params.get("next") ?? "/review";
+
+  // Drop legacy ?token= from the address bar so secrets never linger in history.
+  useEffect(() => {
+    if (!params.get("token")) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("token");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}`);
+  }, [params]);
 
   function unlock() {
     setError(null);
@@ -17,7 +25,7 @@ function StaffUnlockForm() {
       const res = await fetch("/api/staff/unlock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, role: "developer", next }),
+        body: JSON.stringify({ password, role: "developer", next }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
@@ -35,26 +43,33 @@ function StaffUnlockForm() {
   return (
     <main className="app-frame-narrow">
       <section className="panel rise space-y-4 p-6">
-        <h1 className="brand-mark text-3xl">Developer unlock</h1>
+        <h1 className="brand-mark text-3xl">Staff login</h1>
         <p className="muted text-sm">
-          Opens developer tools on this browser while the public site stays in
-          customer mode. Customers never see this page.
+          Enter the admin password to open developer tools on this browser. The
+          public customer site stays open without login.
         </p>
-        <input
-          className="field"
-          type="password"
-          autoComplete="off"
-          placeholder="Staff access token"
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-        />
+        <label className="block space-y-1.5">
+          <span className="text-sm muted">Password</span>
+          <input
+            className="field"
+            type="password"
+            name="password"
+            autoComplete="current-password"
+            placeholder="Admin password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && password.trim() && !pending) unlock();
+            }}
+          />
+        </label>
         <button
           type="button"
           className="btn btn-primary w-full"
-          disabled={pending || !token.trim()}
+          disabled={pending || !password.trim()}
           onClick={unlock}
         >
-          {pending ? "Unlocking…" : "Continue as developer"}
+          {pending ? "Signing in…" : "Continue as developer"}
         </button>
         {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
       </section>

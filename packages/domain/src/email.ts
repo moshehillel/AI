@@ -119,7 +119,7 @@ export function programSubmittedEmail(input: {
       `1. Open the program in Koda Review:`,
       input.reviewUrl,
       input.staffUnlockUrl
-        ? `\nIf the public site is in customer mode, unlock developer tools first:\n${input.staffUnlockUrl}`
+        ? `\nIf the public site is in customer mode, sign in at Staff login first (password — never in the URL):\n${input.staffUnlockUrl}`
         : "",
       ``,
       `2. Click "Open in Cursor" to review the customer's plan in Cursor (not in Koda as the build workspace).`,

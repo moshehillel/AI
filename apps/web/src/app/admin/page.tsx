@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { AppHeader } from "@/components/app-header";
 import { requirePageAuth } from "@/lib/page-auth";
+import { isOpenAccess } from "@/lib/access-mode";
 import { db } from "@automation-studio/db";
 import { parseCompanySettings } from "@automation-studio/domain";
 import { ConnectRepoForm } from "./connect-repo-form";
@@ -9,6 +10,7 @@ import { ProjectMembersForm } from "./project-members-form";
 import { VerifyProtectionButton } from "./verify-protection-button";
 import { CompanySettingsForm } from "./company-settings-form";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 export default async function AdminPage({
   searchParams,
@@ -19,6 +21,9 @@ export default async function AdminPage({
   const params = await searchParams;
 
   if (ctx.role !== "ADMIN" && ctx.role !== "DEVELOPER") {
+    if (isOpenAccess()) {
+      redirect("/staff?next=/admin");
+    }
     return (
       <main className="app-frame">
         <AppHeader role={ctx.role} />

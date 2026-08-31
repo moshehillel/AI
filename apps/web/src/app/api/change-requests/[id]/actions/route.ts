@@ -25,7 +25,7 @@ import {
 } from "@automation-studio/domain";
 import { getAppBaseUrl } from "@/lib/app-url";
 import { queueAndMaybeSendEmail } from "@/lib/notify";
-import { getStaffAccessToken } from "@/lib/staff-access";
+import { getStaffPassword } from "@/lib/staff-access";
 
 const bodySchema = z.object({
   action: z.enum([
@@ -44,6 +44,7 @@ const bodySchema = z.object({
     "reject",
     "merge",
     "cancel",
+    "interrupt",
     "retry",
   ]),
   /** Required for submit_to_dev — blocks accidental one-click submits. */
@@ -204,9 +205,9 @@ export async function POST(
         });
 
         const reviewUrl = `${getAppBaseUrl()}/change-requests/${cr.id}`;
-        const staffToken = getStaffAccessToken();
-        const staffUnlockUrl = staffToken
-          ? `${getAppBaseUrl()}/staff?token=${encodeURIComponent(staffToken)}&next=${encodeURIComponent(`/change-requests/${cr.id}`)}`
+        // Never put the password in email/URL — login form at /staff sets httpOnly cookie.
+        const staffUnlockUrl = getStaffPassword()
+          ? `${getAppBaseUrl()}/staff?next=${encodeURIComponent(`/change-requests/${cr.id}`)}`
           : null;
         const emailContent = programSubmittedEmail({
           programTitle: cr.title,
@@ -911,6 +912,59 @@ export async function POST(
           });
         }
         break;
+      }
+      case "interrupt": {
+        // Soft-stop the current agent turn only — do not cancel the change request.
+        const latestRun = await db.agentRun.findFirst({
+          where: { changeRequestId: cr.id, status: "RUNNING" },
+          orderBy: { createdAt: "desc" },
+        });
+        const agentId = latestRun?.cursorAgentId ?? cr.cursorAgentId;
+
+        // Mark locally first so the waiting worker can exit without posting a reply.
+        if (latestRun) {
+          await db.agentRun.updateMany({
+            where: { id: latestRun.id, status: "RUNNING" },
+            data: { status: "CANCELLED", finishedAt: new Date() },
+          });
+        }
+
+        if (agentId) {
+          await enqueueJob("cursor.cancel", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+            agentId,
+            runId: latestRun?.cursorRunId,
+            agentRunId: latestRun?.id,
+          });
+        }
+
+        await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            authorId: ctx.user.id,
+            content: "Interrupted — stopped the current response.",
+          },
+        });
+
+        await writeAuditEvent({
+          companyId: ctx.company.id,
+          actorId: ctx.user.id,
+          action: "koda.turn_interrupted",
+          entityType: "change_request",
+          entityId: cr.id,
+          metadata: {
+            agentId: agentId ?? null,
+            runId: latestRun?.cursorRunId ?? null,
+          },
+        });
+
+        return NextResponse.json({
+          ok: true,
+          interrupted: true,
+          cancelledRun: Boolean(agentId || latestRun),
+        });
       }
       case "cancel": {
         const latestRun = await db.agentRun.findFirst({

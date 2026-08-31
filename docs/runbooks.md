@@ -74,7 +74,7 @@ redacts common patterns if they slip through.
 
 **Developer — retrieve for Build**
 
-1. Unlock staff: `/staff?token=<STAFF_ACCESS_TOKEN>`
+1. Unlock staff: open `/staff`, enter `ADMIN_PASSWORD` (or `STAFF_ACCESS_TOKEN`)
 2. Open the submitted program → **Build desk**
 3. Under **Customer secrets**, click **Reveal** then **Copy once**
 4. Use the value in the build environment / Cursor session manually
@@ -86,12 +86,18 @@ Open in Cursor / Build / Test & Improve prompts include secret **names** only
 ### Developer flow: Open in Cursor → Build → Test & Improve
 
 While `OPEN_ACCESS=1`, the public site is always the seeded **EMPLOYEE**.
-Developers unlock staff tools with `STAFF_ACCESS_TOKEN`:
+Developers unlock staff tools with a password (`ADMIN_PASSWORD` or
+`STAFF_ACCESS_TOKEN`) via the `/staff` form — the password is never put in the
+URL (query tokens leak in history and logs). After login, an httpOnly signed
+cookie unlocks `/admin`, `/review`, and `/usage`.
 
 ```bash
-railway variable set --service web STAFF_ACCESS_TOKEN="$(openssl rand -hex 24)"
-# Redeploy web after setting. Bookmark:
-# https://koda.advancedautomations.net/staff?token=<token>
+# Set once (reuse STAFF_ACCESS_TOKEN if already configured):
+railway variable set --service web ADMIN_PASSWORD="$(openssl rand -hex 24)"
+# Or keep using the existing alias:
+# railway variable set --service web STAFF_ACCESS_TOKEN="$(openssl rand -hex 24)"
+# Redeploy web after setting. Then open:
+# https://koda.advancedautomations.net/staff
 ```
 
 Then for each submitted program:

@@ -3,16 +3,23 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-export function NewProgramForm({ projectId }: { projectId: string }) {
+export function NewProgramForm({
+  projectId,
+  variant = "default",
+}: {
+  projectId: string;
+  variant?: "default" | "hero";
+}) {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [spark, setSpark] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const hero = variant === "hero";
 
   return (
     <form
-      className="space-y-3"
+      className={hero ? "onboard-form" : "space-y-3"}
       onSubmit={(event) => {
         event.preventDefault();
         setError(null);
@@ -44,24 +51,37 @@ export function NewProgramForm({ projectId }: { projectId: string }) {
         });
       }}
     >
-      <p className="text-sm muted">
-        Koda will ask clarifying questions one at a time — not a long form.
-      </p>
+      {!hero ? (
+        <p className="text-sm muted">
+          Koda will ask clarifying questions one at a time — not a long form.
+        </p>
+      ) : null}
       <input
-        className="field"
+        className={hero ? "onboard-field" : "field"}
         placeholder="Program name"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
+        aria-label="Program name"
       />
       <textarea
-        className="field min-h-24"
-        placeholder="Optional: a sentence about what you want to automate (or leave blank and let Koda ask)"
+        className={hero ? "onboard-field onboard-field-area" : "field min-h-24"}
+        placeholder={
+          hero
+            ? "What should we automate?"
+            : "Optional: a sentence about what you want to automate (or leave blank and let Koda ask)"
+        }
         value={spark}
         onChange={(e) => setSpark(e.target.value)}
+        aria-label="What to automate"
+        rows={hero ? 2 : 4}
       />
-      {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
+      {error ? (
+        <p className={hero ? "onboard-error" : "text-sm text-[var(--danger)]"}>
+          {error}
+        </p>
+      ) : null}
       <button
-        className="btn btn-primary"
+        className={hero ? "onboard-btn" : "btn btn-primary"}
         disabled={pending || (!title.trim() && !spark.trim())}
       >
         {pending ? "Starting…" : "Start planning with Koda"}

@@ -1,8 +1,21 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Space_Grotesk, Manrope } from "next/font/google";
 import { isOpenAccess } from "@/lib/access-mode";
 
 export const dynamic = "force-dynamic";
+
+const display = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-onboard-display",
+});
+
+const body = Manrope({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-onboard-body",
+});
 
 export default function HomePage() {
   const clerkEnabled = Boolean(
@@ -16,10 +29,28 @@ export default function HomePage() {
 
   if (!clerkEnabled) {
     return (
-      <main className="app-frame relative flex min-h-screen flex-col">
-        <header className="relative z-10 flex items-center justify-between rise">
-          <div className="brand-mark text-2xl tracking-tight">Koda</div>
-          <Link className="btn btn-primary" href="/projects">
+      <main className={`onboard ${display.variable} ${body.variable}`}>
+        <div className="onboard-atmosphere" aria-hidden>
+          <div className="onboard-glow onboard-glow-a" />
+          <div className="onboard-glow onboard-glow-b" />
+          <div className="onboard-grid" />
+          <div className="onboard-cubes" />
+        </div>
+        <header className="onboard-top">
+          <div className="onboard-top-brand">
+            <picture>
+              <source srcSet="/brand/AA-Logo.webp" type="image/webp" />
+              <img
+                src="/brand/AA-Logo.png"
+                alt="Advanced Automations"
+                className="onboard-top-logo"
+                width={48}
+                height={48}
+              />
+            </picture>
+            <span className="onboard-top-name">Advanced Automations</span>
+          </div>
+          <Link className="onboard-btn onboard-btn-compact" href="/projects">
             Continue
           </Link>
         </header>
@@ -39,31 +70,36 @@ function Hero({
   ctaLabel: string;
 }) {
   return (
-    <section className="hero-stage">
-      <div className="hero-grid" aria-hidden />
-      <div className="relative z-10 max-w-3xl">
-        <p
-          className="brand-mark rise text-6xl leading-none md:text-8xl"
-          style={{ animationDelay: "40ms" }}
-        >
+    <section className="onboard-hero">
+      <div className="onboard-hero-visual rise" style={{ animationDelay: "40ms" }}>
+        <picture>
+          <source srcSet="/brand/AA-Logo.webp" type="image/webp" />
+          <img
+            src="/brand/AA-Logo.png"
+            alt="Advanced Automations"
+            className="onboard-hero-logo"
+            width={720}
+            height={720}
+            fetchPriority="high"
+          />
+        </picture>
+      </div>
+      <div className="onboard-hero-copy">
+        <p className="onboard-koda rise" style={{ animationDelay: "100ms" }}>
           Koda
         </p>
         <h1
-          className="rise mt-5 max-w-2xl text-2xl font-medium leading-snug text-[var(--accent-soft)] md:text-4xl"
-          style={{ animationDelay: "120ms" }}
+          className="onboard-headline rise"
+          style={{ animationDelay: "160ms" }}
         >
           Advanced Automations AI Builder
         </h1>
-        <p
-          className="muted rise mt-6 max-w-xl text-lg leading-relaxed"
-          style={{ animationDelay: "200ms" }}
-        >
+        <p className="onboard-lead rise" style={{ animationDelay: "220ms" }}>
           Tell Koda what you need automated. Answer a few questions, review the
-          plan, then ship with developer approval — without touching
-          infrastructure.
+          plan, then ship with developer approval.
         </p>
-        <div className="rise mt-9" style={{ animationDelay: "280ms" }}>
-          <Link className="btn btn-primary" href={ctaHref}>
+        <div className="onboard-cta rise" style={{ animationDelay: "280ms" }}>
+          <Link className="onboard-btn" href={ctaHref}>
             {ctaLabel}
           </Link>
         </div>
@@ -80,14 +116,30 @@ async function ClerkHome() {
   }
 
   return (
-    <main className="app-frame relative flex min-h-screen flex-col">
-      <header className="relative z-10 flex items-center justify-between rise">
-        <div className="brand-mark text-2xl tracking-tight">Koda</div>
-        <div className="flex gap-3">
-          <Link className="btn btn-ghost" href="/sign-in">
-            Sign in
-          </Link>
-          <Link className="btn btn-primary" href="/sign-up">
+    <main className={`onboard ${display.variable} ${body.variable}`}>
+      <div className="onboard-atmosphere" aria-hidden>
+        <div className="onboard-glow onboard-glow-a" />
+        <div className="onboard-glow onboard-glow-b" />
+        <div className="onboard-grid" />
+        <div className="onboard-cubes" />
+      </div>
+      <header className="onboard-top">
+        <div className="onboard-top-brand">
+          <picture>
+            <source srcSet="/brand/AA-Logo.webp" type="image/webp" />
+            <img
+              src="/brand/AA-Logo.png"
+              alt="Advanced Automations"
+              className="onboard-top-logo"
+              width={48}
+              height={48}
+            />
+          </picture>
+          <span className="onboard-top-name">Advanced Automations</span>
+        </div>
+        <div className="onboard-top-nav">
+          <Link href="/sign-in">Sign in</Link>
+          <Link className="onboard-btn onboard-btn-compact" href="/sign-up">
             Get started
           </Link>
         </div>

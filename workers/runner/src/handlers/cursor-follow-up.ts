@@ -8,8 +8,18 @@ import {
 } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
 import { loadPlanningAttachmentsForAgent } from "../lib/planning-attachment.js";
-import { persistPlanModeReply, clearLiveProgress } from "../lib/planning-persist.js";
+import { clearLiveProgress } from "../lib/planning-persist.js";
 import { mirrorPlanningStream } from "../lib/planning-stream.js";
+import {
+  AGENT_TURN_TIMEOUT_MS,
+  attachmentLoadFailureMessage,
+  failPlanningTurn,
+  finalizePlanModeTurn,
+  planningTurnErrorMessage,
+  postTurnMessage,
+  withTimeout,
+  writeLiveProgress,
+} from "../lib/planning-turn.js";
 
 function normalizeAttachmentRefs(data: {
   attachmentRef?: string;
@@ -34,6 +44,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
 
   const forcePlan = cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status);
   const mode = forcePlan ? "plan" : (data.mode ?? "agent");
+  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
 
   let prompt =
     mode === "plan"
@@ -45,6 +56,13 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
   const repo = cr.project.repository;
   const branchName = cr.branchName;
   if (attachmentRefs.length) {
+    if (mode === "plan") {
+      await writeLiveProgress(
+        cr.id,
+        priorMeta,
+        "Reading your attached files…",
+      );
+    }
     const attached = await loadPlanningAttachmentsForAgent({
       companyId: data.companyId,
       projectId: cr.projectId,
@@ -58,7 +76,26 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
               branch: branchName,
             }
           : null,
+      onProgress:
+        mode === "plan"
+          ? (label) => writeLiveProgress(cr.id, priorMeta, label)
+          : undefined,
     });
+    const attachError = attachmentLoadFailureMessage(
+      attachmentRefs,
+      attached.fileNames.length,
+    );
+    if (attachError) {
+      if (mode === "plan") {
+        await failPlanningTurn({
+          changeRequestId: cr.id,
+          priorMeta,
+          reason: attachError,
+        });
+        return { ok: false, reason: attachError };
+      }
+      throw new Error(attachError);
+    }
     if (attached.promptSection) {
       prompt = `${prompt}\n\n${attached.promptSection}`;
     }
@@ -97,139 +134,173 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     await new Promise((r) => setTimeout(r, 200));
   }
 
+  const agentRunStartedAt = new Date();
   const agentRun = await db.agentRun.create({
     data: {
       changeRequestId: cr.id,
       cursorAgentId: cr.cursorAgentId,
       mode: mode === "plan" ? "PLAN" : "AGENT",
       status: "RUNNING",
-      startedAt: new Date(),
+      startedAt: agentRunStartedAt,
     },
   });
 
-  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+  let result: Awaited<ReturnType<Awaited<ReturnType<typeof resumeAndSend>>["wait"]>>;
 
-  const { wait, run, runId: immediateRunId } = await resumeAndSend({
-    agentId: cr.cursorAgentId,
-    prompt,
-    mode,
-    images,
-  });
-
-  if (immediateRunId) {
-    await db.agentRun.update({
-      where: { id: agentRun.id },
-      data: { cursorRunId: immediateRunId },
+  try {
+    const { wait, run, runId: immediateRunId } = await resumeAndSend({
+      agentId: cr.cursorAgentId,
+      prompt,
+      mode,
+      images,
     });
-  }
 
-  if (mode === "plan") {
-    await db.changeRequest.update({
-      where: { id: cr.id },
-      data: {
-        planningMeta: {
-          ...priorMeta,
-          liveProgress: "Starting…",
-          liveDraft: null,
-        },
-        updatedAt: new Date(),
-      },
-    });
-  }
+    if (immediateRunId) {
+      await db.agentRun.update({
+        where: { id: agentRun.id },
+        data: { cursorRunId: immediateRunId },
+      });
+    }
 
-  const streamMirror =
-    mode === "plan"
-      ? mirrorPlanningStream({
+    if (mode === "plan") {
+      await writeLiveProgress(cr.id, priorMeta, "Starting…", null);
+    }
+
+    const streamMirror =
+      mode === "plan"
+        ? mirrorPlanningStream({
+            changeRequestId: cr.id,
+            priorMeta,
+            stream: run,
+          })
+        : Promise.resolve();
+
+    try {
+      [result] = await Promise.all([
+        withTimeout(wait(), AGENT_TURN_TIMEOUT_MS, "AI reply"),
+        streamMirror,
+      ]);
+    } catch (error) {
+      const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
+      if (current?.status === "CANCELLED") {
+        console.info(`[cursor-follow-up] cancelled mid-wait cr=${cr.id}`);
+        if (mode === "plan") await clearLiveProgress(cr.id, priorMeta);
+        return { cancelled: true };
+      }
+      await db.agentRun.update({
+        where: { id: agentRun.id },
+        data: { status: "FAILED", finishedAt: new Date() },
+      });
+      const reason =
+        error instanceof Error ? error.message : "Something went wrong";
+      if (mode === "plan") {
+        await failPlanningTurn({
           changeRequestId: cr.id,
           priorMeta,
-          stream: run,
-        })
-      : Promise.resolve();
+          reason,
+          agentRunId: agentRun.id,
+        });
+        return { ok: false, reason };
+      }
+      await postTurnMessage(
+        cr.id,
+        planningTurnErrorMessage(reason),
+        "ASSISTANT",
+      );
+      throw error;
+    }
 
-  let result: Awaited<ReturnType<typeof wait>>;
-  try {
-    [result] = await Promise.all([wait(), streamMirror]);
-  } catch (error) {
-    const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
-    if (current?.status === "CANCELLED") {
-      console.info(`[cursor-follow-up] cancelled mid-wait cr=${cr.id}`);
+    const afterWait = await db.agentRun.findUnique({ where: { id: agentRun.id } });
+    if (afterWait?.status === "CANCELLED") {
+      console.info(`[cursor-follow-up] cancelled after wait cr=${cr.id}`);
       if (mode === "plan") await clearLiveProgress(cr.id, priorMeta);
       return { cancelled: true };
     }
+
     await db.agentRun.update({
       where: { id: agentRun.id },
-      data: { status: "FAILED", finishedAt: new Date() },
+      data: {
+        cursorRunId: result.runId ?? immediateRunId,
+        status: "SUCCEEDED",
+        finishedAt: new Date(),
+      },
     });
-    if (mode === "plan") await clearLiveProgress(cr.id, priorMeta);
-    throw error;
-  }
 
-  const afterWait = await db.agentRun.findUnique({ where: { id: agentRun.id } });
-  if (afterWait?.status === "CANCELLED") {
-    console.info(`[cursor-follow-up] cancelled after wait cr=${cr.id}`);
-    if (mode === "plan") await clearLiveProgress(cr.id, priorMeta);
-    return { cancelled: true };
-  }
-
-  await db.agentRun.update({
-    where: { id: agentRun.id },
-    data: {
-      cursorRunId: result.runId ?? immediateRunId,
-      status: "SUCCEEDED",
-      finishedAt: new Date(),
-    },
-  });
-
-  if (mode === "agent") {
-    if (result.text) {
-      await db.changeRequestMessage.create({
-        data: {
-          changeRequestId: cr.id,
-          role: "ASSISTANT",
-          content: result.text,
-          cursorRunId: result.runId,
-          model: result.model,
-        },
-      });
-    }
-    await transitionChangeRequest({
-      changeRequestId: cr.id,
-      companyId: data.companyId,
-      toStatus: "TESTING",
-    });
-    await enqueueJob("github.ensure-pr", {
-      changeRequestId: cr.id,
-      companyId: data.companyId,
-    });
-  } else {
-    if (result.text) {
-      await persistPlanModeReply({
-        changeRequestId: cr.id,
-        priorMeta,
-        rawText: result.text,
-        cursorRunId: result.runId,
-        model: result.model,
-      });
-    } else {
-      await clearLiveProgress(cr.id, priorMeta);
-    }
-    if (cr.kind !== "PROGRAM") {
+    if (mode === "agent") {
+      if (result.text?.trim()) {
+        await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "ASSISTANT",
+            content: result.text,
+            cursorRunId: result.runId,
+            model: result.model,
+          },
+        });
+      } else {
+        await postTurnMessage(
+          cr.id,
+          planningTurnErrorMessage("The AI session finished without a reply"),
+          "ASSISTANT",
+          { cursorRunId: result.runId, model: result.model },
+        );
+      }
       await transitionChangeRequest({
         changeRequestId: cr.id,
         companyId: data.companyId,
-        toStatus: "AWAITING_PLAN_APPROVAL",
+        toStatus: "TESTING",
       });
+      await enqueueJob("github.ensure-pr", {
+        changeRequestId: cr.id,
+        companyId: data.companyId,
+      });
+    } else {
+      await finalizePlanModeTurn({
+        changeRequestId: cr.id,
+        priorMeta,
+        result,
+      });
+      if (cr.kind !== "PROGRAM") {
+        await transitionChangeRequest({
+          changeRequestId: cr.id,
+          companyId: data.companyId,
+          toStatus: "AWAITING_PLAN_APPROVAL",
+        });
+      }
     }
+
+    await enqueueJob("usage.record", {
+      changeRequestId: cr.id,
+      companyId: data.companyId,
+      agentRunId: agentRun.id,
+      inputTokens: result.usage?.inputTokens,
+      outputTokens: result.usage?.outputTokens,
+      totalTokens: result.usage?.totalTokens,
+    });
+
+    return { ok: true };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Something went wrong";
+    console.error(`[cursor-follow-up] failed cr=${cr.id}`, error);
+    if (mode === "plan") {
+      const alreadyPosted = await db.changeRequestMessage.findFirst({
+        where: {
+          changeRequestId: cr.id,
+          role: "ASSISTANT",
+          createdAt: { gte: agentRunStartedAt },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!alreadyPosted) {
+        await failPlanningTurn({
+          changeRequestId: cr.id,
+          priorMeta,
+          reason,
+          agentRunId: agentRun.id,
+        });
+      }
+      return { ok: false, reason };
+    }
+    throw error;
   }
-
-  await enqueueJob("usage.record", {
-    changeRequestId: cr.id,
-    companyId: data.companyId,
-    agentRunId: agentRun.id,
-    inputTokens: result.usage?.inputTokens,
-    outputTokens: result.usage?.outputTokens,
-    totalTokens: result.usage?.totalTokens,
-  });
-
-  return { ok: true };
 }

@@ -10,8 +10,18 @@ import {
 } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
 import { loadPlanningAttachmentsForAgent } from "../lib/planning-attachment.js";
-import { persistPlanModeReply, clearLiveProgress } from "../lib/planning-persist.js";
+import { clearLiveProgress } from "../lib/planning-persist.js";
 import { mirrorPlanningStream } from "../lib/planning-stream.js";
+import {
+  AGENT_TURN_TIMEOUT_MS,
+  attachmentLoadFailureMessage,
+  failPlanningTurn,
+  finalizePlanModeTurn,
+  planningTurnErrorMessage,
+  postTurnMessage,
+  withTimeout,
+  writeLiveProgress,
+} from "../lib/planning-turn.js";
 
 function normalizeAttachmentRefs(data: {
   attachmentRef?: string;
@@ -111,7 +121,11 @@ export async function handleCursorStart(data: CursorStartJobData) {
   let images: Array<{ data: string; mimeType: string }> | undefined;
 
   const attachmentRefs = normalizeAttachmentRefs(data);
+  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
   if (attachmentRefs.length) {
+    if (data.mode === "plan") {
+      await writeLiveProgress(cr.id, priorMeta, "Reading your attached files…");
+    }
     const attached = await loadPlanningAttachmentsForAgent({
       companyId: data.companyId,
       projectId: cr.projectId,
@@ -122,7 +136,26 @@ export async function handleCursorStart(data: CursorStartJobData) {
         repo: repo.githubRepo,
         branch: branchName,
       },
+      onProgress:
+        data.mode === "plan"
+          ? (label) => writeLiveProgress(cr.id, priorMeta, label)
+          : undefined,
     });
+    const attachError = attachmentLoadFailureMessage(
+      attachmentRefs,
+      attached.fileNames.length,
+    );
+    if (attachError) {
+      if (data.mode === "plan") {
+        await failPlanningTurn({
+          changeRequestId: cr.id,
+          priorMeta,
+          reason: attachError,
+        });
+        return { ok: false, reason: attachError };
+      }
+      throw new Error(attachError);
+    }
     if (attached.promptSection) {
       prompt = `${prompt}\n\n${attached.promptSection}`;
     }
@@ -157,8 +190,6 @@ export async function handleCursorStart(data: CursorStartJobData) {
     },
   });
 
-  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
-
   await db.changeRequest.update({
     where: { id: cr.id },
     data: {
@@ -187,7 +218,10 @@ export async function handleCursorStart(data: CursorStartJobData) {
 
   let result: Awaited<ReturnType<typeof wait>>;
   try {
-    [result] = await Promise.all([wait(), streamMirror]);
+    [result] = await Promise.all([
+      withTimeout(wait(), AGENT_TURN_TIMEOUT_MS, "AI reply"),
+      streamMirror,
+    ]);
   } catch (error) {
     const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
     if (current?.status === "CANCELLED") {
@@ -199,7 +233,17 @@ export async function handleCursorStart(data: CursorStartJobData) {
       where: { id: agentRun.id },
       data: { status: "FAILED", finishedAt: new Date() },
     });
-    if (data.mode === "plan") await clearLiveProgress(cr.id, priorMeta);
+    const reason = error instanceof Error ? error.message : "Something went wrong";
+    if (data.mode === "plan") {
+      await failPlanningTurn({
+        changeRequestId: cr.id,
+        priorMeta,
+        reason,
+        agentRunId: agentRun.id,
+      });
+      return { ok: false, reason, agentId, mode: data.mode };
+    }
+    await postTurnMessage(cr.id, planningTurnErrorMessage(reason), "ASSISTANT");
     throw error;
   }
 
@@ -220,17 +264,11 @@ export async function handleCursorStart(data: CursorStartJobData) {
   });
 
   if (data.mode === "plan") {
-    if (result.text) {
-      await persistPlanModeReply({
-        changeRequestId: cr.id,
-        priorMeta,
-        rawText: result.text,
-        cursorRunId: result.runId,
-        model: result.model,
-      });
-    } else {
-      await clearLiveProgress(cr.id, priorMeta);
-    }
+    await finalizePlanModeTurn({
+      changeRequestId: cr.id,
+      priorMeta,
+      result,
+    });
     if (cr.kind === "PROGRAM") {
       // Stay in planning until client submits to developer
       await transitionChangeRequest({
@@ -247,7 +285,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
       });
     }
   } else {
-    if (result.text) {
+    if (result.text?.trim()) {
       await db.changeRequestMessage.create({
         data: {
           changeRequestId: cr.id,
@@ -257,6 +295,13 @@ export async function handleCursorStart(data: CursorStartJobData) {
           model: result.model,
         },
       });
+    } else {
+      await postTurnMessage(
+        cr.id,
+        planningTurnErrorMessage("The AI session finished without a reply"),
+        "ASSISTANT",
+        { cursorRunId: result.runId, model: result.model },
+      );
     }
     await transitionChangeRequest({
       changeRequestId: cr.id,

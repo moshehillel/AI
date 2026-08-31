@@ -50,6 +50,16 @@ const WORKING_STATUSES = [
   "DEPLOYING",
 ] as const;
 
+/** Show a recoverable error if Koda never posts a reply. */
+const REPLY_TIMEOUT_MS = 4 * 60 * 1000;
+
+type AgentRunSnapshot = {
+  id: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+};
+
 function isAwaitingAssistantReply(messages: Message[]): boolean {
   let lastUserIdx = -1;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -270,6 +280,7 @@ export function ChatPanel({
   const [liveDraft, setLiveDraft] = useState<string | null>(null);
   const [progressSteps, setProgressSteps] = useState<string[]>([]);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [replyTimedOut, setReplyTimedOut] = useState(false);
   const thinkingStarted = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -289,7 +300,8 @@ export function ChatPanel({
       working ||
       connectingSession ||
       isAwaitingAssistantReply(messages));
-  const showThinking = waitingOnReply || liveLink === "reconnecting";
+  const showThinking =
+    (waitingOnReply || liveLink === "reconnecting") && !replyTimedOut;
   const inputBusy = pending || preparingFile || savingSecrets || interrupting;
   const canSend =
     !inputBusy && (Boolean(prompt.trim()) || stagedFiles.length > 0);
@@ -327,6 +339,7 @@ export function ChatPanel({
           liveProgress?: string | null;
           liveDraft?: string | null;
           plan?: { content?: string } | null;
+          latestAgentRun?: AgentRunSnapshot | null;
         };
         if (data.type === "connected" || data.type === "heartbeat") {
           if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -362,6 +375,18 @@ export function ChatPanel({
             setAwaitingReply(stillAwaiting);
             if (!stillAwaiting) {
               setTurnInterrupted(false);
+              setReplyTimedOut(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else if (
+              data.latestAgentRun &&
+              (data.latestAgentRun.status === "FAILED" ||
+                data.latestAgentRun.status === "SUCCEEDED")
+            ) {
+              // Agent finished but no assistant message landed — surface recovery UI.
+              setReplyTimedOut(true);
+              setAwaitingReply(false);
               setLiveProgress(null);
               setLiveDraft(null);
               setProgressSteps([]);
@@ -410,6 +435,21 @@ export function ChatPanel({
     thinkingStarted.current = null;
     setThoughtSeconds(0);
   }, [showThinking]);
+
+  useEffect(() => {
+    if (!waitingOnReply || turnInterrupted) {
+      setReplyTimedOut(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      setReplyTimedOut(true);
+      setAwaitingReply(false);
+      setLiveProgress(null);
+      setLiveDraft(null);
+      setProgressSteps([]);
+    }, REPLY_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [waitingOnReply, turnInterrupted, changeRequestId]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -534,6 +574,7 @@ export function ChatPanel({
 
     setAttachError(null);
     setTurnInterrupted(false);
+    setReplyTimedOut(false);
     setAwaitingReply(true);
     startTransition(async () => {
       const response = await fetch(
@@ -939,6 +980,20 @@ export function ChatPanel({
           </>
         ) : null}
 
+        {replyTimedOut ? (
+          <div
+            className="agent-msg agent-msg-assistant rise"
+            role="alert"
+            style={{ borderColor: "var(--ide-danger)" }}
+          >
+            <p className="agent-msg-body" style={{ margin: 0 }}>
+              This is taking longer than expected and no reply arrived. Click{" "}
+              <strong>Interrupt</strong> below, then send your message again. If
+              you attached files, try one at a time or a smaller PDF.
+            </p>
+          </div>
+        ) : null}
+
         {status === "FAILED" ? (
           <p className="text-sm" style={{ color: "var(--ide-danger)" }}>
             Something went wrong. Use Retry in the actions panel.
@@ -947,10 +1002,10 @@ export function ChatPanel({
       </div>
 
       <div className="pill-composer-wrap">
-        {showThinking ? (
+        {showThinking || (replyTimedOut && waitingOnReply === false) ? (
           <div className="composer-status">
             <span>
-              <strong>1 Working</strong>
+              <strong>{showThinking ? "1 Working" : "Stalled"}</strong>
             </span>
             <span>
               Plan updates{" "}

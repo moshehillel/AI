@@ -65,6 +65,7 @@ export async function loadPlanningAttachmentsForAgent(opts: {
     repo: string;
     branch: string;
   } | null;
+  onProgress?: (label: string) => void | Promise<void>;
 }): Promise<{
   promptSection: string;
   images: Array<{ data: string; mimeType: string }>;
@@ -81,6 +82,7 @@ export async function loadPlanningAttachmentsForAgent(opts: {
   }> = [];
 
   for (const ref of refs) {
+    await opts.onProgress?.("Reading your attached files…");
     const payload = await loadPlanningAttachmentPayload({
       companyId: opts.companyId,
       projectId: opts.projectId,
@@ -89,6 +91,13 @@ export async function loadPlanningAttachmentsForAgent(opts: {
     if (!payload) continue;
 
     fileNames.push(payload.fileName);
+    const progressLabel =
+      payload.kind === "pdf"
+        ? `Reading your PDF (${payload.fileName})…`
+        : payload.kind === "excel"
+          ? `Reading your spreadsheet (${payload.fileName})…`
+          : `Reading ${payload.fileName}…`;
+    await opts.onProgress?.(progressLabel);
 
     const workspacePath =
       payload.workspacePath ||

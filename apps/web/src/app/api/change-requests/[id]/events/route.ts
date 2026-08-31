@@ -38,6 +38,7 @@ export async function GET(
               pullRequests: { orderBy: { createdAt: "desc" }, take: 1 },
               ciChecks: { orderBy: { createdAt: "desc" }, take: 1 },
               plans: { orderBy: { createdAt: "desc" }, take: 1 },
+              agentRuns: { orderBy: { createdAt: "desc" }, take: 1 },
               secretRefs: {
                 where: { purpose: "CHAT", ciphertext: { not: null } },
                 select: { keyName: true, createdAt: true },
@@ -56,6 +57,8 @@ export async function GET(
             liveDraft?: string | null;
           };
 
+          const latestAgentRun = cr.agentRuns[0] ?? null;
+
           const fingerprint = JSON.stringify({
             status: cr.status,
             messageCount: cr.messages.length,
@@ -64,6 +67,9 @@ export async function GET(
             pr: cr.pullRequests[0]?.url ?? null,
             planId: cr.plans[0]?.id ?? null,
             planUpdated: cr.plans[0]?.updatedAt?.toISOString() ?? null,
+            agentRunId: latestAgentRun?.id ?? null,
+            agentRunStatus: latestAgentRun?.status ?? null,
+            agentRunFinished: latestAgentRun?.finishedAt?.toISOString() ?? null,
             secretKeys: credentialSecrets.map((s) => s.keyName),
             liveProgress: meta.liveProgress ?? null,
             liveDraft: meta.liveDraft ?? null,
@@ -86,6 +92,17 @@ export async function GET(
               pullRequest: cr.pullRequests[0] ?? null,
               ci: cr.ciChecks[0] ?? null,
               plan: cr.plans[0] ?? null,
+              latestAgentRun: latestAgentRun
+                ? {
+                    id: latestAgentRun.id,
+                    status: latestAgentRun.status,
+                    startedAt:
+                      latestAgentRun.startedAt?.toISOString() ??
+                      latestAgentRun.createdAt?.toISOString() ??
+                      new Date(0).toISOString(),
+                    finishedAt: latestAgentRun.finishedAt?.toISOString() ?? null,
+                  }
+                : null,
               liveProgress: meta.liveProgress ?? null,
               liveDraft: meta.liveDraft ?? null,
               secretKeys: credentialSecrets.map((s) => ({

@@ -18,6 +18,13 @@ import { handleSyncPreview } from "./handlers/sync-preview.js";
 import { handleTransition } from "./handlers/transition.js";
 import { handleUsageRecord } from "./handlers/usage-record.js";
 import { handleMergePrepare } from "./handlers/merge-prepare.js";
+import { db } from "@automation-studio/db";
+import {
+  failPlanningTurn,
+  planningTurnErrorMessage,
+  postTurnMessage,
+} from "./lib/planning-turn.js";
+import type { PlanningMeta } from "@automation-studio/domain";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 loadEnv({ path: path.join(__dirname, "../../../.env") });
@@ -65,6 +72,50 @@ worker.on("completed", (job) => {
 
 worker.on("failed", (job, error) => {
   console.error(`[worker] failed ${job?.name} (${job?.id})`, error);
+  void (async () => {
+    if (!job?.data || typeof job.data !== "object") return;
+    const data = job.data as {
+      changeRequestId?: string;
+      companyId?: string;
+    };
+    if (!data.changeRequestId) return;
+    if (job.name !== "cursor.follow-up" && job.name !== "cursor.start-agent") {
+      return;
+    }
+
+    const cr = await db.changeRequest.findFirst({
+      where: { id: data.changeRequestId },
+    });
+    if (!cr) return;
+
+    const recentAssistant = await db.changeRequestMessage.findFirst({
+      where: {
+        changeRequestId: cr.id,
+        role: "ASSISTANT",
+        createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (recentAssistant) return;
+
+    const reason = error instanceof Error ? error.message : "Something went wrong";
+    const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+    if (cr.kind === "PROGRAM" && cr.status === "PLANNING") {
+      await failPlanningTurn({
+        changeRequestId: cr.id,
+        priorMeta,
+        reason,
+      });
+      return;
+    }
+    await postTurnMessage(
+      cr.id,
+      planningTurnErrorMessage(reason),
+      "ASSISTANT",
+    );
+  })().catch((postError) => {
+    console.error("[worker] failed to post turn error message", postError);
+  });
 });
 
 console.log(`[worker] listening on queue ${QUEUE_NAME}`);

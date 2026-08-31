@@ -4,6 +4,10 @@ export const PLANNING_FILE_MAX_BYTES = 2 * 1024 * 1024; // 2 MiB
 export const PLANNING_ATTACHMENT_EXCERPT_MAX = 12_000;
 /** Cursor Cloud Agents API allows at most 5 images per prompt. */
 export const PLANNING_AGENT_MAX_IMAGES = 5;
+/** Max files staged/sent with one planning chat message. */
+export const PLANNING_MAX_FILES_PER_MESSAGE = 5;
+/** Workspace folder where original PDFs are committed for the Cursor agent to open. */
+export const PLANNING_UPLOAD_REPO_DIR = ".koda/uploads";
 
 const EXT_MIME: Record<string, string[]> = {
   ".txt": ["text/plain"],
@@ -82,10 +86,16 @@ export type PlanningAgentFilePayload = {
   /**
    * Cursor SDK / Cloud Agents API only accepts raster images on `prompt.images`.
    * PDF pages are rendered to PNG so layout is visible to the model.
+   * Raw PDF bytes are NOT accepted by the API — see originalBase64 + workspacePath.
    */
   images?: AgentAttachmentImage[];
-  /** Original file bytes (base64) — for audit / reprocess; not pasted into Goal. */
+  /**
+   * Original file bytes (base64). For PDFs this is the real PDF (not a transcript).
+   * Kept encrypted in SecretRef and optionally written into the agent workspace.
+   */
   originalBase64?: string;
+  /** Relative path in the planning repo where the original file was / should be written. */
+  workspacePath?: string;
 };
 
 export function extensionOf(fileName: string): string {
@@ -231,23 +241,35 @@ export function summarizeExcelForPlanning(opts: {
   return parts.join("\n");
 }
 
-/** Short chat line when PDF layout images are attached for the agent. */
+/** Short chat line when a PDF is staged/sent — never a full text transcript. */
 export function summarizePdfChatForPlanning(opts: {
   fileName: string;
   pageCount: number;
   imagesAttached: number;
+  /** Optional tiny preview only — not the primary agent payload. */
   textExcerpt?: string;
 }): string {
   const parts = [
     `File: ${opts.fileName} (PDF)`,
-    `Pages: ${opts.pageCount} · Layout images sent to Koda: ${opts.imagesAttached}`,
+    `Pages: ${opts.pageCount} · Original PDF kept for Koda · Layout previews: ${opts.imagesAttached}`,
   ];
   if (opts.textExcerpt?.trim()) {
-    const { text, truncated } = truncate(opts.textExcerpt.trim(), 800);
-    parts.push("Text preview:", text);
-    if (truncated) parts.push("…(truncated for chat — layout images carry the full pages)");
+    const { text, truncated } = truncate(opts.textExcerpt.trim(), 240);
+    parts.push(`Snippet: ${text}${truncated ? "…" : ""}`);
   }
   return parts.join("\n");
+}
+
+/** Safe relative path under PLANNING_UPLOAD_REPO_DIR for a customer upload. */
+export function planningUploadWorkspacePath(fileName: string): string {
+  const base = fileName
+    .replace(/[/\\]/g, "_")
+    .replace(/\.\./g, "_")
+    .replace(/[^\w.\- ()[\]]+/g, "_")
+    .replace(/^\.+/, "")
+    .trim();
+  const safe = (base || "upload.bin").slice(0, 180);
+  return `${PLANNING_UPLOAD_REPO_DIR}/${safe}`;
 }
 
 /** Summarize plain text / docs: filename + capped excerpt. */
@@ -298,15 +320,22 @@ export function formatAgentFilePromptSection(
   payload: PlanningAgentFilePayload,
 ): string {
   const parts = [
-    `[Attached file for layout/structure analysis: ${payload.fileName} (${payload.kind})]`,
+    `[Attached file: ${payload.fileName} (${payload.kind})]`,
     payload.agentNote,
   ];
-  if (payload.images?.length) {
+  if (payload.workspacePath) {
     parts.push(
-      `${payload.images.length} page image(s) are attached to this message via the Cursor images API so you can see layout/tables visually.`,
+      `Original file path in this workspace: ${payload.workspacePath}`,
+      `Open and read that file directly (it is the real ${payload.kind === "pdf" ? "PDF" : "upload"}, not a text transcript).`,
     );
   }
-  if (payload.agentText?.trim()) {
+  if (payload.images?.length) {
+    parts.push(
+      `${payload.images.length} page image(s) are also attached via the Cursor images API for immediate layout/table visibility (Cloud Agents API does not accept raw PDF bytes on prompt.images).`,
+    );
+  }
+  // Excel/CSV/text still use structured agentText. PDFs should not dump OCR/transcript here.
+  if (payload.kind !== "pdf" && payload.agentText?.trim()) {
     parts.push("Structured content:", payload.agentText.trim());
   }
   return parts.join("\n\n");

@@ -7,11 +7,23 @@ import {
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
-import { loadPlanningAttachmentForAgent } from "../lib/planning-attachment.js";
+import { loadPlanningAttachmentsForAgent } from "../lib/planning-attachment.js";
+
+function normalizeAttachmentRefs(data: {
+  attachmentRef?: string;
+  attachmentRefs?: string[];
+}): string[] {
+  const refs = [
+    ...(data.attachmentRefs ?? []),
+    ...(data.attachmentRef ? [data.attachmentRef] : []),
+  ].filter(Boolean);
+  return [...new Set(refs)];
+}
 
 export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
   const cr = await db.changeRequest.findFirstOrThrow({
     where: { id: data.changeRequestId, companyId: data.companyId },
+    include: { project: { include: { repository: true } } },
   });
 
   if (!cr.cursorAgentId) {
@@ -27,20 +39,32 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       : data.prompt;
   let images: Array<{ data: string; mimeType: string }> | undefined;
 
-  if (data.attachmentRef) {
-    const attached = await loadPlanningAttachmentForAgent({
+  const attachmentRefs = normalizeAttachmentRefs(data);
+  const repo = cr.project.repository;
+  const branchName = cr.branchName;
+  if (attachmentRefs.length) {
+    const attached = await loadPlanningAttachmentsForAgent({
       companyId: data.companyId,
       projectId: cr.projectId,
-      attachmentRef: data.attachmentRef,
+      attachmentRefs,
+      repoWrite:
+        repo && branchName
+          ? {
+              installationId: repo.installationId ?? "0",
+              owner: repo.githubOwner,
+              repo: repo.githubRepo,
+              branch: branchName,
+            }
+          : null,
     });
-    if (attached) {
+    if (attached.promptSection) {
       prompt = `${prompt}\n\n${attached.promptSection}`;
-      images = attached.images.length ? attached.images : undefined;
     }
+    images = attached.images.length ? attached.images : undefined;
   }
 
   console.info(
-    `[cursor-follow-up] mode=${mode} cr=${cr.id} agentId=${cr.cursorAgentId} attachmentRef=${data.attachmentRef ?? "none"} images=${images?.length ?? 0}`,
+    `[cursor-follow-up] mode=${mode} cr=${cr.id} agentId=${cr.cursorAgentId} attachmentRefs=${attachmentRefs.join(",") || "none"} images=${images?.length ?? 0}`,
   );
 
   if (mode === "agent" && cr.status !== "BUILDING" && cr.status !== "IMPLEMENTING") {

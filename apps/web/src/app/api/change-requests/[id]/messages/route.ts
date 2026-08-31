@@ -20,87 +20,136 @@ import {
 } from "@automation-studio/domain";
 import { enqueueJob } from "@automation-studio/jobs";
 
-const attachmentSchema = z
-  .object({
-    kind: z.enum(["api_docs_url", "docs_text", "examples", "file"]),
-    value: z.string().min(1).max(20000),
-    fileName: z.string().max(260).optional(),
-    /** SecretRef keyName for encrypted agent file payload (PDF images / Excel CSV). */
-    attachmentRef: z.string().max(120).optional(),
-  })
-  .optional();
+const attachmentItemSchema = z.object({
+  kind: z.enum(["api_docs_url", "docs_text", "examples", "file"]),
+  value: z.string().min(1).max(20000),
+  fileName: z.string().max(260).optional(),
+  /** SecretRef keyName for encrypted agent file payload (PDF / Excel / text). */
+  attachmentRef: z.string().max(120).optional(),
+});
 
-const bodySchema = z.object({
-  content: z.string().max(20000).optional(),
-  attachment: attachmentSchema,
-}).superRefine((value, ctx) => {
-  const content = value.content?.trim() ?? "";
-  if (!content && !value.attachment) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Message or attachment required",
-      path: ["content"],
-    });
-  }
-  if (value.attachment?.kind === "api_docs_url") {
-    try {
-      // eslint-disable-next-line no-new
-      new URL(value.attachment.value);
-    } catch {
+const bodySchema = z
+  .object({
+    content: z.string().max(20000).optional(),
+    /** Single attachment (legacy). */
+    attachment: attachmentItemSchema.optional(),
+    /** Multiple file attachments sent with one message. */
+    attachments: z.array(attachmentItemSchema).max(5).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const content = value.content?.trim() ?? "";
+    const list = [
+      ...(value.attachments ?? []),
+      ...(value.attachment ? [value.attachment] : []),
+    ];
+    if (!content && list.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Invalid API docs URL",
-        path: ["attachment", "value"],
+        message: "Message or attachment required",
+        path: ["content"],
       });
     }
+    for (const [i, att] of list.entries()) {
+      if (att.kind === "api_docs_url") {
+        try {
+          // eslint-disable-next-line no-new
+          new URL(att.value);
+        } catch {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "Invalid API docs URL",
+            path: value.attachments?.length
+              ? ["attachments", i, "value"]
+              : ["attachment", "value"],
+          });
+        }
+      }
+    }
+  });
+
+type AttachmentItem = z.infer<typeof attachmentItemSchema>;
+
+function normalizeAttachments(body: z.infer<typeof bodySchema>): AttachmentItem[] {
+  const list = [
+    ...(body.attachments ?? []),
+    ...(body.attachment ? [body.attachment] : []),
+  ];
+  // Dedupe by attachmentRef when present
+  const seen = new Set<string>();
+  const out: AttachmentItem[] = [];
+  for (const a of list) {
+    const key = a.attachmentRef || `${a.kind}:${a.fileName ?? ""}:${a.value.slice(0, 40)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(a);
   }
-});
+  return out.slice(0, 5);
+}
 
 function composeUserContent(
   content: string,
-  attachment?: z.infer<typeof attachmentSchema>,
+  attachments: AttachmentItem[],
 ): string {
-  if (!attachment) return content;
-  const label =
-    attachment.kind === "api_docs_url"
-      ? `Attached API docs URL: ${attachment.value}`
-      : attachment.kind === "docs_text"
-        ? `Attached documentation:\n${attachment.value}`
-        : attachment.kind === "examples"
-          ? `Attached examples:\n${attachment.value}`
-          : `Attached file${attachment.fileName ? ` (${attachment.fileName})` : ""}:\n${attachment.value}`;
-  return content ? `${content}\n\n${label}` : label;
+  if (!attachments.length) return content;
+  const blocks = attachments.map((attachment) => {
+    if (attachment.kind === "api_docs_url") {
+      return `Attached API docs URL: ${attachment.value}`;
+    }
+    if (attachment.kind === "docs_text") {
+      return `Attached documentation:\n${attachment.value}`;
+    }
+    if (attachment.kind === "examples") {
+      return `Attached examples:\n${attachment.value}`;
+    }
+    return `Attached file${attachment.fileName ? ` (${attachment.fileName})` : ""}:\n${attachment.value}`;
+  });
+  const attached = blocks.join("\n\n");
+  return content ? `${content}\n\n${attached}` : attached;
 }
 
-function mergePlanningAttachment(
+function mergePlanningAttachments(
   meta: PlanningMeta,
-  attachment?: z.infer<typeof attachmentSchema>,
+  attachments: AttachmentItem[],
 ): PlanningMeta {
-  if (!attachment) return meta;
-  if (attachment.kind === "api_docs_url") {
-    return { ...meta, apiDocsUrl: attachment.value };
-  }
-  if (attachment.kind === "docs_text" || attachment.kind === "file") {
-    // Keep planningMeta docsText short — never dump full Excel/PDF into Goal context.
-    const prior = meta.docsText ? `${meta.docsText}\n\n` : "";
-    const prefix =
-      attachment.kind === "file" && attachment.fileName
-        ? `[${attachment.fileName}]\n`
-        : "";
-    const clipped = attachment.value.slice(0, 4000);
-    return {
-      ...meta,
-      docsText: `${prior}${prefix}${clipped}`.slice(0, 12000),
-      ...(attachment.attachmentRef
-        ? { pendingAttachmentRef: attachment.attachmentRef }
-        : {}),
+  let next = { ...meta };
+  const refs = [
+    ...(next.pendingAttachmentRefs ?? []),
+    ...(next.pendingAttachmentRef ? [next.pendingAttachmentRef] : []),
+  ];
+  for (const attachment of attachments) {
+    if (attachment.kind === "api_docs_url") {
+      next = { ...next, apiDocsUrl: attachment.value };
+      continue;
+    }
+    if (attachment.kind === "docs_text" || attachment.kind === "file") {
+      const prior = next.docsText ? `${next.docsText}\n\n` : "";
+      const prefix =
+        attachment.kind === "file" && attachment.fileName
+          ? `[${attachment.fileName}]\n`
+          : "";
+      const clipped = attachment.value.slice(0, 4000);
+      next = {
+        ...next,
+        docsText: `${prior}${prefix}${clipped}`.slice(0, 12000),
+      };
+      if (attachment.attachmentRef) refs.push(attachment.attachmentRef);
+      continue;
+    }
+    const prior = next.examples ? `${next.examples}\n\n` : "";
+    next = {
+      ...next,
+      examples: `${prior}${attachment.value}`.slice(0, 40000),
     };
   }
-  const prior = meta.examples ? `${meta.examples}\n\n` : "";
-  return {
-    ...meta,
-    examples: `${prior}${attachment.value}`.slice(0, 40000),
-  };
+  const uniqueRefs = [...new Set(refs.filter(Boolean))];
+  if (uniqueRefs.length) {
+    next = {
+      ...next,
+      pendingAttachmentRefs: uniqueRefs,
+      pendingAttachmentRef: uniqueRefs[uniqueRefs.length - 1] ?? null,
+    };
+  }
+  return next;
 }
 
 export async function POST(
@@ -114,9 +163,15 @@ export async function POST(
     const cr = await requireChangeRequestAccess(ctx, id);
     const body = bodySchema.parse(await request.json());
 
+    const attachments = normalizeAttachments(body);
+    const primaryAttachment = attachments[0];
+    const fileAttachmentRefs = attachments
+      .map((a) => a.attachmentRef)
+      .filter((r): r is string => Boolean(r));
+
     const rawContent = composeUserContent(
       body.content?.trim() ?? "",
-      body.attachment,
+      attachments,
     );
     const { redacted, secrets, hadSecrets } = detectAndRedactSecrets(rawContent);
 
@@ -175,31 +230,38 @@ export async function POST(
       });
     }
 
+    const fileNames = attachments
+      .map((a) => a.fileName)
+      .filter((name): name is string => Boolean(name));
+
+    const messageMetadata: Record<string, string | boolean | string[]> = {};
+    if (hadSecrets) {
+      messageMetadata.secretsRedacted = true;
+      messageMetadata.secretRefs = secrets.map((s) => s.keyName);
+    }
+    if (attachments.length && primaryAttachment) {
+      messageMetadata.attachmentKind = primaryAttachment.kind;
+      if (fileAttachmentRefs.length === 1 && fileAttachmentRefs[0]) {
+        messageMetadata.attachmentRef = fileAttachmentRefs[0];
+      }
+      if (fileAttachmentRefs.length) {
+        messageMetadata.attachmentRefs = fileAttachmentRefs;
+      }
+      if (fileNames.length) {
+        messageMetadata.fileNames = fileNames;
+      }
+      if (primaryAttachment.fileName) {
+        messageMetadata.fileName = primaryAttachment.fileName;
+      }
+    }
+
     const message = await db.changeRequestMessage.create({
       data: {
         changeRequestId: cr.id,
         authorId: ctx.user.id,
         role: "USER",
         content: redacted,
-        metadata: {
-          ...(hadSecrets
-            ? {
-                secretsRedacted: true,
-                secretRefs: secrets.map((s) => s.keyName),
-              }
-            : {}),
-          ...(body.attachment
-            ? {
-                attachmentKind: body.attachment.kind,
-                ...(body.attachment.attachmentRef
-                  ? { attachmentRef: body.attachment.attachmentRef }
-                  : {}),
-                ...(body.attachment.fileName
-                  ? { fileName: body.attachment.fileName }
-                  : {}),
-              }
-            : {}),
-        },
+        metadata: messageMetadata as Prisma.InputJsonValue,
       },
     });
 
@@ -229,7 +291,10 @@ export async function POST(
         companyId: ctx.company.id,
         prompt: redacted,
         mode: forcePlan ? "plan" : "agent",
-        attachmentRef: body.attachment?.attachmentRef,
+        attachmentRef: fileAttachmentRefs[0],
+        attachmentRefs: fileAttachmentRefs.length
+          ? fileAttachmentRefs
+          : undefined,
       });
     } else if (cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status)) {
       const full = await db.changeRequest.findFirstOrThrow({
@@ -237,9 +302,9 @@ export async function POST(
         include: { project: { include: { repository: true } } },
       });
 
-      const currentMeta = mergePlanningAttachment(
+      const currentMeta = mergePlanningAttachments(
         (cr.planningMeta ?? {}) as PlanningMeta,
-        body.attachment,
+        attachments,
       );
 
       // Auto-link a planning repo (sibling project or DEFAULT_GITHUB_*) so we
@@ -284,7 +349,10 @@ export async function POST(
               })),
               planningMeta: currentMeta,
             }),
-            attachmentRef: body.attachment?.attachmentRef,
+            attachmentRef: fileAttachmentRefs[0],
+            attachmentRefs: fileAttachmentRefs.length
+              ? fileAttachmentRefs
+              : undefined,
           });
         } else {
           await enqueueJob(
@@ -317,7 +385,7 @@ export async function POST(
         const { content, nextMeta, planMarkdown } = buildPlanningFollowUp({
           meta: currentMeta,
           latestUserContent: redacted,
-          attachmentKind: body.attachment?.kind ?? null,
+          attachmentKind: primaryAttachment?.kind ?? null,
           title: cr.title,
         });
 
@@ -359,16 +427,16 @@ export async function POST(
       }
     } else if (
       cr.kind === "PROGRAM" &&
-      body.attachment &&
+      attachments.length &&
       isProgramPlanOnly(cr.status)
     ) {
       const currentMeta = (cr.planningMeta ?? {}) as PlanningMeta;
       await db.changeRequest.update({
         where: { id: cr.id },
         data: {
-          planningMeta: mergePlanningAttachment(
+          planningMeta: mergePlanningAttachments(
             currentMeta,
-            body.attachment,
+            attachments,
           ) as Prisma.InputJsonValue,
           updatedAt: new Date(),
         },

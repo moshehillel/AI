@@ -100,17 +100,21 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     attachmentRef:
       ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRef ??
       undefined,
+    attachmentRefs:
+      ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRefs ??
+      undefined,
   });
 
   // Clear one-shot pending attachment so it is not re-sent on later starts.
   const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
-  if (priorMeta.pendingAttachmentRef) {
+  if (priorMeta.pendingAttachmentRef || priorMeta.pendingAttachmentRefs?.length) {
     await db.changeRequest.update({
       where: { id: cr.id },
       data: {
         planningMeta: {
           ...priorMeta,
           pendingAttachmentRef: null,
+          pendingAttachmentRefs: null,
         } as object,
         updatedAt: new Date(),
       },

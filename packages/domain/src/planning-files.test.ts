@@ -3,9 +3,11 @@ import { describe, it } from "node:test";
 import {
   PLANNING_FILE_ACCEPT,
   PLANNING_FILE_MAX_BYTES,
+  PLANNING_UPLOAD_REPO_DIR,
   classifyPlanningFile,
   formatAgentFilePromptSection,
   looksLikeBinaryText,
+  planningUploadWorkspacePath,
   summarizeCsvForPlanning,
   summarizeExcelForPlanning,
   summarizePdfChatForPlanning,
@@ -101,7 +103,9 @@ describe("planning file attachments", () => {
       textExcerpt: "Cover page",
     });
     assert.match(summary, /spec\.pdf \(PDF\)/);
-    assert.match(summary, /Layout images sent to Koda: 5/);
+    assert.match(summary, /Layout previews: 5/);
+    assert.match(summary, /Original PDF kept/);
+    assert.match(summary, /Snippet: Cover page/);
   });
 
   it("summarizes pdf/text with filename note and truncation", () => {
@@ -123,15 +127,43 @@ describe("planning file attachments", () => {
     assert.equal(looksLikeBinaryText(`hello\u0000world`), true);
   });
 
-  it("formats agent prompt section without being a Goal dump", () => {
+  it("formats agent prompt section without OCR transcript for PDFs", () => {
     const section = formatAgentFilePromptSection({
       fileName: "a.pdf",
       kind: "pdf",
       mimeType: "application/pdf",
       agentNote: "3 pages rendered",
+      agentText: "THIS SHOULD NOT APPEAR IN PDF PROMPT",
+      workspacePath: ".koda/uploads/a.pdf",
       images: [{ data: "abc", mimeType: "image/png" }],
     });
-    assert.match(section, /Attached file for layout/);
+    assert.match(section, /Attached file: a\.pdf/);
+    assert.match(section, /\.koda\/uploads\/a\.pdf/);
     assert.match(section, /images API/);
+    assert.ok(!section.includes("THIS SHOULD NOT APPEAR"));
+    assert.ok(!section.includes("Structured content"));
+  });
+
+  it("formats agent prompt section with structured text for excel", () => {
+    const section = formatAgentFilePromptSection({
+      fileName: "ops.xlsx",
+      kind: "excel",
+      mimeType:
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      agentNote: "2 sheets",
+      agentText: "sheet,CSV\nA,1",
+    });
+    assert.match(section, /Structured content/);
+    assert.match(section, /sheet,CSV/);
+  });
+
+  it("builds a safe workspace upload path", () => {
+    assert.equal(
+      planningUploadWorkspacePath("My Spec.pdf"),
+      `${PLANNING_UPLOAD_REPO_DIR}/My Spec.pdf`,
+    );
+    const sneaky = planningUploadWorkspacePath("../../etc/passwd");
+    assert.match(sneaky, new RegExp(`^${PLANNING_UPLOAD_REPO_DIR}/`));
+    assert.ok(!sneaky.includes(".."));
   });
 });

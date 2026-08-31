@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   PLANNING_FILE_ACCEPT,
+  PLANNING_MAX_FILES_PER_MESSAGE,
   classifyPlanningFile,
   formatPlanningFileRejection,
   validatePlanningFileSize,
@@ -25,6 +26,14 @@ type AttachMode =
   | null;
 
 type SecretDraft = { keyName: string; value: string };
+
+type StagedFile = {
+  id: string;
+  fileName: string;
+  kind: string;
+  excerpt: string;
+  attachmentRef: string;
+};
 
 const WORKING_STATUSES = [
   "ANALYZING",
@@ -190,6 +199,7 @@ export function ChatPanel({
   const [pending, startTransition] = useTransition();
   const [awaitingReply, setAwaitingReply] = useState(false);
   const [preparingFile, setPreparingFile] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [liveLink, setLiveLink] = useState<
     "connected" | "connecting" | "reconnecting"
   >("connecting");
@@ -217,12 +227,13 @@ export function ChatPanel({
   const waitingOnReply =
     status !== "FAILED" &&
     (awaitingReply ||
-      preparingFile ||
       working ||
       connectingSession ||
       isAwaitingAssistantReply(messages));
   const showThinking = waitingOnReply || liveLink === "reconnecting";
   const inputBusy = pending || preparingFile || savingSecrets;
+  const canSend =
+    !inputBusy && (Boolean(prompt.trim()) || stagedFiles.length > 0);
   const label = thinkingLabel({
     liveLink: waitingOnReply ? "connected" : liveLink,
     connectingSession,
@@ -374,9 +385,25 @@ export function ChatPanel({
       fileName?: string;
       attachmentRef?: string;
     };
+    /** When set, these replace stagedFiles for this send (docs/examples path). */
+    fileAttachments?: StagedFile[];
   }) {
     const content = (opts?.content ?? prompt).trim();
-    if (!content && !opts?.attachment) return;
+    const files = opts?.fileAttachments ?? stagedFiles;
+    const legacyAttachment = opts?.attachment;
+    const attachmentsPayload =
+      files.length > 0
+        ? files.map((f) => ({
+            kind: "file" as const,
+            value: f.excerpt,
+            fileName: f.fileName,
+            attachmentRef: f.attachmentRef,
+          }))
+        : legacyAttachment
+          ? [legacyAttachment]
+          : undefined;
+
+    if (!content && !attachmentsPayload?.length) return;
     setAttachError(null);
     setAwaitingReply(true);
     startTransition(async () => {
@@ -387,7 +414,12 @@ export function ChatPanel({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             content: content || undefined,
-            attachment: opts?.attachment,
+            ...(attachmentsPayload?.length === 1 && !files.length
+              ? { attachment: attachmentsPayload[0] }
+              : {}),
+            ...(attachmentsPayload?.length
+              ? { attachments: attachmentsPayload }
+              : {}),
           }),
         },
       );
@@ -402,6 +434,7 @@ export function ChatPanel({
           return next;
         });
         setPrompt("");
+        setStagedFiles([]);
         setAttachMode(null);
         setAttachValue("");
         setAwaitingReply(
@@ -437,6 +470,7 @@ export function ChatPanel({
   async function prepareFileAttachment(file: File): Promise<{
     value: string;
     fileName: string;
+    kind: string;
     attachmentRef?: string;
   } | null> {
     const sizeError = validatePlanningFileSize(file.size);
@@ -469,44 +503,69 @@ export function ChatPanel({
       error?: string;
       excerpt?: string;
       fileName?: string;
+      kind?: string;
       attachmentRef?: string;
     };
-    if (!res.ok || !data.excerpt) {
+    if (!res.ok || !data.excerpt || !data.attachmentRef) {
       setAttachError(data.error || "Could not read that file.");
       return null;
     }
     return {
       value: data.excerpt.slice(0, 20000),
       fileName: data.fileName || file.name,
+      kind: data.kind || kind,
       attachmentRef: data.attachmentRef,
     };
   }
 
-  async function onFilePicked(file: File | null) {
-    if (!file) return;
+  /** Stage files in the composer — do not send until Send / Enter. */
+  async function onFilesPicked(list: FileList | File[] | null) {
+    const incoming = list ? Array.from(list) : [];
+    if (!incoming.length) return;
     setAttachError(null);
+
+    const remaining = PLANNING_MAX_FILES_PER_MESSAGE - stagedFiles.length;
+    if (remaining <= 0) {
+      setAttachError(
+        `You can attach up to ${PLANNING_MAX_FILES_PER_MESSAGE} files per message.`,
+      );
+      return;
+    }
+    const batch = incoming.slice(0, remaining);
+    if (incoming.length > remaining) {
+      setAttachError(
+        `Only ${remaining} more file(s) can be added (max ${PLANNING_MAX_FILES_PER_MESSAGE}).`,
+      );
+    }
+
     setPreparingFile(true);
-    setAwaitingReply(true);
     try {
-      const prepared = await prepareFileAttachment(file);
-      if (!prepared) {
-        setAwaitingReply(false);
-        return;
-      }
-      sendMessage({
-        attachment: {
-          kind: "file",
-          value: prepared.value,
+      const added: StagedFile[] = [];
+      for (const file of batch) {
+        const prepared = await prepareFileAttachment(file);
+        if (!prepared?.attachmentRef) continue;
+        added.push({
+          id: `${prepared.attachmentRef}-${Date.now()}-${added.length}`,
           fileName: prepared.fileName,
+          kind: prepared.kind,
+          excerpt: prepared.value,
           attachmentRef: prepared.attachmentRef,
-        },
-      });
+        });
+      }
+      if (added.length) {
+        setStagedFiles((prev) =>
+          [...prev, ...added].slice(0, PLANNING_MAX_FILES_PER_MESSAGE),
+        );
+      }
     } catch {
-      setAwaitingReply(false);
-      setAttachError("Could not upload that file.");
+      setAttachError("Could not prepare that file.");
     } finally {
       setPreparingFile(false);
     }
+  }
+
+  function removeStagedFile(id: string) {
+    setStagedFiles((prev) => prev.filter((f) => f.id !== id));
   }
 
   async function submitSecrets() {
@@ -670,11 +729,7 @@ export function ChatPanel({
 
         {showThinking ? (
           <ThoughtBlock
-            title={
-              preparingFile
-                ? "Reading file…"
-                : `Thought ${thoughtSeconds || 1}s`
-            }
+            title={`Thought ${thoughtSeconds || 1}s`}
             summary={label}
             openDefault
             live
@@ -737,12 +792,38 @@ export function ChatPanel({
               ref={fileRef}
               type="file"
               className="hidden"
+              multiple
               accept={PLANNING_FILE_ACCEPT}
               onChange={(e) => {
-                void onFilePicked(e.target.files?.[0] ?? null);
+                void onFilesPicked(e.target.files);
                 e.target.value = "";
               }}
             />
+          </div>
+        ) : null}
+
+        {stagedFiles.length > 0 || preparingFile ? (
+          <div className="staged-files" aria-live="polite">
+            {stagedFiles.map((f) => (
+              <span key={f.id} className="staged-file-chip" title={f.excerpt.slice(0, 200)}>
+                <span className="staged-file-name">{f.fileName}</span>
+                <span className="staged-file-kind">{f.kind}</span>
+                <button
+                  type="button"
+                  className="staged-file-remove"
+                  aria-label={`Remove ${f.fileName}`}
+                  disabled={inputBusy}
+                  onClick={() => removeStagedFile(f.id)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {preparingFile ? (
+              <span className="staged-file-chip staged-file-pending">
+                Preparing file…
+              </span>
+            ) : null}
           </div>
         ) : null}
 
@@ -871,7 +952,7 @@ export function ChatPanel({
           className="pill-composer"
           onSubmit={(event) => {
             event.preventDefault();
-            if (inputBusy) return;
+            if (!canSend) return;
             sendMessage({ content: prompt });
           }}
         >
@@ -879,7 +960,7 @@ export function ChatPanel({
             type="button"
             className="pill-attach"
             disabled={!isPlanning || inputBusy}
-            title="Attach"
+            title="Attach files (sent with your message)"
             onClick={() => {
               if (!isPlanning) return;
               fileRef.current?.click();
@@ -897,20 +978,22 @@ export function ChatPanel({
             className="pill-input"
             rows={1}
             placeholder={
-              inputBusy
-                ? preparingFile
-                  ? "Reading your file…"
-                  : "Sending…"
-                : placeholder
+              pending
+                ? "Sending…"
+                : preparingFile
+                  ? "File ready when prepared — add a note or press Send…"
+                  : stagedFiles.length
+                    ? "Add a message (optional) and press Send…"
+                    : placeholder
             }
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            disabled={inputBusy}
+            disabled={pending || savingSecrets}
             aria-busy={inputBusy}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                if (!inputBusy && prompt.trim()) {
+                if (canSend) {
                   sendMessage({ content: prompt });
                 }
               }
@@ -932,7 +1015,7 @@ export function ChatPanel({
             <button
               type="submit"
               className="pill-send"
-              disabled={inputBusy || !prompt.trim()}
+              disabled={!canSend}
               aria-label="Send"
             >
               <IconSend />

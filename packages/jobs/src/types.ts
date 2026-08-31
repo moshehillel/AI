@@ -31,6 +31,8 @@ export type CursorStartJobData = {
   prompt: string;
   /** SecretRef.keyName for an encrypted PlanningAgentFilePayload */
   attachmentRef?: string;
+  /** Multiple SecretRef.keyNames for encrypted PlanningAgentFilePayloads */
+  attachmentRefs?: string[];
 };
 
 export type CursorFollowUpJobData = {
@@ -40,6 +42,8 @@ export type CursorFollowUpJobData = {
   mode?: "plan" | "agent";
   /** SecretRef.keyName for an encrypted PlanningAgentFilePayload */
   attachmentRef?: string;
+  /** Multiple SecretRef.keyNames for encrypted PlanningAgentFilePayloads */
+  attachmentRefs?: string[];
 };
 
 export type CursorCancelJobData = {

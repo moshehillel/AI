@@ -249,3 +249,69 @@ export async function compareBranchToDefault(input: {
   };
 }
 
+/**
+ * Create or update text/binary files on a branch (one commit per file).
+ * Binary content must be base64-encoded with encoding "base64".
+ */
+export async function commitFilesToBranch(input: {
+  installationId: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  message: string;
+  files: Array<{
+    path: string;
+    content: string;
+    encoding?: "utf-8" | "base64";
+  }>;
+}): Promise<{ sha: string; paths: string[] }> {
+  const paths = input.files.map((f) => f.path);
+  if (mockEnabled()) {
+    return { sha: `mock-commit-${Date.now()}`, paths };
+  }
+
+  const octokit = await getInstallationOctokit(input.installationId);
+  if (!octokit) throw new Error("GitHub App not configured");
+
+  for (const file of input.files) {
+    let sha: string | undefined;
+    try {
+      const existing = await octokit.repos.getContent({
+        owner: input.owner,
+        repo: input.repo,
+        path: file.path,
+        ref: input.branch,
+      });
+      if (!Array.isArray(existing.data) && "sha" in existing.data) {
+        sha = existing.data.sha;
+      }
+    } catch {
+      // file does not exist yet
+    }
+
+    await octokit.repos.createOrUpdateFileContents({
+      owner: input.owner,
+      repo: input.repo,
+      path: file.path,
+      message:
+        input.files.length === 1
+          ? input.message
+          : `${input.message} (${file.path})`,
+      content:
+        file.encoding === "base64"
+          ? file.content
+          : Buffer.from(file.content, "utf-8").toString("base64"),
+      branch: input.branch,
+      ...(sha ? { sha } : {}),
+    });
+  }
+
+  const { data: ref } = await octokit.git.getRef({
+    owner: input.owner,
+    repo: input.repo,
+    ref: `heads/${input.branch}`,
+  });
+
+  return { sha: ref.object.sha, paths };
+}
+

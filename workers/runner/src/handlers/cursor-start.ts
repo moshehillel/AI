@@ -9,7 +9,18 @@ import {
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
-import { loadPlanningAttachmentForAgent } from "../lib/planning-attachment.js";
+import { loadPlanningAttachmentsForAgent } from "../lib/planning-attachment.js";
+
+function normalizeAttachmentRefs(data: {
+  attachmentRef?: string;
+  attachmentRefs?: string[];
+}): string[] {
+  const refs = [
+    ...(data.attachmentRefs ?? []),
+    ...(data.attachmentRef ? [data.attachmentRef] : []),
+  ].filter(Boolean);
+  return [...new Set(refs)];
+}
 
 export async function handleCursorStart(data: CursorStartJobData) {
   const cr = await db.changeRequest.findFirstOrThrow({
@@ -73,6 +84,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
       prompt: data.prompt,
       mode: "plan",
       attachmentRef: data.attachmentRef,
+      attachmentRefs: data.attachmentRefs,
     });
     return { agentId: cr.cursorAgentId, mode: data.mode, resumed: true };
   }
@@ -96,20 +108,27 @@ export async function handleCursorStart(data: CursorStartJobData) {
       : data.prompt;
   let images: Array<{ data: string; mimeType: string }> | undefined;
 
-  if (data.attachmentRef) {
-    const attached = await loadPlanningAttachmentForAgent({
+  const attachmentRefs = normalizeAttachmentRefs(data);
+  if (attachmentRefs.length) {
+    const attached = await loadPlanningAttachmentsForAgent({
       companyId: data.companyId,
       projectId: cr.projectId,
-      attachmentRef: data.attachmentRef,
+      attachmentRefs,
+      repoWrite: {
+        installationId: repo.installationId ?? "0",
+        owner: repo.githubOwner,
+        repo: repo.githubRepo,
+        branch: branchName,
+      },
     });
-    if (attached) {
+    if (attached.promptSection) {
       prompt = `${prompt}\n\n${attached.promptSection}`;
-      images = attached.images.length ? attached.images : undefined;
     }
+    images = attached.images.length ? attached.images : undefined;
   }
 
   console.info(
-    `[cursor-start] LIVE start mode=${data.mode} cr=${cr.id} kind=${cr.kind} attachmentRef=${data.attachmentRef ?? "none"} images=${images?.length ?? 0}`,
+    `[cursor-start] LIVE start mode=${data.mode} cr=${cr.id} kind=${cr.kind} attachmentRefs=${attachmentRefs.join(",") || "none"} images=${images?.length ?? 0}`,
   );
 
   const { agentId, wait } = await createTaskAgent({

@@ -16,6 +16,8 @@ export type PlanningMeta = {
   planMarkdown?: string | null;
   /** Pending encrypted file payload key (SecretRef) for the next Cursor agent turn. */
   pendingAttachmentRef?: string | null;
+  /** Multiple pending encrypted file payload keys for the next Cursor agent turn. */
+  pendingAttachmentRefs?: string[] | null;
   /** Credential SecretRef keyNames the customer has already provided (never values). */
   providedSecretKeys?: string[];
   /** Extra prerequisite lines Koda / staff added beyond inferred defaults. */
@@ -199,7 +201,9 @@ function goalCandidateFromUserText(text: string): string | null {
     /^Extracted text for planning:/im.test(withoutAttach) ||
     /^Headers:\s*.+\nExcerpt \(first rows\):/im.test(withoutAttach) ||
     /^\[Attached file for layout\/structure analysis:/im.test(withoutAttach) ||
-    /Layout images sent to Koda/i.test(withoutAttach.slice(0, 500))
+    /Layout images sent to Koda/i.test(withoutAttach.slice(0, 500)) ||
+    /Layout previews:/i.test(withoutAttach.slice(0, 500)) ||
+    /Original PDF kept for Koda/i.test(withoutAttach.slice(0, 500))
   ) {
     return null;
   }

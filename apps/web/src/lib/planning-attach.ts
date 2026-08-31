@@ -10,6 +10,7 @@ import {
   classifyPlanningFile,
   formatPlanningFileRejection,
   looksLikeBinaryText,
+  planningUploadWorkspacePath,
   summarizeCsvForPlanning,
   summarizePdfChatForPlanning,
   summarizeTextForPlanning,
@@ -132,39 +133,33 @@ export async function preparePlanningAttachment(file: File): Promise<
         };
       }
 
+      const workspacePath = planningUploadWorkspacePath(file.name);
       const chatSummary = summarizePdfChatForPlanning({
         fileName: file.name,
         pageCount,
         imagesAttached: images.length,
-        textExcerpt: rawText.slice(0, 1200),
+        textExcerpt: rawText.slice(0, 400),
       });
 
-      const { text: excerpt } = (() => {
-        const cleaned = rawText.trim();
-        if (cleaned.length <= PLANNING_ATTACHMENT_EXCERPT_MAX) {
-          return { text: cleaned };
-        }
-        return { text: cleaned.slice(0, PLANNING_ATTACHMENT_EXCERPT_MAX) };
-      })();
-
+      // Do NOT put OCR / full text dump in agentText — user wants the PDF
+      // itself (workspace file + page images), not a transcript.
       const payload: PlanningAgentFilePayload = {
         fileName: file.name,
         kind: "pdf",
         mimeType: "application/pdf",
         agentNote: [
-          "The user uploaded a PDF. Cursor Cloud Agents API only accepts raster images (not raw PDF bytes) on prompt.images.",
-          `Rendered ${images.length} of ${pageCount} page(s) as PNG so you can see layout, tables, and structure.`,
+          "The user uploaded a PDF. Prefer the original PDF file in the workspace (not a text transcript).",
+          `Cursor Cloud Agents API cannot attach raw PDF bytes on prompt.images — only raster images — so ${images.length} of ${pageCount} page(s) are also attached as PNG for layout.`,
           images.length < pageCount
             ? `(Additional pages omitted — API limit is ${PLANNING_AGENT_MAX_IMAGES} images per message.)`
             : "",
+          `Original PDF bytes are preserved encrypted and written to ${workspacePath} when the planning branch is available.`,
         ]
           .filter(Boolean)
           .join(" "),
-        agentText: excerpt
-          ? `Extracted text (may miss layout):\n${excerpt}`
-          : undefined,
         images,
         originalBase64: Buffer.from(buffer).toString("base64"),
+        workspacePath,
       };
 
       return {

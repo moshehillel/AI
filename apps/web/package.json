@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test src/lib/plan-diagram.test.ts"
+    "test": "node --import tsx --test src/lib/plan-diagram.test.ts src/lib/plan-submit-summary.test.ts"
   },
   "dependencies": {
     "@automation-studio/auth": "workspace:*",

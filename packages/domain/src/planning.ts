@@ -447,7 +447,6 @@ export function buildStillNeededQuestions(opts: {
   priorPlan?: string | null;
   covered: Set<PlanningTopic>;
 }): string[] {
-  const context = `${opts.latestUserContent}\n${opts.priorPlan ?? ""}`;
   const hasHhaProvider =
     opts.systems.some((s) => /hha/i.test(s)) &&
     opts.systems.some((s) => /provider soft/i.test(s));
@@ -456,7 +455,9 @@ export function buildStillNeededQuestions(opts: {
 
   if (
     hasHhaProvider &&
-    !/\b(upload|excel|file export|export file|spreadsheet)\b/i.test(context)
+    !/\b(upload|excel|file export|export file|spreadsheet)\b/i.test(
+      opts.latestUserContent,
+    )
   ) {
     questions.push(
       "Do staff only log into Provider Soft and HHA in a browser, or do you already get spreadsheet or file exports?",

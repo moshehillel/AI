@@ -1,5 +1,4 @@
 import {
-  definePDFJSModule,
   extractText,
   getDocumentProxy,
   renderPageAsImage,
@@ -7,6 +6,7 @@ import {
 import {
   PLANNING_AGENT_MAX_IMAGES,
   PLANNING_ATTACHMENT_EXCERPT_MAX,
+  buildExcelAgentPayload,
   classifyPlanningFile,
   formatPlanningFileRejection,
   looksLikeBinaryText,
@@ -16,27 +16,18 @@ import {
   validatePlanningFileSize,
   type PlanningAgentFilePayload,
   type PlanningFileKind,
-} from "@automation-studio/domain/planning-files";
-import { buildExcelAgentPayload } from "@automation-studio/domain";
-
-let pdfjsReady: Promise<void> | null = null;
-
-async function ensurePdfjs() {
-  if (!pdfjsReady) {
-    pdfjsReady = definePDFJSModule(() => import("pdfjs-dist")).then(() => undefined);
-  }
-  await pdfjsReady;
-}
+} from "@automation-studio/domain";
 
 async function renderPdfPagesAsPng(
   buffer: Uint8Array,
   pageCount: number,
 ): Promise<Array<{ data: string; mimeType: "image/png" }>> {
-  await ensurePdfjs();
   const max = Math.min(pageCount, PLANNING_AGENT_MAX_IMAGES);
   const images: Array<{ data: string; mimeType: "image/png" }> = [];
   for (let page = 1; page <= max; page++) {
     try {
+      // Use unpdf's bundled serverless PDF.js + @napi-rs/canvas (official
+      // pdfjs-dist worker path fails under Node with DataCloneError).
       const result = await renderPageAsImage(buffer, page, {
         canvasImport: () => import("@napi-rs/canvas"),
         scale: 1.5,
@@ -121,8 +112,8 @@ export async function preparePlanningAttachment(file: File): Promise<
 
   if (kind === "pdf") {
     try {
-      await ensurePdfjs();
-      const pdf = await getDocumentProxy(buffer);
+      // Copy the buffer — PDF.js may transfer/detach the ArrayBuffer.
+      const pdf = await getDocumentProxy(new Uint8Array(buffer));
       const pageCount = pdf.numPages ?? 1;
       const extracted = await extractText(pdf, { mergePages: true });
       const pages = extracted.text as string | string[];
@@ -130,7 +121,7 @@ export async function preparePlanningAttachment(file: File): Promise<
         ? pages.join("\n")
         : String(pages ?? "");
 
-      const images = await renderPdfPagesAsPng(buffer, pageCount);
+      const images = await renderPdfPagesAsPng(new Uint8Array(buffer), pageCount);
       if (!images.length && !rawText.trim()) {
         return {
           ok: false,

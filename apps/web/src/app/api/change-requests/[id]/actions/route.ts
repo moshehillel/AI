@@ -434,14 +434,6 @@ export async function POST(
             });
           }
         } else {
-            await enqueueJob("cursor.start-agent", {
-              changeRequestId: cr.id,
-              companyId: ctx.company.id,
-              mode: "agent",
-              prompt: `Build the approved program plan.\n\nTitle: ${full.title}\n\n${planText}`,
-            });
-          }
-        } else {
           // Mock build path when no repo connected yet
           await db.changeRequestMessage.create({
             data: {

@@ -20,6 +20,65 @@ type Message = {
 
 type AttachMode = "api_docs_url" | "docs_text" | "examples" | "file" | null;
 
+const WORKING_STATUSES = [
+  "ANALYZING",
+  "IMPLEMENTING",
+  "TESTING",
+  "BUILDING",
+  "DEPLOYING",
+] as const;
+
+/** True when the latest user turn still has no ASSISTANT reply (SYSTEM “connecting…” does not count). */
+function isAwaitingAssistantReply(messages: Message[]): boolean {
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "USER") {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  if (lastUserIdx < 0) return false;
+  return !messages
+    .slice(lastUserIdx + 1)
+    .some((m) => m.role === "ASSISTANT");
+}
+
+function isConnectingSession(messages: Message[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === "ASSISTANT") return false;
+    if (m.role === "USER") return false;
+    if (
+      m.role === "SYSTEM" &&
+      /connecting|live planning session|starting/i.test(m.content)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function thinkingLabel(opts: {
+  liveLink: "connected" | "connecting" | "reconnecting";
+  connectingSession: boolean;
+  working: boolean;
+  status: string;
+}): string {
+  if (opts.liveLink === "reconnecting") return "Reconnecting live updates…";
+  if (opts.liveLink === "connecting") return "Connecting live updates…";
+  if (opts.connectingSession) return "Koda is connecting…";
+  if (opts.working) {
+    if (opts.status === "BUILDING" || opts.status === "IMPLEMENTING") {
+      return "Koda is working…";
+    }
+    if (opts.status === "TESTING") return "Koda is testing…";
+    if (opts.status === "DEPLOYING") return "Koda is deploying…";
+    return "Koda is analyzing…";
+  }
+  return "Koda is thinking…";
+}
+
 export function ChatPanel({
   changeRequestId,
   initialMessages,
@@ -37,6 +96,10 @@ export function ChatPanel({
   const [prompt, setPrompt] = useState("");
   const [pending, startTransition] = useTransition();
   const [awaitingReply, setAwaitingReply] = useState(false);
+  const [preparingFile, setPreparingFile] = useState(false);
+  const [liveLink, setLiveLink] = useState<
+    "connected" | "connecting" | "reconnecting"
+  >("connecting");
   const [attachMode, setAttachMode] = useState<AttachMode>(null);
   const [attachValue, setAttachValue] = useState("");
   const [attachError, setAttachError] = useState<string | null>(null);
@@ -50,11 +113,35 @@ export function ChatPanel({
     (status === "PLANNING" || status === "AWAITING_PLAN_APPROVAL");
   const canReopenPlanning =
     isProgram && status === "AWAITING_DEV_BUILD";
+  const working = (WORKING_STATUSES as readonly string[]).includes(status);
+  const connectingSession = isConnectingSession(messages);
+  const waitingOnReply =
+    status !== "FAILED" &&
+    (awaitingReply ||
+      preparingFile ||
+      working ||
+      connectingSession ||
+      isAwaitingAssistantReply(messages));
+  const showThinking = waitingOnReply || liveLink === "reconnecting";
+  const inputBusy = pending || preparingFile;
+  const label = thinkingLabel({
+    liveLink: waitingOnReply ? "connected" : liveLink,
+    connectingSession,
+    working,
+    status,
+  });
 
   useEffect(() => {
+    setLiveLink("connecting");
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     const source = new EventSource(
       `/api/change-requests/${changeRequestId}/events`,
     );
+    source.onopen = () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+      setLiveLink("connected");
+    };
     source.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as {
@@ -62,10 +149,21 @@ export function ChatPanel({
           status?: string;
           messages?: Message[];
         };
+        if (data.type === "connected" || data.type === "heartbeat") {
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+          setLiveLink("connected");
+          return;
+        }
         if (data.type === "snapshot") {
+          if (reconnectTimer) clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+          setLiveLink("connected");
           if (data.status) setStatus(data.status);
           if (data.messages) {
             setMessages(data.messages);
+            // Clear optimistic wait once server state is in; derived waiting
+            // (no ASSISTANT after last USER / connecting SYSTEM) keeps the UI.
             setAwaitingReply(false);
           }
         }
@@ -74,9 +172,18 @@ export function ChatPanel({
       }
     };
     source.onerror = () => {
-      // browser will retry EventSource automatically
+      // Debounce — EventSource often blips through CONNECTING during retries.
+      if (reconnectTimer) return;
+      reconnectTimer = setTimeout(() => {
+        if (source.readyState !== EventSource.OPEN) {
+          setLiveLink("reconnecting");
+        }
+      }, 1200);
     };
-    return () => source.close();
+    return () => {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      source.close();
+    };
   }, [changeRequestId]);
 
   useEffect(() => {
@@ -84,7 +191,7 @@ export function ChatPanel({
       top: scrollerRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages, awaitingReply]);
+  }, [messages, showThinking, label]);
 
   const placeholder = isProgram
     ? isPlanning
@@ -93,14 +200,6 @@ export function ChatPanel({
         ? "Ask how it works, request a test script, or describe a change…"
         : "Send a message…"
     : "Ask for another change or clarification…";
-
-  const workingStatuses = [
-    "ANALYZING",
-    "IMPLEMENTING",
-    "TESTING",
-    "BUILDING",
-    "DEPLOYING",
-  ];
 
   function sendMessage(opts?: {
     content?: string;
@@ -139,7 +238,11 @@ export function ChatPanel({
         setPrompt("");
         setAttachMode(null);
         setAttachValue("");
-        if (json.assistantMessage) setAwaitingReply(false);
+        // Only clear optimistic flag; keep thinking if reply is SYSTEM
+        // “connecting…” or follow-up is still processing (no ASSISTANT yet).
+        setAwaitingReply(
+          !(json.assistantMessage && json.assistantMessage.role === "ASSISTANT"),
+        );
       } else {
         setAwaitingReply(false);
         const data = (await response.json().catch(() => ({}))) as {
@@ -243,6 +346,7 @@ export function ChatPanel({
   async function onFilePicked(file: File | null) {
     if (!file) return;
     setAttachError(null);
+    setPreparingFile(true);
     setAwaitingReply(true);
     try {
       const prepared = await prepareFileAttachment(file);
@@ -260,6 +364,8 @@ export function ChatPanel({
     } catch {
       setAwaitingReply(false);
       setAttachError("Could not upload that file.");
+    } finally {
+      setPreparingFile(false);
     }
   }
 
@@ -326,8 +432,23 @@ export function ChatPanel({
             </p>
           </div>
         ))}
-        {awaitingReply || workingStatuses.includes(status) ? (
-          <p className="muted pulse-soft text-sm">Koda is thinking…</p>
+        {showThinking ? (
+          <div
+            className="chat-bubble chat-bubble-koda chat-thinking rise"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <p className="muted mb-1 text-xs uppercase tracking-wide">Koda</p>
+            <p className="thinking-line text-sm leading-relaxed">
+              <span>{preparingFile ? "Reading your file…" : label}</span>
+              <span className="thinking-dots" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
+            </p>
+          </div>
         ) : null}
         {status === "FAILED" ? (
           <p className="text-sm text-[var(--danger)]">
@@ -403,7 +524,7 @@ export function ChatPanel({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={pending}
+                  disabled={inputBusy}
                   onClick={submitAttach}
                 >
                   Attach to chat
@@ -431,22 +552,42 @@ export function ChatPanel({
         className="mt-3 flex gap-2"
         onSubmit={(event) => {
           event.preventDefault();
+          if (inputBusy) return;
           sendMessage({ content: prompt });
         }}
       >
         <input
           className="field"
-          placeholder={placeholder}
+          placeholder={
+            inputBusy
+              ? preparingFile
+                ? "Reading your file…"
+                : "Sending…"
+              : placeholder
+          }
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
+          disabled={inputBusy}
+          aria-busy={inputBusy}
         />
         <button
           className="btn btn-primary"
-          disabled={pending || !prompt.trim()}
+          disabled={inputBusy || !prompt.trim()}
         >
-          Send
+          {inputBusy ? "…" : "Send"}
         </button>
       </form>
+      {inputBusy ? (
+        <p className="mt-1.5 text-xs muted pulse-soft">
+          {preparingFile
+            ? "Preparing attachment — composer paused."
+            : "Sending your message…"}
+        </p>
+      ) : showThinking ? (
+        <p className="mt-1.5 text-xs muted">
+          Koda is still responding — you can send another message anytime.
+        </p>
+      ) : null}
 
       {isPlanning ? (
         <div className="mt-3 space-y-2">
@@ -454,7 +595,7 @@ export function ChatPanel({
             <button
               type="button"
               className="btn btn-ghost w-full"
-              disabled={pending}
+              disabled={inputBusy}
               onClick={() => {
                 setActionError(null);
                 setConfirmSubmit(true);
@@ -472,7 +613,7 @@ export function ChatPanel({
                 <button
                   type="button"
                   className="btn btn-primary"
-                  disabled={pending}
+                  disabled={inputBusy}
                   onClick={() =>
                     postProgramAction("submit_to_dev", { confirmSubmit: true })
                   }
@@ -482,7 +623,7 @@ export function ChatPanel({
                 <button
                   type="button"
                   className="btn btn-ghost"
-                  disabled={pending}
+                  disabled={inputBusy}
                   onClick={() => setConfirmSubmit(false)}
                 >
                   Keep planning
@@ -498,7 +639,7 @@ export function ChatPanel({
           <button
             type="button"
             className="btn btn-primary w-full"
-            disabled={pending}
+            disabled={inputBusy}
             onClick={() => postProgramAction("reopen_planning")}
           >
             Continue planning (reopen)

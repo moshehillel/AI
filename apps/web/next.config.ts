@@ -11,6 +11,7 @@ loadEnv({ path: path.join(repoRoot, ".env") });
 const nextConfig: NextConfig = {
   transpilePackages: [
     "@automation-studio/auth",
+    "@automation-studio/cursor-adapter",
     "@automation-studio/db",
     "@automation-studio/domain",
     "@automation-studio/github",

@@ -314,13 +314,13 @@ export async function POST(
             },
           });
           agentId = created.agentId;
-          void created.wait().catch((err) => {
+          void created.wait().catch((err: unknown) => {
             console.error("[open_in_cursor] agent wait failed", err);
           });
           await db.agentRun.create({
             data: {
               changeRequestId: cr.id,
-              cursorAgentId: agentId,
+              cursorAgentId: agentId!,
               mode: "PLAN",
               status: "RUNNING",
               startedAt: new Date(),
@@ -335,6 +335,9 @@ export async function POST(
           });
         }
 
+        if (!agentId) {
+          throw new AuthError("Could not open a Cursor agent for this program", 500);
+        }
         const urls = agentOpenUrls(agentId);
         const nextSetup: ProgramBuildSetup = {
           ...prior,

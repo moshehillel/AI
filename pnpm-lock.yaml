@@ -23,6 +23,9 @@ importers:
       '@automation-studio/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@automation-studio/cursor-adapter':
+        specifier: workspace:*
+        version: link:../../packages/cursor-adapter
       '@automation-studio/db':
         specifier: workspace:*
         version: link:../../packages/db

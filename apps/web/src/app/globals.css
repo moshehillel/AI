@@ -1,40 +1,40 @@
 @import "tailwindcss";
 
 /*
- * IDE layout: dark surrounding chrome + light agent chat (Cursor-like reading pane).
- * Chat text stays high-contrast dark-on-light; sidebars use light-on-dark.
+ * IDE layout matches Cursor agent screenshots: light grey chrome throughout.
+ * Sidebars #f3f3f3, chat #f8f8f8 / white, thin #e8e8e8 dividers.
  */
 :root {
   /* Light chat / center pane */
-  --ide-bg-chat: #ffffff;
+  --ide-bg-chat: #f8f8f8;
   --ide-bg-elevated: #ffffff;
-  --ide-bg-user-bubble: #f2f2f2;
-  --ide-bg-hover: rgba(0, 0, 0, 0.045);
-  --ide-bg-active: rgba(59, 130, 246, 0.1);
+  --ide-bg-user-bubble: #ffffff;
+  --ide-bg-hover: rgba(0, 0, 0, 0.04);
+  --ide-bg-active: rgba(59, 130, 246, 0.08);
   --ide-ink: #1a1a1a;
-  --ide-ink-secondary: #3c3c3c;
-  --ide-muted: #666666;
-  --ide-line: #e6e6e6;
-  --ide-line-strong: #d0d0d0;
+  --ide-ink-secondary: #5c5c5c;
+  --ide-muted: #8a8a8a;
+  --ide-line: #e8e8e8;
+  --ide-line-strong: #dadada;
   --ide-accent: #3b82f6;
   --ide-accent-soft: #dbeafe;
-  --ide-mode: #6d28d9;
-  --ide-mode-bg: rgba(109, 40, 217, 0.1);
+  --ide-mode: #7c5cff;
+  --ide-mode-bg: rgba(124, 92, 255, 0.12);
   --ide-danger: #dc2626;
   --ide-warn: #b45309;
   --ide-success: #16a34a;
   --ide-add: #16a34a;
   --ide-del: #dc2626;
 
-  /* Dark frame (left / right sidebars + shell) */
-  --ide-chrome-bg: #1a1a1a;
-  --ide-chrome-elevated: #242424;
-  --ide-chrome-hover: rgba(255, 255, 255, 0.06);
-  --ide-chrome-active: rgba(59, 130, 246, 0.2);
-  --ide-chrome-ink: #ececec;
-  --ide-chrome-ink-secondary: #c2c2c2;
-  --ide-chrome-muted: #9a9a9a;
-  --ide-chrome-line: rgba(255, 255, 255, 0.1);
+  /* Light IDE chrome (left / right sidebars + shell) — Cursor screenshot match */
+  --ide-chrome-bg: #f3f3f3;
+  --ide-chrome-elevated: #ffffff;
+  --ide-chrome-hover: rgba(0, 0, 0, 0.04);
+  --ide-chrome-active: rgba(59, 130, 246, 0.08);
+  --ide-chrome-ink: #1a1a1a;
+  --ide-chrome-ink-secondary: #5c5c5c;
+  --ide-chrome-muted: #8a8a8a;
+  --ide-chrome-line: #e8e8e8;
 
   /* Shell bg alias (outside chat) */
   --ide-bg: var(--ide-chrome-bg);
@@ -867,7 +867,7 @@ select {
   bottom: 0;
   z-index: 40;
   border-top: 1px solid var(--ide-chrome-line);
-  background: color-mix(in oklab, var(--ide-chrome-bg) 92%, black);
+  background: color-mix(in oklab, var(--ide-chrome-bg) 92%, white);
   backdrop-filter: blur(8px);
   padding: 0.4rem 1rem;
   text-align: center;

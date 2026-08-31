@@ -14,6 +14,8 @@ export type PlanningMeta = {
   lastQuestionTopic?: PlanningTopic | null;
   /** Latest synthesized plan markdown (also mirrored in Plan rows). */
   planMarkdown?: string | null;
+  /** Pending encrypted file payload key (SecretRef) for the next Cursor agent turn. */
+  pendingAttachmentRef?: string | null;
 };
 
 export const PLANNING_TOPICS: PlanningTopic[] = [
@@ -185,11 +187,13 @@ function goalCandidateFromUserText(text: string): string | null {
   ) {
     return null;
   }
-  // File excerpts / CSV dumps must never become the Goal.
+  // File excerpts / CSV / Excel dumps must never become the Goal.
   if (
-    /^File:\s+.+\((PDF|CSV\/TSV|document)\)/i.test(withoutAttach) ||
+    /^File:\s+.+\((PDF|CSV\/TSV|Excel|document)\)/i.test(withoutAttach) ||
     /^Extracted text for planning:/im.test(withoutAttach) ||
-    /^Headers:\s*.+\nExcerpt \(first rows\):/im.test(withoutAttach)
+    /^Headers:\s*.+\nExcerpt \(first rows\):/im.test(withoutAttach) ||
+    /^\[Attached file for layout\/structure analysis:/im.test(withoutAttach) ||
+    /Layout images sent to Koda/i.test(withoutAttach.slice(0, 500))
   ) {
     return null;
   }

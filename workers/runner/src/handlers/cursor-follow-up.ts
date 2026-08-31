@@ -7,6 +7,7 @@ import {
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
+import { loadPlanningAttachmentForAgent } from "../lib/planning-attachment.js";
 
 export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
   const cr = await db.changeRequest.findFirstOrThrow({
@@ -19,13 +20,27 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
 
   const forcePlan = cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status);
   const mode = forcePlan ? "plan" : (data.mode ?? "agent");
-  const prompt =
+
+  let prompt =
     mode === "plan"
       ? `${planningAgentInstructions()}\n\nClient message:\n${data.prompt}`
       : data.prompt;
+  let images: Array<{ data: string; mimeType: string }> | undefined;
+
+  if (data.attachmentRef) {
+    const attached = await loadPlanningAttachmentForAgent({
+      companyId: data.companyId,
+      projectId: cr.projectId,
+      attachmentRef: data.attachmentRef,
+    });
+    if (attached) {
+      prompt = `${prompt}\n\n${attached.promptSection}`;
+      images = attached.images.length ? attached.images : undefined;
+    }
+  }
 
   console.info(
-    `[cursor-follow-up] mode=${mode} cr=${cr.id} agentId=${cr.cursorAgentId}`,
+    `[cursor-follow-up] mode=${mode} cr=${cr.id} agentId=${cr.cursorAgentId} attachmentRef=${data.attachmentRef ?? "none"} images=${images?.length ?? 0}`,
   );
 
   if (mode === "agent" && cr.status !== "BUILDING" && cr.status !== "IMPLEMENTING") {
@@ -60,6 +75,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     agentId: cr.cursorAgentId,
     prompt,
     mode,
+    images,
   });
   const result = await wait();
 
@@ -120,7 +136,6 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
         toStatus: "AWAITING_PLAN_APPROVAL",
       });
     }
-    // Programs remain in PLANNING / AWAITING_DEV_BUILD
   }
 
   await enqueueJob("usage.record", {

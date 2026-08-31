@@ -1,22 +1,22 @@
 import { NextResponse } from "next/server";
-import { extractText, getDocumentProxy } from "unpdf";
+import { randomBytes } from "node:crypto";
 import { getRequestAuth } from "@/lib/request-auth";
 import {
   AuthError,
   requireChangeRequestAccess,
   requirePermission,
 } from "@automation-studio/auth";
-import {
-  PLANNING_FILE_MAX_BYTES,
-  classifyPlanningFile,
-  formatPlanningFileRejection,
-  summarizeTextForPlanning,
-  validatePlanningFileSize,
-} from "@automation-studio/domain/planning-files";
+import { db } from "@automation-studio/db";
+import { encryptSecret } from "@automation-studio/domain";
+import { preparePlanningAttachment } from "@/lib/planning-attach";
 
 export const runtime = "nodejs";
 
-/** Extract planning-safe text excerpt from an uploaded PDF (or text fallback). */
+/**
+ * Accept a planning chat file (PDF / Excel / CSV / text), prepare a short
+ * human summary plus a Cursor-agent payload (PDF pages → PNG images; Excel →
+ * structured CSV), and store the agent payload encrypted for the follow-up job.
+ */
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -25,7 +25,7 @@ export async function POST(
     const { id } = await context.params;
     const ctx = await getRequestAuth();
     await requirePermission(ctx, "change_request:chat");
-    await requireChangeRequestAccess(ctx, id);
+    const cr = await requireChangeRequestAccess(ctx, id);
 
     const form = await request.formData();
     const file = form.get("file");
@@ -33,81 +33,57 @@ export async function POST(
       return NextResponse.json({ error: "Missing file upload." }, { status: 400 });
     }
 
-    const sizeError = validatePlanningFileSize(file.size);
-    if (sizeError) {
-      return NextResponse.json({ error: sizeError }, { status: 400 });
+    const prepared = await preparePlanningAttachment(file);
+    if (!prepared.ok) {
+      return NextResponse.json({ error: prepared.error }, { status: 400 });
     }
 
-    const kind = classifyPlanningFile({
-      fileName: file.name,
-      mimeType: file.type,
-    });
-    if (kind === "unsupported") {
-      return NextResponse.json(
-        {
-          error: formatPlanningFileRejection({
-            fileName: file.name,
-            mimeType: file.type,
-          }),
+    const attachmentKey = `planning-file-${randomBytes(8).toString("hex")}`;
+    const ciphertext = encryptSecret(JSON.stringify(prepared.prepared.payload));
+
+    await db.secretRef.upsert({
+      where: {
+        companyId_projectId_keyName_purpose: {
+          companyId: ctx.company.id,
+          projectId: cr.projectId,
+          keyName: attachmentKey,
+          purpose: "CHAT",
         },
-        { status: 400 },
-      );
-    }
-
-    const buffer = new Uint8Array(await file.arrayBuffer());
-    let rawText = "";
-
-    if (kind === "pdf") {
-      try {
-        const pdf = await getDocumentProxy(buffer);
-        const extracted = await extractText(pdf, { mergePages: true });
-        const pages = extracted.text as string | string[];
-        rawText = Array.isArray(pages) ? pages.join("\n") : String(pages ?? "");
-      } catch {
-        return NextResponse.json(
-          {
-            error:
-              "Could not read that PDF. Try a text-based PDF (not a scanned image-only file), or paste the key text.",
-          },
-          { status: 400 },
-        );
-      }
-      if (!rawText.trim()) {
-        return NextResponse.json(
-          {
-            error:
-              "No extractable text in that PDF (it may be image-only). Paste the key sections instead.",
-          },
-          { status: 400 },
-        );
-      }
-    } else {
-      rawText = new TextDecoder("utf-8").decode(buffer);
-    }
-
-    const excerpt = summarizeTextForPlanning({
-      fileName: file.name,
-      raw: rawText,
-      kind,
+      },
+      update: {
+        externalRef: `planning-file://${cr.id}/${attachmentKey}`,
+        ciphertext,
+        provider: "ENCRYPTED",
+        changeRequestId: cr.id,
+      },
+      create: {
+        companyId: ctx.company.id,
+        projectId: cr.projectId,
+        changeRequestId: cr.id,
+        purpose: "CHAT",
+        provider: "ENCRYPTED",
+        keyName: attachmentKey,
+        externalRef: `planning-file://${cr.id}/${attachmentKey}`,
+        ciphertext,
+      },
     });
 
-    if (excerpt.length > PLANNING_FILE_MAX_BYTES) {
-      // Defensive — summarize already caps chars; keep payload small.
-      return NextResponse.json(
-        { error: "Extracted text is too large after processing." },
-        { status: 400 },
-      );
-    }
+    console.info(
+      `[attach-file] cr=${cr.id} kind=${prepared.prepared.kind} file=${prepared.prepared.fileName} images=${prepared.prepared.payload.images?.length ?? 0} agentTextChars=${prepared.prepared.payload.agentText?.length ?? 0} ref=${attachmentKey}`,
+    );
 
     return NextResponse.json({
-      fileName: file.name,
-      kind,
-      excerpt,
+      fileName: prepared.prepared.fileName,
+      kind: prepared.prepared.kind,
+      excerpt: prepared.prepared.chatSummary,
+      attachmentRef: attachmentKey,
+      agentImages: prepared.prepared.payload.images?.length ?? 0,
     });
   } catch (error) {
     if (error instanceof AuthError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
+    console.error("[attach-file] failed", error);
     return NextResponse.json({ error: "Could not process that file." }, { status: 500 });
   }
 }

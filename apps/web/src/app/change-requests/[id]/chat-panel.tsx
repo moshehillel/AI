@@ -6,8 +6,6 @@ import {
   PLANNING_FILE_ACCEPT,
   classifyPlanningFile,
   formatPlanningFileRejection,
-  looksLikeBinaryText,
-  summarizeTextForPlanning,
   validatePlanningFileSize,
 } from "@automation-studio/domain/planning-files";
 
@@ -207,6 +205,7 @@ export function ChatPanel({
       kind: Exclude<AttachMode, null>;
       value: string;
       fileName?: string;
+      attachmentRef?: string;
     };
   }) {
     const content = (opts?.content ?? prompt).trim();
@@ -273,6 +272,7 @@ export function ChatPanel({
   async function prepareFileAttachment(file: File): Promise<{
     value: string;
     fileName: string;
+    attachmentRef?: string;
   } | null> {
     const sizeError = validatePlanningFileSize(file.size);
     if (sizeError) {
@@ -294,53 +294,30 @@ export function ChatPanel({
       return null;
     }
 
-    // PDFs need server-side extraction (binary); never file.text() them.
-    if (kind === "pdf") {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch(
-        `/api/change-requests/${changeRequestId}/extract-file`,
-        { method: "POST", body: form },
-      );
-      const data = (await res.json().catch(() => ({}))) as {
-        error?: string;
-        excerpt?: string;
-        fileName?: string;
-      };
-      if (!res.ok || !data.excerpt) {
-        setAttachError(data.error || "Could not read that PDF.");
-        return null;
-      }
-      return {
-        value: data.excerpt.slice(0, 20000),
-        fileName: data.fileName || file.name,
-      };
-    }
-
-    try {
-      const text = await file.text();
-      if (looksLikeBinaryText(text)) {
-        setAttachError(
-          `“${file.name}” looks binary. Upload a CSV/text export or a text-based PDF.`,
-        );
-        return null;
-      }
-      if (!text.trim()) {
-        setAttachError("That file looks empty.");
-        return null;
-      }
-      return {
-        value: summarizeTextForPlanning({
-          fileName: file.name,
-          raw: text,
-          kind,
-        }).slice(0, 20000),
-        fileName: file.name,
-      };
-    } catch {
-      setAttachError("Could not read that file.");
+    // Binary files (PDF / Excel) and text alike go through the server so the
+    // Cursor agent receives layout images / structured CSV — not only a chat excerpt.
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(
+      `/api/change-requests/${changeRequestId}/extract-file`,
+      { method: "POST", body: form },
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      excerpt?: string;
+      fileName?: string;
+      attachmentRef?: string;
+      agentImages?: number;
+    };
+    if (!res.ok || !data.excerpt) {
+      setAttachError(data.error || "Could not read that file.");
       return null;
     }
+    return {
+      value: data.excerpt.slice(0, 20000),
+      fileName: data.fileName || file.name,
+      attachmentRef: data.attachmentRef,
+    };
   }
 
   async function onFilePicked(file: File | null) {
@@ -359,6 +336,7 @@ export function ChatPanel({
           kind: "file",
           value: prepared.value,
           fileName: prepared.fileName,
+          attachmentRef: prepared.attachmentRef,
         },
       });
     } catch {

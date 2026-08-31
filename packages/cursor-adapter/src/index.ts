@@ -1,5 +1,11 @@
 export type AgentMode = "plan" | "agent";
 
+/** Cursor Cloud Agents / SDK only accept raster images on send (not PDF/xlsx). */
+export type AgentImageAttachment = {
+  data: string;
+  mimeType: string;
+};
+
 export type CreateTaskAgentInput = {
   repoUrl: string;
   branch: string;
@@ -7,12 +13,14 @@ export type CreateTaskAgentInput = {
   mode: AgentMode;
   metadata?: Record<string, string>;
   modelId?: string;
+  images?: AgentImageAttachment[];
 };
 
 export type FollowUpInput = {
   agentId: string;
   prompt: string;
   mode?: AgentMode;
+  images?: AgentImageAttachment[];
 };
 
 export type NormalizedStreamEvent =
@@ -35,6 +43,28 @@ export type AgentRunResult = {
     totalTokens: number;
   };
 };
+
+/** Dashboard URL for an agent (developer-facing only). */
+export function agentWebUrl(agentId: string): string {
+  return `https://cursor.com/agents/${agentId}`;
+}
+
+/** Deep link that opens / resumes the agent in the Cursor app. */
+export function agentCursorDeepLink(agentId: string): string {
+  return `https://cursor.com/background-agent?bcId=${encodeURIComponent(agentId)}`;
+}
+
+export function agentOpenUrls(agentId: string): {
+  agentId: string;
+  openInWebUrl: string;
+  openInCursorUrl: string;
+} {
+  return {
+    agentId,
+    openInWebUrl: agentWebUrl(agentId),
+    openInCursorUrl: agentCursorDeepLink(agentId),
+  };
+}
 
 function requireApiKey(): string {
   const key = process.env.CURSOR_API_KEY;
@@ -118,7 +148,14 @@ export async function createTaskAgent(
     },
   });
 
-  const run = await agent.send(input.prompt);
+  const message = buildSendMessage(input.prompt, input.images);
+  const imageCount = input.images?.length ?? 0;
+  if (imageCount > 0) {
+    console.info(
+      `[cursor-adapter] createTaskAgent attaching ${imageCount} image(s) for layout`,
+    );
+  }
+  const run = await agent.send(message);
 
   return {
     agentId: agent.agentId,
@@ -156,8 +193,9 @@ export async function resumeAndSend(
     return mockFollowUp(input);
   }
 
+  const imageCount = input.images?.length ?? 0;
   console.info(
-    `[cursor-adapter] LIVE resumeAndSend mode=${input.mode ?? "agent"} agentId=${input.agentId}`,
+    `[cursor-adapter] LIVE resumeAndSend mode=${input.mode ?? "agent"} agentId=${input.agentId} images=${imageCount}`,
   );
 
   const { Agent } = sdk!;
@@ -165,7 +203,8 @@ export async function resumeAndSend(
     apiKey: requireApiKey(),
   });
 
-  const run = await agent.send(input.prompt, {
+  const message = buildSendMessage(input.prompt, input.images);
+  const run = await agent.send(message, {
     mode: input.mode,
   });
 
@@ -189,6 +228,21 @@ export async function resumeAndSend(
       };
     },
   };
+}
+
+function buildSendMessage(
+  prompt: string,
+  images?: AgentImageAttachment[],
+): string | { text: string; images: Array<{ data: string; mimeType: string }> } {
+  const cleaned = (images ?? [])
+    .filter((img) => img.data && img.mimeType)
+    .slice(0, 5)
+    .map((img) => ({
+      data: img.data,
+      mimeType: img.mimeType,
+    }));
+  if (!cleaned.length) return prompt;
+  return { text: prompt, images: cleaned };
 }
 
 export async function getAgentUsage(agentId: string) {

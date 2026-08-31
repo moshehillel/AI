@@ -2,6 +2,8 @@
 
 export const PLANNING_FILE_MAX_BYTES = 2 * 1024 * 1024; // 2 MiB
 export const PLANNING_ATTACHMENT_EXCERPT_MAX = 12_000;
+/** Cursor Cloud Agents API allows at most 5 images per prompt. */
+export const PLANNING_AGENT_MAX_IMAGES = 5;
 
 const EXT_MIME: Record<string, string[]> = {
   ".txt": ["text/plain"],
@@ -16,6 +18,11 @@ const EXT_MIME: Record<string, string[]> = {
   ".html": ["text/html"],
   ".htm": ["text/html"],
   ".pdf": ["application/pdf"],
+  ".xlsx": [
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/octet-stream",
+  ],
+  ".xls": ["application/vnd.ms-excel", "application/octet-stream"],
   ".ts": ["text/plain", "text/typescript", "application/typescript"],
   ".js": ["text/javascript", "application/javascript", "text/plain"],
   ".py": ["text/x-python", "application/x-python", "text/plain"],
@@ -35,6 +42,8 @@ export const PLANNING_FILE_ACCEPT = [
   ".html",
   ".htm",
   ".pdf",
+  ".xlsx",
+  ".xls",
   ".ts",
   ".js",
   ".py",
@@ -46,9 +55,38 @@ export const PLANNING_FILE_ACCEPT = [
   "text/markdown",
   "text/html",
   "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 ].join(",");
 
-export type PlanningFileKind = "pdf" | "csv" | "text" | "unsupported";
+export type PlanningFileKind =
+  | "pdf"
+  | "csv"
+  | "excel"
+  | "text"
+  | "unsupported";
+
+export type AgentAttachmentImage = {
+  data: string; // base64
+  mimeType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+};
+
+/** Payload stored for the Cursor agent (not dumped into chat Goal). */
+export type PlanningAgentFilePayload = {
+  fileName: string;
+  kind: Exclude<PlanningFileKind, "unsupported">;
+  mimeType: string;
+  /** Short note for the agent prompt (paths, sheet names, page counts). */
+  agentNote: string;
+  /** Structured text for the agent (CSV sheets, text excerpt). */
+  agentText?: string;
+  /**
+   * Cursor SDK / Cloud Agents API only accepts raster images on `prompt.images`.
+   * PDF pages are rendered to PNG so layout is visible to the model.
+   */
+  images?: AgentAttachmentImage[];
+  /** Original file bytes (base64) — for audit / reprocess; not pasted into Goal. */
+  originalBase64?: string;
+};
 
 export function extensionOf(fileName: string): string {
   const base = fileName.trim().toLowerCase();
@@ -65,12 +103,26 @@ export function classifyPlanningFile(opts: {
 
   if (ext === ".pdf" || mime === "application/pdf") return "pdf";
   if (
+    ext === ".xlsx" ||
+    mime ===
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+  ) {
+    return "excel";
+  }
+  if (
+    ext === ".xls" ||
+    (mime === "application/vnd.ms-excel" &&
+      ext !== ".csv" &&
+      ext !== ".tsv")
+  ) {
+    return "excel";
+  }
+  if (
     ext === ".csv" ||
     ext === ".tsv" ||
     mime === "text/csv" ||
     mime === "application/csv" ||
     mime === "text/tab-separated-values" ||
-    // Excel often labels CSV exports as this:
     (mime === "application/vnd.ms-excel" && (ext === ".csv" || ext === ".tsv"))
   ) {
     return "csv";
@@ -102,6 +154,9 @@ export function looksLikeBinaryText(sample: string): boolean {
   if (!s) return false;
   if (s.includes("\u0000")) return true;
   if (s.startsWith("%PDF-")) return true;
+  if (s.startsWith("PK\u0003\u0004") || s.charCodeAt(0) === 0xd0) {
+    return true;
+  }
   let weird = 0;
   for (let i = 0; i < s.length; i++) {
     const c = s.charCodeAt(i);
@@ -146,6 +201,55 @@ export function summarizeCsvForPlanning(opts: {
   return parts.join("\n");
 }
 
+/** Short human-facing chat summary for Excel (not the full sheet dump). */
+export function summarizeExcelForPlanning(opts: {
+  fileName: string;
+  sheetSummaries: Array<{
+    name: string;
+    rows: number;
+    cols: number;
+    headers: string[];
+  }>;
+}): string {
+  const sheets = opts.sheetSummaries;
+  const parts = [
+    `File: ${opts.fileName} (Excel)`,
+    `Sheets: ${sheets.length || 0}`,
+  ];
+  for (const s of sheets.slice(0, 8)) {
+    const headers = s.headers.slice(0, 12).join(", ");
+    parts.push(
+      `- ${s.name}: ${s.rows} rows × ${s.cols} cols${headers ? ` · ${headers}` : ""}`,
+    );
+  }
+  if (sheets.length > 8) {
+    parts.push(`…(+${sheets.length - 8} more sheets)`);
+  }
+  parts.push(
+    "Full sheet data is sent to Koda as structured CSV (Cursor API does not accept .xlsx natively).",
+  );
+  return parts.join("\n");
+}
+
+/** Short chat line when PDF layout images are attached for the agent. */
+export function summarizePdfChatForPlanning(opts: {
+  fileName: string;
+  pageCount: number;
+  imagesAttached: number;
+  textExcerpt?: string;
+}): string {
+  const parts = [
+    `File: ${opts.fileName} (PDF)`,
+    `Pages: ${opts.pageCount} · Layout images sent to Koda: ${opts.imagesAttached}`,
+  ];
+  if (opts.textExcerpt?.trim()) {
+    const { text, truncated } = truncate(opts.textExcerpt.trim(), 800);
+    parts.push("Text preview:", text);
+    if (truncated) parts.push("…(truncated for chat — layout images carry the full pages)");
+  }
+  return parts.join("\n");
+}
+
 /** Summarize plain text / docs: filename + capped excerpt. */
 export function summarizeTextForPlanning(opts: {
   fileName: string;
@@ -155,10 +259,17 @@ export function summarizeTextForPlanning(opts: {
 }): string {
   const max = opts.maxChars ?? PLANNING_ATTACHMENT_EXCERPT_MAX;
   const kind = opts.kind ?? "text";
-  if (kind === "csv") return summarizeCsvForPlanning({ fileName: opts.fileName, raw: opts.raw, maxChars: max });
+  if (kind === "csv") {
+    return summarizeCsvForPlanning({
+      fileName: opts.fileName,
+      raw: opts.raw,
+      maxChars: max,
+    });
+  }
 
   const cleaned = opts.raw.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-  const label = kind === "pdf" ? "PDF" : "document";
+  const label =
+    kind === "pdf" ? "PDF" : kind === "excel" ? "Excel" : "document";
   const { text, truncated } = truncate(cleaned, max);
   const parts = [
     `File: ${opts.fileName} (${label})`,
@@ -177,7 +288,26 @@ export function formatPlanningFileRejection(opts: {
 }): string {
   const kind = classifyPlanningFile(opts);
   if (kind === "unsupported") {
-    return `Unsupported file type for “${opts.fileName}”. Upload PDF, CSV, or a text/docs file (.txt, .md, .json, .html, …).`;
+    return `Unsupported file type for “${opts.fileName}”. Upload PDF, Excel (.xlsx/.xls), CSV, or a text/docs file (.txt, .md, .json, .html, …).`;
   }
   return `Could not use “${opts.fileName}”.`;
+}
+
+/** Build the agent-facing prompt addendum from a stored payload. */
+export function formatAgentFilePromptSection(
+  payload: PlanningAgentFilePayload,
+): string {
+  const parts = [
+    `[Attached file for layout/structure analysis: ${payload.fileName} (${payload.kind})]`,
+    payload.agentNote,
+  ];
+  if (payload.images?.length) {
+    parts.push(
+      `${payload.images.length} page image(s) are attached to this message via the Cursor images API so you can see layout/tables visually.`,
+    );
+  }
+  if (payload.agentText?.trim()) {
+    parts.push("Structured content:", payload.agentText.trim());
+  }
+  return parts.join("\n\n");
 }

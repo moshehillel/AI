@@ -9,6 +9,7 @@ import {
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
+import { loadPlanningAttachmentForAgent } from "../lib/planning-attachment.js";
 
 export async function handleCursorStart(data: CursorStartJobData) {
   const cr = await db.changeRequest.findFirstOrThrow({
@@ -71,6 +72,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
       companyId: data.companyId,
       prompt: data.prompt,
       mode: "plan",
+      attachmentRef: data.attachmentRef,
     });
     return { agentId: cr.cursorAgentId, mode: data.mode, resumed: true };
   }
@@ -88,13 +90,26 @@ export async function handleCursorStart(data: CursorStartJobData) {
   });
 
   const repoUrl = `https://github.com/${repo.githubOwner}/${repo.githubRepo}`;
-  const prompt =
+  let prompt =
     data.mode === "plan" && !data.prompt.includes("PLANNING mode")
       ? `${planningAgentInstructions()}\n\n${data.prompt}`
       : data.prompt;
+  let images: Array<{ data: string; mimeType: string }> | undefined;
+
+  if (data.attachmentRef) {
+    const attached = await loadPlanningAttachmentForAgent({
+      companyId: data.companyId,
+      projectId: cr.projectId,
+      attachmentRef: data.attachmentRef,
+    });
+    if (attached) {
+      prompt = `${prompt}\n\n${attached.promptSection}`;
+      images = attached.images.length ? attached.images : undefined;
+    }
+  }
 
   console.info(
-    `[cursor-start] LIVE start mode=${data.mode} cr=${cr.id} kind=${cr.kind}`,
+    `[cursor-start] LIVE start mode=${data.mode} cr=${cr.id} kind=${cr.kind} attachmentRef=${data.attachmentRef ?? "none"} images=${images?.length ?? 0}`,
   );
 
   const { agentId, wait } = await createTaskAgent({
@@ -102,6 +117,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
     branch: branchName,
     prompt,
     mode: data.mode,
+    images,
     metadata: {
       company_id: data.companyId,
       project_id: cr.projectId,

@@ -97,7 +97,25 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     companyId: data.companyId,
     mode: mode as "plan" | "agent",
     prompt,
+    attachmentRef:
+      ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRef ??
+      undefined,
   });
+
+  // Clear one-shot pending attachment so it is not re-sent on later starts.
+  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+  if (priorMeta.pendingAttachmentRef) {
+    await db.changeRequest.update({
+      where: { id: cr.id },
+      data: {
+        planningMeta: {
+          ...priorMeta,
+          pendingAttachmentRef: null,
+        } as object,
+        updatedAt: new Date(),
+      },
+    });
+  }
 
   return { branchName };
 }

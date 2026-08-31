@@ -25,6 +25,8 @@ const attachmentSchema = z
     kind: z.enum(["api_docs_url", "docs_text", "examples", "file"]),
     value: z.string().min(1).max(20000),
     fileName: z.string().max(260).optional(),
+    /** SecretRef keyName for encrypted agent file payload (PDF images / Excel CSV). */
+    attachmentRef: z.string().max(120).optional(),
   })
   .optional();
 
@@ -79,14 +81,19 @@ function mergePlanningAttachment(
     return { ...meta, apiDocsUrl: attachment.value };
   }
   if (attachment.kind === "docs_text" || attachment.kind === "file") {
+    // Keep planningMeta docsText short — never dump full Excel/PDF into Goal context.
     const prior = meta.docsText ? `${meta.docsText}\n\n` : "";
     const prefix =
       attachment.kind === "file" && attachment.fileName
         ? `[${attachment.fileName}]\n`
         : "";
+    const clipped = attachment.value.slice(0, 4000);
     return {
       ...meta,
-      docsText: `${prior}${prefix}${attachment.value}`.slice(0, 40000),
+      docsText: `${prior}${prefix}${clipped}`.slice(0, 12000),
+      ...(attachment.attachmentRef
+        ? { pendingAttachmentRef: attachment.attachmentRef }
+        : {}),
     };
   }
   const prior = meta.examples ? `${meta.examples}\n\n` : "";
@@ -167,7 +174,15 @@ export async function POST(
               }
             : {}),
           ...(body.attachment
-            ? { attachmentKind: body.attachment.kind }
+            ? {
+                attachmentKind: body.attachment.kind,
+                ...(body.attachment.attachmentRef
+                  ? { attachmentRef: body.attachment.attachmentRef }
+                  : {}),
+                ...(body.attachment.fileName
+                  ? { fileName: body.attachment.fileName }
+                  : {}),
+              }
             : {}),
         },
       },
@@ -199,6 +214,7 @@ export async function POST(
         companyId: ctx.company.id,
         prompt: redacted,
         mode: forcePlan ? "plan" : "agent",
+        attachmentRef: body.attachment?.attachmentRef,
       });
     } else if (cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status)) {
       const full = await db.changeRequest.findFirstOrThrow({
@@ -253,6 +269,7 @@ export async function POST(
               })),
               planningMeta: currentMeta,
             }),
+            attachmentRef: body.attachment?.attachmentRef,
           });
         } else {
           await enqueueJob(

@@ -29,6 +29,8 @@ export type CursorStartJobData = {
   companyId: string;
   mode: "plan" | "agent";
   prompt: string;
+  /** SecretRef.keyName for an encrypted PlanningAgentFilePayload */
+  attachmentRef?: string;
 };
 
 export type CursorFollowUpJobData = {
@@ -36,6 +38,8 @@ export type CursorFollowUpJobData = {
   companyId: string;
   prompt: string;
   mode?: "plan" | "agent";
+  /** SecretRef.keyName for an encrypted PlanningAgentFilePayload */
+  attachmentRef?: string;
 };
 
 export type CursorCancelJobData = {

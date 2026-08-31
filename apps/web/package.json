@@ -16,11 +16,14 @@
     "@automation-studio/github": "workspace:*",
     "@automation-studio/jobs": "workspace:*",
     "@clerk/nextjs": "^6.12.5",
+    "@napi-rs/canvas": "^1.0.8",
     "next": "^15.2.4",
+    "pdfjs-dist": "^6.3.289",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "svix": "^1.61.0",
     "unpdf": "^1.8.1",
+    "xlsx": "^0.18.5",
     "zod": "^3.24.2"
   },
   "devDependencies": {

@@ -22,7 +22,8 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
-    "@automation-studio/db": "workspace:*"
+    "@automation-studio/db": "workspace:*",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "tsx": "^4.19.3",

@@ -35,6 +35,11 @@ type StagedFile = {
   attachmentRef: string;
 };
 
+type QueuedSend = {
+  content: string;
+  stagedFiles: StagedFile[];
+};
+
 const WORKING_STATUSES = [
   "ANALYZING",
   "IMPLEMENTING",
@@ -120,6 +125,21 @@ function IconSend() {
   );
 }
 
+function IconStop() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect
+        x="4"
+        y="4"
+        width="8"
+        height="8"
+        rx="1.2"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 function IconChevron({ open }: { open: boolean }) {
   return (
     <svg
@@ -198,6 +218,9 @@ export function ChatPanel({
   const [prompt, setPrompt] = useState("");
   const [pending, startTransition] = useTransition();
   const [awaitingReply, setAwaitingReply] = useState(false);
+  const [turnInterrupted, setTurnInterrupted] = useState(false);
+  const [queued, setQueued] = useState<QueuedSend | null>(null);
+  const [interrupting, setInterrupting] = useState(false);
   const [preparingFile, setPreparingFile] = useState(false);
   const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
   const [liveLink, setLiveLink] = useState<
@@ -217,6 +240,7 @@ export function ChatPanel({
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const flushQueuedRef = useRef(false);
   const isProgram = kind === "PROGRAM";
   const isPlanning =
     isProgram &&
@@ -226,12 +250,13 @@ export function ChatPanel({
   const connectingSession = isConnectingSession(messages);
   const waitingOnReply =
     status !== "FAILED" &&
+    !turnInterrupted &&
     (awaitingReply ||
       working ||
       connectingSession ||
       isAwaitingAssistantReply(messages));
   const showThinking = waitingOnReply || liveLink === "reconnecting";
-  const inputBusy = pending || preparingFile || savingSecrets;
+  const inputBusy = pending || preparingFile || savingSecrets || interrupting;
   const canSend =
     !inputBusy && (Boolean(prompt.trim()) || stagedFiles.length > 0);
   const label = thinkingLabel({
@@ -240,6 +265,12 @@ export function ChatPanel({
     working,
     status,
   });
+  const queuedPreview = queued
+    ? queued.content.trim() ||
+      (queued.stagedFiles.length
+        ? `${queued.stagedFiles.length} file(s)`
+        : "Queued message")
+    : null;
 
   useEffect(() => {
     setLiveLink("connecting");
@@ -272,7 +303,9 @@ export function ChatPanel({
           if (data.status) setStatus(data.status);
           if (data.messages) {
             setMessages(data.messages);
-            setAwaitingReply(false);
+            const stillAwaiting = isAwaitingAssistantReply(data.messages);
+            setAwaitingReply(stillAwaiting);
+            if (!stillAwaiting) setTurnInterrupted(false);
           }
         }
       } catch {
@@ -324,6 +357,24 @@ export function ChatPanel({
     el.style.height = "auto";
     el.style.height = `${Math.min(140, el.scrollHeight)}px`;
   }, [prompt]);
+
+  // When the current turn finishes naturally, flush any queued follow-up.
+  useEffect(() => {
+    if (waitingOnReply || pending || interrupting || !queued) {
+      flushQueuedRef.current = false;
+      return;
+    }
+    if (flushQueuedRef.current) return;
+    flushQueuedRef.current = true;
+    const next = queued;
+    setQueued(null);
+    sendMessage({
+      content: next.content,
+      fileAttachments: next.stagedFiles,
+      force: true,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- flush once when idle
+  }, [waitingOnReply, pending, interrupting, queued]);
 
   const timeline = useMemo(() => {
     const items: Array<
@@ -387,6 +438,8 @@ export function ChatPanel({
     };
     /** When set, these replace stagedFiles for this send (docs/examples path). */
     fileAttachments?: StagedFile[];
+    /** Skip queueing even while a reply is in flight (used after Interrupt). */
+    force?: boolean;
   }) {
     const content = (opts?.content ?? prompt).trim();
     const files = opts?.fileAttachments ?? stagedFiles;
@@ -404,7 +457,23 @@ export function ChatPanel({
           : undefined;
 
     if (!content && !attachmentsPayload?.length) return;
+
+    // While Koda is still responding, Send queues the next message instead.
+    if (waitingOnReply && !opts?.force) {
+      setQueued({
+        content,
+        stagedFiles: files.map((f) => ({ ...f })),
+      });
+      setPrompt("");
+      setStagedFiles([]);
+      setAttachMode(null);
+      setAttachValue("");
+      setAttachError(null);
+      return;
+    }
+
     setAttachError(null);
+    setTurnInterrupted(false);
     setAwaitingReply(true);
     startTransition(async () => {
       const response = await fetch(
@@ -454,6 +523,57 @@ export function ChatPanel({
         setAttachError(err || "Could not send — try again.");
       }
     });
+  }
+
+  function editQueued() {
+    if (!queued) return;
+    setPrompt(queued.content);
+    setStagedFiles(queued.stagedFiles);
+    setQueued(null);
+    textareaRef.current?.focus();
+  }
+
+  function cancelQueued() {
+    setQueued(null);
+  }
+
+  async function interruptTurn(andSendQueued: boolean) {
+    if (interrupting) return;
+    setInterrupting(true);
+    setAttachError(null);
+    // Client-side stop waiting immediately (SSE may still deliver a late reply).
+    setTurnInterrupted(true);
+    setAwaitingReply(false);
+    try {
+      const response = await fetch(
+        `/api/change-requests/${changeRequestId}/actions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "interrupt" }),
+        },
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setAttachError(data.error ?? "Could not interrupt — try again.");
+      }
+    } catch {
+      setAttachError("Could not interrupt — try again.");
+    } finally {
+      setInterrupting(false);
+    }
+
+    if (andSendQueued && queued) {
+      const next = queued;
+      setQueued(null);
+      sendMessage({
+        content: next.content,
+        fileAttachments: next.stagedFiles,
+        force: true,
+      });
+    }
   }
 
   function submitAttach() {
@@ -753,6 +873,57 @@ export function ChatPanel({
               Plan updates{" "}
               <span className="stat-add">live</span>
             </span>
+            <button
+              type="button"
+              className="composer-interrupt"
+              disabled={interrupting}
+              title="Stop the current response"
+              onClick={() => void interruptTurn(Boolean(queued))}
+            >
+              <IconStop />
+              <span>{interrupting ? "Stopping…" : "Interrupt"}</span>
+            </button>
+          </div>
+        ) : null}
+
+        {queuedPreview ? (
+          <div className="queued-message" aria-live="polite">
+            <span className="queued-message-label">Queued</span>
+            <span className="queued-message-text" title={queuedPreview}>
+              {queuedPreview}
+            </span>
+            {queued?.stagedFiles.length ? (
+              <span className="queued-message-files">
+                {queued.stagedFiles.length} file
+                {queued.stagedFiles.length === 1 ? "" : "s"}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="queued-message-action"
+              disabled={inputBusy}
+              onClick={editQueued}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className="queued-message-action"
+              disabled={inputBusy}
+              onClick={cancelQueued}
+            >
+              Cancel
+            </button>
+            {showThinking ? (
+              <button
+                type="button"
+                className="queued-message-action queued-message-send-now"
+                disabled={inputBusy}
+                onClick={() => void interruptTurn(true)}
+              >
+                Send now
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -980,15 +1151,19 @@ export function ChatPanel({
             placeholder={
               pending
                 ? "Sending…"
-                : preparingFile
-                  ? "File ready when prepared — add a note or press Send…"
-                  : stagedFiles.length
-                    ? "Add a message (optional) and press Send…"
-                    : placeholder
+                : waitingOnReply
+                  ? queued
+                    ? "Edit queue above, or Interrupt to send now…"
+                    : "Type to queue the next message…"
+                  : preparingFile
+                    ? "File ready when prepared — add a note or press Send…"
+                    : stagedFiles.length
+                      ? "Add a message (optional) and press Send…"
+                      : placeholder
             }
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            disabled={pending || savingSecrets}
+            disabled={pending || savingSecrets || interrupting}
             aria-busy={inputBusy}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -1012,11 +1187,28 @@ export function ChatPanel({
                 />
               </svg>
             </span>
+            {showThinking ? (
+              <button
+                type="button"
+                className="pill-interrupt"
+                disabled={interrupting}
+                aria-label="Interrupt"
+                title={
+                  queued
+                    ? "Interrupt and send queued message"
+                    : "Interrupt current response"
+                }
+                onClick={() => void interruptTurn(Boolean(queued))}
+              >
+                <IconStop />
+              </button>
+            ) : null}
             <button
               type="submit"
               className="pill-send"
               disabled={!canSend}
-              aria-label="Send"
+              aria-label={waitingOnReply ? "Queue message" : "Send"}
+              title={waitingOnReply ? "Queue for when Koda finishes" : "Send"}
             >
               <IconSend />
             </button>

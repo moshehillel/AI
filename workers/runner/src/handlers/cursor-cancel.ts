@@ -10,7 +10,10 @@ export async function handleCursorCancel(data: CursorCancelJobData) {
 
   if (data.agentRunId) {
     await db.agentRun.updateMany({
-      where: { id: data.agentRunId, status: "RUNNING" },
+      where: {
+        id: data.agentRunId,
+        status: { in: ["RUNNING", "CANCELLED"] },
+      },
       data: { status: "CANCELLED", finishedAt: new Date() },
     });
   }

@@ -131,7 +131,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
     `[cursor-start] LIVE start mode=${data.mode} cr=${cr.id} kind=${cr.kind} attachmentRefs=${attachmentRefs.join(",") || "none"} images=${images?.length ?? 0}`,
   );
 
-  const { agentId, wait } = await createTaskAgent({
+  const { agentId, wait, runId: immediateRunId } = await createTaskAgent({
     repoUrl,
     branch: branchName,
     prompt,
@@ -148,6 +148,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
     data: {
       changeRequestId: cr.id,
       cursorAgentId: agentId,
+      cursorRunId: immediateRunId,
       mode: data.mode === "plan" ? "PLAN" : "AGENT",
       status: "RUNNING",
       startedAt: new Date(),
@@ -159,12 +160,32 @@ export async function handleCursorStart(data: CursorStartJobData) {
     data: { cursorAgentId: agentId },
   });
 
-  const result = await wait();
+  let result: Awaited<ReturnType<typeof wait>>;
+  try {
+    result = await wait();
+  } catch (error) {
+    const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
+    if (current?.status === "CANCELLED") {
+      console.info(`[cursor-start] cancelled mid-wait cr=${cr.id}`);
+      return { agentId, mode: data.mode, cancelled: true };
+    }
+    await db.agentRun.update({
+      where: { id: agentRun.id },
+      data: { status: "FAILED", finishedAt: new Date() },
+    });
+    throw error;
+  }
+
+  const afterWait = await db.agentRun.findUnique({ where: { id: agentRun.id } });
+  if (afterWait?.status === "CANCELLED") {
+    console.info(`[cursor-start] cancelled after wait cr=${cr.id}`);
+    return { agentId, mode: data.mode, cancelled: true };
+  }
 
   await db.agentRun.update({
     where: { id: agentRun.id },
     data: {
-      cursorRunId: result.runId,
+      cursorRunId: result.runId ?? immediateRunId,
       status: "SUCCEEDED",
       finishedAt: new Date(),
     },

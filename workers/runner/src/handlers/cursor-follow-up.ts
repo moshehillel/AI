@@ -85,6 +85,16 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     }
   }
 
+  // After Interrupt, a prior wait may still be winding down. Wait briefly for
+  // RUNNING rows to clear so we do not race two Cursor sends on one agent.
+  for (let i = 0; i < 25; i += 1) {
+    const stillRunning = await db.agentRun.count({
+      where: { changeRequestId: cr.id, status: "RUNNING" },
+    });
+    if (stillRunning === 0) break;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
   const agentRun = await db.agentRun.create({
     data: {
       changeRequestId: cr.id,
@@ -95,18 +105,46 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     },
   });
 
-  const { wait } = await resumeAndSend({
+  const { wait, runId: immediateRunId } = await resumeAndSend({
     agentId: cr.cursorAgentId,
     prompt,
     mode,
     images,
   });
-  const result = await wait();
+
+  if (immediateRunId) {
+    await db.agentRun.update({
+      where: { id: agentRun.id },
+      data: { cursorRunId: immediateRunId },
+    });
+  }
+
+  let result: Awaited<ReturnType<typeof wait>>;
+  try {
+    result = await wait();
+  } catch (error) {
+    const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
+    if (current?.status === "CANCELLED") {
+      console.info(`[cursor-follow-up] cancelled mid-wait cr=${cr.id}`);
+      return { cancelled: true };
+    }
+    await db.agentRun.update({
+      where: { id: agentRun.id },
+      data: { status: "FAILED", finishedAt: new Date() },
+    });
+    throw error;
+  }
+
+  const afterWait = await db.agentRun.findUnique({ where: { id: agentRun.id } });
+  if (afterWait?.status === "CANCELLED") {
+    console.info(`[cursor-follow-up] cancelled after wait cr=${cr.id}`);
+    return { cancelled: true };
+  }
 
   await db.agentRun.update({
     where: { id: agentRun.id },
     data: {
-      cursorRunId: result.runId,
+      cursorRunId: result.runId ?? immediateRunId,
       status: "SUCCEEDED",
       finishedAt: new Date(),
     },

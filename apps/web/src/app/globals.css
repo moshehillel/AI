@@ -577,6 +577,98 @@ select {
   color: var(--ide-del);
 }
 
+.composer-interrupt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  border: 1px solid var(--ide-line);
+  border-radius: 999px;
+  background: var(--ide-bg-elevated);
+  color: var(--ide-ink);
+  padding: 4px 10px 4px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.composer-interrupt:hover:not(:disabled) {
+  background: var(--ide-bg-hover);
+}
+
+.composer-interrupt:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.composer-interrupt svg {
+  width: 11px;
+  height: 11px;
+}
+
+.queued-message {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: min(100%, 52rem);
+  margin: 0 auto 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--ide-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--ide-bg-elevated) 88%, var(--ide-mode-bg));
+  color: var(--ide-ink-secondary);
+  font-size: 12px;
+}
+
+.queued-message-label {
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--ide-mode-bg);
+  color: var(--ide-mode);
+  padding: 2px 8px;
+  font-weight: 600;
+}
+
+.queued-message-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ide-ink);
+}
+
+.queued-message-files {
+  flex-shrink: 0;
+  color: var(--ide-muted);
+}
+
+.queued-message-action {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--ide-ink-secondary);
+  padding: 2px 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.queued-message-action:hover:not(:disabled) {
+  color: var(--ide-ink);
+  text-decoration: underline;
+}
+
+.queued-message-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.queued-message-send-now {
+  color: var(--ide-mode);
+}
+
 /* Pill composer — Cursor signature */
 .pill-composer-wrap {
   flex-shrink: 0;
@@ -703,6 +795,35 @@ select {
 .pill-send svg {
   width: 14px;
   height: 14px;
+}
+
+.pill-interrupt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--ide-line);
+  border-radius: 50%;
+  background: var(--ide-bg-elevated);
+  color: var(--ide-ink);
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+}
+
+.pill-interrupt:hover:not(:disabled) {
+  background: var(--ide-bg-hover);
+  transform: scale(1.04);
+}
+
+.pill-interrupt:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pill-interrupt svg {
+  width: 12px;
+  height: 12px;
 }
 
 .composer-foot {

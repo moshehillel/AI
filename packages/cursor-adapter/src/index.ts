@@ -119,9 +119,17 @@ async function resolveModelSelection(
   return { id: requested || "default" };
 }
 
+export type AgentSessionHandle = {
+  agentId: string;
+  /** Available immediately so cancel can target the run before wait() finishes. */
+  runId?: string;
+  run: AsyncIterable<NormalizedStreamEvent>;
+  wait: () => Promise<AgentRunResult>;
+};
+
 export async function createTaskAgent(
   input: CreateTaskAgentInput,
-): Promise<{ agentId: string; run: AsyncIterable<NormalizedStreamEvent>; wait: () => Promise<AgentRunResult> }> {
+): Promise<AgentSessionHandle> {
   const sdk = await loadCursorSdk();
   if (isMockMode(sdk)) {
     console.warn(
@@ -159,6 +167,7 @@ export async function createTaskAgent(
 
   return {
     agentId: agent.agentId,
+    runId: run.id,
     run: mapStream(run.stream() as AsyncIterable<{ type: string } & Record<string, unknown>>),
     wait: async () => {
       const result = await run.wait();
@@ -184,7 +193,7 @@ export async function createTaskAgent(
 
 export async function resumeAndSend(
   input: FollowUpInput,
-): Promise<{ agentId: string; run: AsyncIterable<NormalizedStreamEvent>; wait: () => Promise<AgentRunResult> }> {
+): Promise<AgentSessionHandle> {
   const sdk = await loadCursorSdk();
   if (isMockMode(sdk)) {
     console.warn(
@@ -210,6 +219,7 @@ export async function resumeAndSend(
 
   return {
     agentId: agent.agentId,
+    runId: run.id,
     run: mapStream(run.stream() as AsyncIterable<{ type: string } & Record<string, unknown>>),
     wait: async () => {
       const result = await run.wait();
@@ -462,16 +472,18 @@ function mockPlanReply(prompt: string): string {
 
 function mockCreate(input: CreateTaskAgentInput) {
   const agentId = `bc-mock-${Date.now()}`;
+  const runId = `run-mock-${Date.now()}`;
   const text =
     input.mode === "plan"
       ? mockPlanReply(input.prompt)
       : "Built the requested automation on an isolated preview (mock).";
   return {
     agentId,
+    runId,
     run: mockStream(input, text),
     wait: async (): Promise<AgentRunResult> => ({
       agentId,
-      runId: `run-mock-${Date.now()}`,
+      runId,
       text,
       model: "mock-auto",
       branch: input.branch,
@@ -481,12 +493,14 @@ function mockCreate(input: CreateTaskAgentInput) {
 }
 
 function mockFollowUp(input: FollowUpInput) {
+  const runId = `run-mock-fu-${Date.now()}`;
   const text =
     input.mode === "plan"
       ? mockPlanReply(input.prompt)
       : "Updated the program based on your follow-up.";
   return {
     agentId: input.agentId,
+    runId,
     run: (async function* () {
       yield { type: "status" as const, message: "Continuing with Koda…" };
       yield {
@@ -497,6 +511,7 @@ function mockFollowUp(input: FollowUpInput) {
     })(),
     wait: async (): Promise<AgentRunResult> => ({
       agentId: input.agentId,
+      runId,
       text,
       usage: { inputTokens: 50, outputTokens: 80, totalTokens: 130 },
     }),

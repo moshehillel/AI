@@ -16,15 +16,7 @@ type Message = {
   createdAt: string;
 };
 
-type AttachMode =
-  | "api_docs_url"
-  | "docs_text"
-  | "examples"
-  | "file"
-  | "secrets"
-  | null;
-
-type SecretDraft = { keyName: string; value: string };
+type AttachMode = "api_docs_url" | "docs_text" | "examples" | "file" | null;
 
 const WORKING_STATUSES = [
   "ANALYZING",
@@ -196,10 +188,6 @@ export function ChatPanel({
   const [attachMode, setAttachMode] = useState<AttachMode>(null);
   const [attachValue, setAttachValue] = useState("");
   const [attachError, setAttachError] = useState<string | null>(null);
-  const [secretDrafts, setSecretDrafts] = useState<SecretDraft[]>([
-    { keyName: "", value: "" },
-  ]);
-  const [savingSecrets, setSavingSecrets] = useState(false);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [thoughtSeconds, setThoughtSeconds] = useState(0);
@@ -222,7 +210,7 @@ export function ChatPanel({
       connectingSession ||
       isAwaitingAssistantReply(messages));
   const showThinking = waitingOnReply || liveLink === "reconnecting";
-  const inputBusy = pending || preparingFile || savingSecrets;
+  const inputBusy = pending || preparingFile;
   const label = thinkingLabel({
     liveLink: waitingOnReply ? "connected" : liveLink,
     connectingSession,
@@ -509,58 +497,7 @@ export function ChatPanel({
     }
   }
 
-  async function submitSecrets() {
-    const secrets = secretDrafts
-      .map((s) => ({
-        keyName: s.keyName.trim(),
-        value: s.value,
-      }))
-      .filter((s) => s.keyName && s.value);
-    if (secrets.length === 0) {
-      setAttachError("Add at least one name and value.");
-      return;
-    }
-    setAttachError(null);
-    setSavingSecrets(true);
-    try {
-      const response = await fetch(
-        `/api/change-requests/${changeRequestId}/secrets`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ secrets }),
-        },
-      );
-      const data = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        saved?: Array<{ keyName: string; message: string }>;
-      };
-      if (!response.ok) {
-        setAttachError(data.error || "Could not save secrets.");
-        return;
-      }
-      setSecretDrafts([{ keyName: "", value: "" }]);
-      setAttachMode(null);
-      if (data.saved?.length) {
-        setMessages((prev) => [
-          ...prev,
-          ...data.saved!.map((s, i) => ({
-            id: `local-secret-${Date.now()}-${i}`,
-            role: "SYSTEM",
-            content: s.message,
-            createdAt: new Date().toISOString(),
-          })),
-        ]);
-      }
-      router.refresh();
-    } catch {
-      setAttachError("Could not save secrets — try again.");
-    } finally {
-      setSavingSecrets(false);
-    }
-  }
-
-    function postProgramAction(
+  function postProgramAction(
     action: "submit_to_dev" | "reopen_planning",
     extra?: Record<string, unknown>,
   ) {
@@ -712,7 +649,6 @@ export function ChatPanel({
                 ["docs_text", "Paste docs"],
                 ["examples", "Paste examples"],
                 ["file", "Upload file"],
-                ["secrets", "Add secrets / credentials"],
               ] as const
             ).map(([kind, chipLabel]) => (
               <button
@@ -728,9 +664,6 @@ export function ChatPanel({
                   }
                   setAttachMode((prev) => (prev === kind ? null : kind));
                   setAttachValue("");
-                  if (kind === "secrets") {
-                    setSecretDrafts([{ keyName: "", value: "" }]);
-                  }
                 }}
               >
                 {chipLabel}
@@ -749,79 +682,7 @@ export function ChatPanel({
           </div>
         ) : null}
 
-        
-        {attachMode === "secrets" ? (
-          <div className="attach-panel space-y-3">
-            <p className="text-sm" style={{ color: "var(--ide-ink-secondary)" }}>
-              Values are encrypted and never shown in chat or the plan. Use a
-              clear name (e.g. <code>HHA_PASSWORD</code>) so the developer
-              knows what each secret is for.
-            </p>
-            {secretDrafts.map((row, index) => (
-              <div key={index} className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  className="field"
-                  type="text"
-                  autoComplete="off"
-                  placeholder="Name (e.g. HHA_PASSWORD)"
-                  value={row.keyName}
-                  onChange={(e) => {
-                    const next = [...secretDrafts];
-                    next[index] = { ...row, keyName: e.target.value };
-                    setSecretDrafts(next);
-                  }}
-                />
-                <input
-                  className="field"
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder="Secret value"
-                  value={row.value}
-                  onChange={(e) => {
-                    const next = [...secretDrafts];
-                    next[index] = { ...row, value: e.target.value };
-                    setSecretDrafts(next);
-                  }}
-                />
-              </div>
-            ))}
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="btn btn-ghost"
-                disabled={inputBusy || secretDrafts.length >= 20}
-                onClick={() =>
-                  setSecretDrafts((prev) => [
-                    ...prev,
-                    { keyName: "", value: "" },
-                  ])
-                }
-              >
-                Add another
-              </button>
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={inputBusy}
-                onClick={() => void submitSecrets()}
-              >
-                {savingSecrets ? "Saving…" : "Save securely"}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                onClick={() => {
-                  setAttachMode(null);
-                  setSecretDrafts([{ keyName: "", value: "" }]);
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : null}
-
-{attachMode && attachMode !== "file" && attachMode !== "secrets" ? (
+        {attachMode && attachMode !== "file" ? (
           <div className="attach-panel space-y-2">
             {attachMode === "api_docs_url" ? (
               <input

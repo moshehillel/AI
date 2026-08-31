@@ -1,4 +1,3 @@
-import { AppHeader } from "@/components/app-header";
 import { requirePageAuth } from "@/lib/page-auth";
 import { requireChangeRequestAccess } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
@@ -8,6 +7,9 @@ import { ChatPanel } from "./chat-panel";
 import { ActionBar } from "./action-bar";
 import { LivePlanPanel } from "./live-plan-panel";
 import { DeveloperWorkbench } from "./developer-workbench";
+import { IdeShell, IdeSidebar } from "@/components/ide-shell";
+
+const ONBOARDING_SLUG = "customer-onboarding";
 
 export default async function ChangeRequestPage({
   params,
@@ -69,141 +71,161 @@ export default async function ChangeRequestPage({
       "AWAITING_FINAL_REVIEW",
     ].includes(full.status);
 
-  return (
-    <main className="app-frame-work">
-      <AppHeader role={ctx.role} />
-      <section className="work-split rise">
-        <div className="agent-window panel flex min-h-[70vh] flex-col overflow-hidden">
-          <div className="agent-window-header">
-            <div>
-              <p className="muted text-xs uppercase tracking-[0.14em]">
-                {full.project.name}
-                {isProgram ? " · Program" : " · Change"}
-              </p>
-              <h1 className="brand-mark text-2xl md:text-3xl">
-                #{full.number} {full.title}
-              </h1>
-            </div>
-            <span className="status-pill">{STATUS_LABELS[full.status]}</span>
-          </div>
-          <ChatPanel
+  const isEmployee = ctx.role === "EMPLOYEE";
+  const programs = await db.changeRequest.findMany({
+    where: {
+      companyId: ctx.company.id,
+      kind: "PROGRAM",
+      status: { not: "CANCELLED" },
+      ...(isEmployee ? { createdById: ctx.user.id } : {}),
+      // Prefer same project; fall back to onboarding workspace programs
+      project: {
+        OR: [{ id: full.projectId }, { slug: ONBOARDING_SLUG }],
+      },
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 30,
+  });
+
+  const rightPanel = (
+    <>
+      {(isProgram || plan) && (
+        <LivePlanPanel
+          changeRequestId={full.id}
+          initialPlan={
+            plan
+              ? {
+                  id: plan.id,
+                  content: plan.content,
+                  createdAt: plan.createdAt.toISOString(),
+                  updatedAt: plan.updatedAt.toISOString(),
+                }
+              : null
+          }
+          compact
+        />
+      )}
+
+      <div className="ide-right-section">
+        <p className="ide-right-label">Progress</p>
+        <ul className="space-y-1.5 text-[12px]">
+          {full.statusEvents.slice(-8).map((event) => (
+            <li key={event.id} className="flex justify-between gap-2">
+              <span style={{ color: "var(--ide-ink-secondary)" }}>
+                {STATUS_LABELS[event.toStatus]}
+              </span>
+              <span className="muted shrink-0">
+                {event.createdAt.toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+            </li>
+          ))}
+          {full.statusEvents.length === 0 ? (
+            <li className="muted">No events yet.</li>
+          ) : null}
+        </ul>
+      </div>
+
+      <div className="ide-right-section space-y-2">
+        <p className="ide-right-label">Details</p>
+        {isProgram && planningMeta.apiDocsUrl ? (
+          <p className="text-[12px]">
+            <span className="muted">API docs:</span>{" "}
+            <a
+              className="underline"
+              href={planningMeta.apiDocsUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open link
+            </a>
+          </p>
+        ) : null}
+        {full.secretRefs.length > 0 ? (
+          <p className="text-[12px]">
+            <span className="muted">Secure secrets:</span>{" "}
+            {full.secretRefs.map((s) => s.keyName).join(", ")}
+          </p>
+        ) : null}
+        {preview?.url ? (
+          <a className="btn btn-primary w-full" href={preview.url} target="_blank">
+            Open preview
+          </a>
+        ) : null}
+        {/* Staff-only internals — never expose git/PR/vendor names to customers */}
+        {isStaff && buildSetup.serverLabel ? (
+          <p className="text-[12px]">
+            <span className="muted">Server:</span> {buildSetup.serverLabel}
+          </p>
+        ) : null}
+        {isStaff && ci ? (
+          <p className="text-[12px]">
+            <span className="muted">Checks:</span> {ci.status}
+          </p>
+        ) : null}
+        {isStaff && full.branchName ? (
+          <p className="text-[12px]">
+            <span className="muted">Branch:</span> {full.branchName}
+          </p>
+        ) : null}
+        {isStaff && pr ? (
+          <a className="btn btn-ghost w-full" href={pr.url} target="_blank">
+            Open review link
+          </a>
+        ) : null}
+        <ActionBar
+          changeRequestId={full.id}
+          status={full.status}
+          role={ctx.role}
+          hasPlan={Boolean(plan)}
+          kind={full.kind}
+          projectId={full.projectId}
+          hideProgramBuild={showDevWorkbench}
+        />
+      </div>
+
+      {showDevWorkbench ? (
+        <div className="ide-right-section">
+          <DeveloperWorkbench
             changeRequestId={full.id}
-            initialMessages={full.messages.map((m) => ({
-              id: m.id,
-              role: m.role,
-              content: m.content,
-              createdAt: m.createdAt.toISOString(),
-            }))}
             status={full.status}
-            kind={full.kind}
+            buildSetup={buildSetup}
+            branchName={full.branchName}
+            previewUrl={preview?.url}
+            hasPlan={Boolean(plan)}
           />
         </div>
+      ) : null}
+    </>
+  );
 
-        <aside className="space-y-4">
-          {showDevWorkbench ? (
-            <DeveloperWorkbench
-              changeRequestId={full.id}
-              status={full.status}
-              buildSetup={buildSetup}
-              branchName={full.branchName}
-              previewUrl={preview?.url}
-              hasPlan={Boolean(plan)}
-            />
-          ) : null}
-
-          {(isProgram || plan) && (
-            <LivePlanPanel
-              changeRequestId={full.id}
-              initialPlan={
-                plan
-                  ? {
-                      id: plan.id,
-                      content: plan.content,
-                      createdAt: plan.createdAt.toISOString(),
-                      updatedAt: plan.updatedAt.toISOString(),
-                    }
-                  : null
-              }
-            />
-          )}
-
-          <div className="panel p-5">
-            <h2 className="text-lg">Progress</h2>
-            <ul className="mt-3 space-y-2 text-sm">
-              {full.statusEvents.map((event) => (
-                <li key={event.id} className="flex justify-between gap-3">
-                  <span>{STATUS_LABELS[event.toStatus]}</span>
-                  <span className="muted">
-                    {event.createdAt.toLocaleTimeString()}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div className="panel space-y-3 p-5">
-            <h2 className="text-lg">Details</h2>
-            {isProgram && planningMeta.apiDocsUrl ? (
-              <p className="text-sm">
-                <span className="muted">API docs:</span>{" "}
-                <a
-                  className="underline"
-                  href={planningMeta.apiDocsUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open link
-                </a>
-              </p>
-            ) : null}
-            {full.secretRefs.length > 0 ? (
-              <p className="text-sm">
-                <span className="muted">Secure secrets stored:</span>{" "}
-                {full.secretRefs.map((s) => s.keyName).join(", ")}
-              </p>
-            ) : null}
-            {isStaff && buildSetup.serverLabel ? (
-              <p className="text-sm">
-                <span className="muted">Server:</span> {buildSetup.serverLabel}
-              </p>
-            ) : null}
-            {isStaff && ci ? (
-              <p className="text-sm">
-                <span className="muted">Checks:</span> {ci.status}
-              </p>
-            ) : null}
-            {isStaff && full.branchName ? (
-              <p className="text-sm">
-                <span className="muted">Branch:</span> {full.branchName}
-              </p>
-            ) : null}
-            {isStaff && pr ? (
-              <a className="btn btn-ghost w-full" href={pr.url} target="_blank">
-                Open review link
-              </a>
-            ) : null}
-            {preview?.url ? (
-              <a
-                className="btn btn-primary w-full"
-                href={preview.url}
-                target="_blank"
-              >
-                Open preview
-              </a>
-            ) : null}
-          </div>
-
-          <ActionBar
-            changeRequestId={full.id}
-            status={full.status}
-            role={ctx.role}
-            hasPlan={Boolean(plan)}
-            kind={full.kind}
-            projectId={full.projectId}
-            hideProgramBuild={showDevWorkbench}
-          />
-        </aside>
-      </section>
-    </main>
+  return (
+    <IdeShell
+      sidebar={
+        <IdeSidebar
+          programs={programs}
+          activeId={full.id}
+          role={ctx.role}
+          newHref="/projects"
+          projectName={full.project.name}
+        />
+      }
+      right={rightPanel}
+    >
+      <ChatPanel
+        changeRequestId={full.id}
+        initialMessages={full.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          createdAt: m.createdAt.toISOString(),
+        }))}
+        status={full.status}
+        kind={full.kind}
+        title={`#${full.number} ${full.title}`}
+      />
+    </IdeShell>
   );
 }

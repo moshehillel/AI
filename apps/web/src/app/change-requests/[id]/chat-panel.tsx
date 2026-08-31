@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   PLANNING_FILE_ACCEPT,
@@ -26,7 +26,6 @@ const WORKING_STATUSES = [
   "DEPLOYING",
 ] as const;
 
-/** True when the latest user turn still has no ASSISTANT reply (SYSTEM “connecting…” does not count). */
 function isAwaitingAssistantReply(messages: Message[]): boolean {
   let lastUserIdx = -1;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -65,16 +64,102 @@ function thinkingLabel(opts: {
 }): string {
   if (opts.liveLink === "reconnecting") return "Reconnecting live updates…";
   if (opts.liveLink === "connecting") return "Connecting live updates…";
-  if (opts.connectingSession) return "Koda is connecting…";
+  if (opts.connectingSession) return "Connecting planning session…";
   if (opts.working) {
     if (opts.status === "BUILDING" || opts.status === "IMPLEMENTING") {
-      return "Koda is working…";
+      return "Working on your request…";
     }
-    if (opts.status === "TESTING") return "Koda is testing…";
-    if (opts.status === "DEPLOYING") return "Koda is deploying…";
-    return "Koda is analyzing…";
+    if (opts.status === "TESTING") return "Running tests…";
+    if (opts.status === "DEPLOYING") return "Preparing preview…";
+    return "Analyzing…";
   }
-  return "Koda is thinking…";
+  return "Thinking…";
+}
+
+function IconPlus() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 3v10M3 8h10"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconSend() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 12.5V3.5M8 3.5L4.5 7M8 3.5L11.5 7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+      style={{ transform: open ? "rotate(90deg)" : undefined }}
+    >
+      <path
+        d="M4.5 2.5L8 6L4.5 9.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ThoughtBlock({
+  title,
+  summary,
+  openDefault = false,
+  live = false,
+}: {
+  title: string;
+  summary?: string;
+  openDefault?: boolean;
+  live?: boolean;
+}) {
+  const [open, setOpen] = useState(openDefault || live);
+  return (
+    <div className="thought-block">
+      <button
+        type="button"
+        className="thought-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <IconChevron open={open} />
+        <span>{title}</span>
+        {live ? (
+          <span className="thinking-dots ml-1" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        ) : null}
+      </button>
+      {open && summary ? <div className="thought-body">{summary}</div> : null}
+    </div>
+  );
+}
+
+function secondsBetween(a: string, b: string): number {
+  const ms = new Date(b).getTime() - new Date(a).getTime();
+  return Math.max(1, Math.round(ms / 1000));
 }
 
 export function ChatPanel({
@@ -82,11 +167,13 @@ export function ChatPanel({
   initialMessages,
   status: initialStatus,
   kind,
+  title,
 }: {
   changeRequestId: string;
   initialMessages: Message[];
   status: string;
   kind: string;
+  title?: string;
 }) {
   const router = useRouter();
   const [messages, setMessages] = useState(initialMessages);
@@ -103,14 +190,17 @@ export function ChatPanel({
   const [attachError, setAttachError] = useState<string | null>(null);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [modeChip, setModeChip] = useState(true);
+  const [thoughtSeconds, setThoughtSeconds] = useState(0);
+  const thinkingStarted = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isProgram = kind === "PROGRAM";
   const isPlanning =
     isProgram &&
     (status === "PLANNING" || status === "AWAITING_PLAN_APPROVAL");
-  const canReopenPlanning =
-    isProgram && status === "AWAITING_DEV_BUILD";
+  const canReopenPlanning = isProgram && status === "AWAITING_DEV_BUILD";
   const working = (WORKING_STATUSES as readonly string[]).includes(status);
   const connectingSession = isConnectingSession(messages);
   const waitingOnReply =
@@ -160,8 +250,6 @@ export function ChatPanel({
           if (data.status) setStatus(data.status);
           if (data.messages) {
             setMessages(data.messages);
-            // Clear optimistic wait once server state is in; derived waiting
-            // (no ASSISTANT after last USER / connecting SYSTEM) keeps the UI.
             setAwaitingReply(false);
           }
         }
@@ -170,7 +258,6 @@ export function ChatPanel({
       }
     };
     source.onerror = () => {
-      // Debounce — EventSource often blips through CONNECTING during retries.
       if (reconnectTimer) return;
       reconnectTimer = setTimeout(() => {
         if (source.readyState !== EventSource.OPEN) {
@@ -191,9 +278,78 @@ export function ChatPanel({
     });
   }, [messages, showThinking, label]);
 
+  useEffect(() => {
+    if (showThinking) {
+      if (!thinkingStarted.current) thinkingStarted.current = Date.now();
+      const tick = () => {
+        if (thinkingStarted.current) {
+          setThoughtSeconds(
+            Math.max(1, Math.round((Date.now() - thinkingStarted.current) / 1000)),
+          );
+        }
+      };
+      tick();
+      const id = setInterval(tick, 1000);
+      return () => clearInterval(id);
+    }
+    thinkingStarted.current = null;
+    setThoughtSeconds(0);
+  }, [showThinking]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(140, el.scrollHeight)}px`;
+  }, [prompt]);
+
+  const timeline = useMemo(() => {
+    const items: Array<
+      | { type: "message"; message: Message }
+      | {
+          type: "thought";
+          id: string;
+          title: string;
+          summary?: string;
+        }
+    > = [];
+    for (let i = 0; i < messages.length; i += 1) {
+      const message = messages[i]!;
+      if (message.role === "SYSTEM") {
+        items.push({
+          type: "thought",
+          id: `sys-${message.id}`,
+          title: "Worked for a moment",
+          summary: message.content,
+        });
+        continue;
+      }
+      if (message.role === "ASSISTANT") {
+        let prevUser: Message | undefined;
+        for (let j = i - 1; j >= 0; j -= 1) {
+          if (messages[j]?.role === "USER") {
+            prevUser = messages[j];
+            break;
+          }
+        }
+        if (prevUser) {
+          const secs = secondsBetween(prevUser.createdAt, message.createdAt);
+          items.push({
+            type: "thought",
+            id: `thought-${message.id}`,
+            title: `Thought ${secs}s`,
+            summary: "Reviewed your note and updated the living plan.",
+          });
+        }
+      }
+      items.push({ type: "message", message });
+    }
+    return items;
+  }, [messages]);
+
   const placeholder = isProgram
     ? isPlanning
-      ? "Message Koda — ask anything, request a diagram, refine the plan…"
+      ? "Plan, search, build anything"
       : status === "CLIENT_VERIFY" || status === "PREVIEW_READY"
         ? "Ask how it works, request a test script, or describe a change…"
         : "Send a message…"
@@ -237,8 +393,6 @@ export function ChatPanel({
         setPrompt("");
         setAttachMode(null);
         setAttachValue("");
-        // Only clear optimistic flag; keep thinking if reply is SYSTEM
-        // “connecting…” or follow-up is still processing (no ASSISTANT yet).
         setAwaitingReply(
           !(json.assistantMessage && json.assistantMessage.role === "ASSISTANT"),
         );
@@ -294,8 +448,6 @@ export function ChatPanel({
       return null;
     }
 
-    // Binary files (PDF / Excel) and text alike go through the server so the
-    // Cursor agent receives layout images / structured CSV — not only a chat excerpt.
     const form = new FormData();
     form.append("file", file);
     const res = await fetch(
@@ -307,7 +459,6 @@ export function ChatPanel({
       excerpt?: string;
       fileName?: string;
       attachmentRef?: string;
-      agentImages?: number;
     };
     if (!res.ok || !data.excerpt) {
       setAttachError(data.error || "Could not read that file.");
@@ -373,71 +524,126 @@ export function ChatPanel({
     });
   }
 
+  const planningStatus =
+    isPlanning
+      ? showThinking
+        ? "Planning"
+        : "Ready"
+      : canReopenPlanning
+        ? "Submitted"
+        : status.replaceAll("_", " ");
+
   return (
-    <div className="agent-chat flex min-h-0 flex-1 flex-col">
-      <div className="agent-chat-banner">
-        <p className="text-xs muted">
-          {isPlanning
-            ? "Planning with Koda — real Q&A and a living plan. Attach docs anytime."
-            : canReopenPlanning
-              ? "Submitted — waiting for a developer. You can reopen planning if this was accidental."
-              : "Koda is AI and can make mistakes."}
-        </p>
-        <p className="shrink-0 text-xs muted">Koda is AI and can make mistakes.</p>
+    <div className="agent-chat">
+      <div className="ide-main-header">
+        <div className="ide-main-title">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+            className="opacity-50"
+          >
+            <path
+              d="M3 10.5c1.5-3 3.5-4.5 5-4.5s3.5 1.5 5 4.5"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+            />
+            <circle cx="8" cy="5" r="1.4" fill="currentColor" opacity="0.55" />
+          </svg>
+          <span>{title ?? "Planning"}</span>
+        </div>
+        <span className="status-pill">{planningStatus}</span>
       </div>
 
-      <div ref={scrollerRef} className="agent-chat-scroll flex-1 space-y-3 overflow-y-auto">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`chat-bubble rise ${
-              message.role === "USER"
-                ? "chat-bubble-user"
-                : message.role === "SYSTEM"
-                  ? "chat-bubble-system"
-                  : "chat-bubble-koda"
-            }`}
-          >
-            <p className="muted mb-1 text-xs uppercase tracking-wide">
-              {message.role === "USER"
-                ? "You"
-                : message.role === "SYSTEM"
-                  ? "System"
-                  : "Koda"}
-            </p>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">
-              {message.content}
-            </p>
-          </div>
-        ))}
+      <div ref={scrollerRef} className="agent-chat-scroll">
+        {timeline.map((item) => {
+          if (item.type === "thought") {
+            return (
+              <ThoughtBlock
+                key={item.id}
+                title={item.title}
+                summary={item.summary}
+              />
+            );
+          }
+          const message = item.message;
+          if (message.role === "USER") {
+            return (
+              <div key={message.id} className="agent-msg agent-msg-user rise">
+                <p className="agent-msg-body">{message.content}</p>
+              </div>
+            );
+          }
+          return (
+            <div
+              key={message.id}
+              className="agent-msg agent-msg-assistant rise"
+            >
+              <p className="agent-msg-body">{message.content}</p>
+              <div className="agent-msg-actions" aria-hidden="true">
+                <button type="button" tabIndex={-1} title="Helpful">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M5.5 14H4a1 1 0 01-1-1V8a1 1 0 011-1h1.5M5.5 7V4.5A1.5 1.5 0 017 3h.2c.6 0 1.1.4 1.3 1L10 8h2.5a1.5 1.5 0 011.5 1.7l-.6 3A1.5 1.5 0 0111.9 14H5.5z"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                <button type="button" tabIndex={-1} title="Not helpful">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M10.5 2H12a1 1 0 011 1v5a1 1 0 01-1 1h-1.5M10.5 9v2.5A1.5 1.5 0 019 13h-.2c-.6 0-1.1-.4-1.3-1L6 8H3.5A1.5 1.5 0 012 6.3l.6-3A1.5 1.5 0 014.1 2H10.5z"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
         {showThinking ? (
-          <div
-            className="chat-bubble chat-bubble-koda chat-thinking rise"
-            role="status"
-            aria-live="polite"
-            aria-busy="true"
-          >
-            <p className="muted mb-1 text-xs uppercase tracking-wide">Koda</p>
-            <p className="thinking-line text-sm leading-relaxed">
-              <span>{preparingFile ? "Reading your file…" : label}</span>
-              <span className="thinking-dots" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </p>
-          </div>
+          <ThoughtBlock
+            title={
+              preparingFile
+                ? "Reading file…"
+                : `Thought ${thoughtSeconds || 1}s`
+            }
+            summary={label}
+            openDefault
+            live
+          />
         ) : null}
+
         {status === "FAILED" ? (
-          <p className="text-sm text-[var(--danger)]">
+          <p className="text-sm" style={{ color: "var(--ide-danger)" }}>
             Something went wrong. Use Retry in the actions panel.
           </p>
         ) : null}
       </div>
 
-      {isPlanning ? (
-        <div className="mt-4 space-y-3">
-          <div className="flex flex-wrap gap-2">
+      <div className="pill-composer-wrap">
+        {showThinking ? (
+          <div className="composer-status">
+            <span>
+              <strong>1 Working</strong>
+            </span>
+            <span>
+              Plan updates{" "}
+              <span className="stat-add">live</span>
+            </span>
+          </div>
+        ) : null}
+
+        {isPlanning ? (
+          <div className="attach-chips">
             {(
               [
                 ["api_docs_url", "API docs URL"],
@@ -445,7 +651,7 @@ export function ChatPanel({
                 ["examples", "Paste examples"],
                 ["file", "Upload file"],
               ] as const
-            ).map(([kind, label]) => (
+            ).map(([kind, chipLabel]) => (
               <button
                 key={kind}
                 type="button"
@@ -461,7 +667,7 @@ export function ChatPanel({
                   setAttachValue("");
                 }}
               >
-                {label}
+                {chipLabel}
               </button>
             ))}
             <input
@@ -475,159 +681,222 @@ export function ChatPanel({
               }}
             />
           </div>
+        ) : null}
 
-          {attachMode && attachMode !== "file" ? (
-            <div className="space-y-2 rounded-xl border border-[var(--line)] bg-black/15 p-3">
-              {attachMode === "api_docs_url" ? (
-                <input
-                  className="field"
-                  type="url"
-                  placeholder="https://… API documentation"
-                  value={attachValue}
-                  onChange={(e) => setAttachValue(e.target.value)}
-                />
-              ) : (
-                <textarea
-                  className="field min-h-28"
-                  placeholder={
-                    attachMode === "examples"
-                      ? "Paste example requests / responses…"
-                      : "Paste documentation excerpts…"
-                  }
-                  value={attachValue}
-                  onChange={(e) => setAttachValue(e.target.value)}
-                />
-              )}
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={inputBusy}
-                  onClick={submitAttach}
-                >
-                  Attach to chat
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => {
-                    setAttachMode(null);
-                    setAttachValue("");
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
+        {attachMode && attachMode !== "file" ? (
+          <div className="attach-panel space-y-2">
+            {attachMode === "api_docs_url" ? (
+              <input
+                className="field"
+                type="url"
+                placeholder="https://… API documentation"
+                value={attachValue}
+                onChange={(e) => setAttachValue(e.target.value)}
+              />
+            ) : (
+              <textarea
+                className="field min-h-24"
+                placeholder={
+                  attachMode === "examples"
+                    ? "Paste example requests / responses…"
+                    : "Paste documentation excerpts…"
+                }
+                value={attachValue}
+                onChange={(e) => setAttachValue(e.target.value)}
+              />
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={inputBusy}
+                onClick={submitAttach}
+              >
+                Attach
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setAttachMode(null);
+                  setAttachValue("");
+                }}
+              >
+                Cancel
+              </button>
             </div>
-          ) : null}
-          {attachError ? (
-            <p className="text-sm text-[var(--danger)]">{attachError}</p>
-          ) : null}
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+        {attachError ? (
+          <p
+            className="mb-2 text-sm"
+            style={{ color: "var(--ide-danger)", maxWidth: "52rem", marginInline: "auto" }}
+          >
+            {attachError}
+          </p>
+        ) : null}
 
-      <form
-        className="agent-composer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (inputBusy) return;
-          sendMessage({ content: prompt });
-        }}
-      >
-        <input
-          className="field agent-composer-input"
-          placeholder={
-            inputBusy
-              ? preparingFile
-                ? "Reading your file…"
-                : "Sending…"
-              : placeholder
-          }
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          disabled={inputBusy}
-          aria-busy={inputBusy}
-        />
-        <button
-          className="btn btn-primary"
-          disabled={inputBusy || !prompt.trim()}
+        <form
+          className="pill-composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (inputBusy) return;
+            sendMessage({ content: prompt });
+          }}
         >
-          {inputBusy ? "…" : "Send"}
-        </button>
-      </form>
-      {inputBusy ? (
-        <p className="mt-1.5 text-xs muted pulse-soft">
-          {preparingFile
-            ? "Preparing attachment — composer paused."
-            : "Sending your message…"}
-        </p>
-      ) : showThinking ? (
-        <p className="mt-1.5 text-xs muted">
-          Koda is still responding — you can send another message anytime.
-        </p>
-      ) : null}
-
-      {isPlanning ? (
-        <div className="mt-3 space-y-2">
-          {!confirmSubmit ? (
-            <button
-              type="button"
-              className="btn btn-ghost w-full"
-              disabled={inputBusy}
-              onClick={() => {
-                setActionError(null);
-                setConfirmSubmit(true);
-              }}
-            >
-              Ready to submit to a developer?
-            </button>
-          ) : (
-            <div className="space-y-2 rounded-xl border border-[var(--line)] bg-black/15 p-3">
-              <p className="text-sm">
-                This notifies Advanced Automations that the plan is ready to
-                build. You can reopen planning afterward if needed.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={inputBusy}
-                  onClick={() =>
-                    postProgramAction("submit_to_dev", { confirmSubmit: true })
-                  }
-                >
-                  Yes, submit for building
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  disabled={inputBusy}
-                  onClick={() => setConfirmSubmit(false)}
-                >
-                  Keep planning
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : null}
-
-      {canReopenPlanning ? (
-        <div className="mt-3 space-y-2">
           <button
             type="button"
-            className="btn btn-primary w-full"
-            disabled={inputBusy}
-            onClick={() => postProgramAction("reopen_planning")}
+            className="pill-attach"
+            disabled={!isPlanning || inputBusy}
+            title="Attach"
+            onClick={() => {
+              if (!isPlanning) return;
+              fileRef.current?.click();
+            }}
           >
-            Continue planning (reopen)
+            <IconPlus />
           </button>
-        </div>
-      ) : null}
+          {modeChip && isPlanning ? (
+            <span className="pill-mode">
+              Plan
+              <button
+                type="button"
+                aria-label="Dismiss mode"
+                onClick={() => setModeChip(false)}
+              >
+                ×
+              </button>
+            </span>
+          ) : null}
+          <textarea
+            ref={textareaRef}
+            className="pill-input"
+            rows={1}
+            placeholder={
+              inputBusy
+                ? preparingFile
+                  ? "Reading your file…"
+                  : "Sending…"
+                : placeholder
+            }
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            disabled={inputBusy}
+            aria-busy={inputBusy}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!inputBusy && prompt.trim()) {
+                  sendMessage({ content: prompt });
+                }
+              }
+            }}
+          />
+          <div className="pill-right">
+            <span className="pill-model">
+              Auto
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                <path
+                  d="M2.5 3.5L5 6.5L7.5 3.5"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  fill="none"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            <button
+              type="submit"
+              className="pill-send"
+              disabled={inputBusy || !prompt.trim()}
+              aria-label="Send"
+            >
+              <IconSend />
+            </button>
+          </div>
+        </form>
 
-      {actionError ? (
-        <p className="mt-2 text-sm text-[var(--danger)]">{actionError}</p>
-      ) : null}
+        <div className="composer-foot">
+          <span>
+            {liveLink === "connected"
+              ? "Live"
+              : liveLink === "reconnecting"
+                ? "Reconnecting…"
+                : "Connecting…"}
+            {isPlanning ? " · Planning with Koda" : ""}
+          </span>
+          <span>Koda is AI and can make mistakes.</span>
+        </div>
+
+        {isPlanning ? (
+          <div className="mx-auto mt-3 max-w-[52rem] space-y-2 px-1">
+            {!confirmSubmit ? (
+              <button
+                type="button"
+                className="btn btn-ghost w-full"
+                disabled={inputBusy}
+                onClick={() => {
+                  setActionError(null);
+                  setConfirmSubmit(true);
+                }}
+              >
+                Ready to submit to a developer?
+              </button>
+            ) : (
+              <div className="attach-panel space-y-2">
+                <p className="text-sm" style={{ color: "var(--ide-ink-secondary)" }}>
+                  This notifies Advanced Automations that the plan is ready to
+                  build. You can reopen planning afterward if needed.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={inputBusy}
+                    onClick={() =>
+                      postProgramAction("submit_to_dev", {
+                        confirmSubmit: true,
+                      })
+                    }
+                  >
+                    Yes, submit for building
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    disabled={inputBusy}
+                    onClick={() => setConfirmSubmit(false)}
+                  >
+                    Keep planning
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
+
+        {canReopenPlanning ? (
+          <div className="mx-auto mt-3 max-w-[52rem] px-1">
+            <button
+              type="button"
+              className="btn btn-primary w-full"
+              disabled={inputBusy}
+              onClick={() => postProgramAction("reopen_planning")}
+            >
+              Continue planning (reopen)
+            </button>
+          </div>
+        ) : null}
+
+        {actionError ? (
+          <p
+            className="mx-auto mt-2 max-w-[52rem] text-sm"
+            style={{ color: "var(--ide-danger)" }}
+          >
+            {actionError}
+          </p>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -1,4 +1,3 @@
-import { AppHeader } from "@/components/app-header";
 import { requirePageAuth } from "@/lib/page-auth";
 import { requireProjectAccess } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
@@ -7,6 +6,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { NewChangeForm } from "./new-change-form";
 import { NewProgramForm } from "./new-program-form";
+import { IdeShell, IdeSidebar } from "@/components/ide-shell";
 
 export default async function ProjectDetailPage({
   params,
@@ -29,7 +29,6 @@ export default async function ProjectDetailPage({
     include: {
       repository: true,
       changeRequests: {
-        // Cancelled programs are soft-deleted from the main dashboard list
         where: { status: { not: "CANCELLED" } },
         orderBy: { createdAt: "desc" },
         take: 20,
@@ -49,115 +48,141 @@ export default async function ProjectDetailPage({
       })
     : [];
 
-  // Employees only see programs (not small change requests) on this surface
   const visibleWork = isStaff
     ? project.changeRequests
     : project.changeRequests.filter((cr) => cr.kind === "PROGRAM");
 
+  const sidebarPrograms = visibleWork
+    .filter((cr) => cr.kind === "PROGRAM")
+    .map((cr) => ({
+      id: cr.id,
+      number: cr.number,
+      title: cr.title,
+      updatedAt: cr.updatedAt,
+      status: cr.status,
+    }));
+
   return (
-    <main className="app-frame">
-      <AppHeader role={ctx.role} />
-      <section className="rise space-y-8">
-        <div>
-          <p className="muted text-sm uppercase tracking-[0.18em]">Workspace</p>
-          <h1 className="brand-mark mt-2 text-4xl">{project.name}</h1>
-          <p className="muted mt-3 max-w-xl">{project.description}</p>
-
-          <div className="mt-8 panel p-6">
-            <h2 className="text-xl">New program</h2>
-            <p className="muted mt-2 text-sm">
-              Start a back-and-forth with Koda. Answer questions as they come —
-              attach docs in chat when ready — then submit to a developer for
-              building.
+    <IdeShell
+      sidebar={
+        <IdeSidebar
+          programs={sidebarPrograms}
+          role={ctx.role}
+          newHref={`/projects/${project.id}`}
+          projectName={project.name}
+        />
+      }
+    >
+      <div className="ide-main-header">
+        <div className="ide-main-title">
+          <span>{project.name}</span>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="mx-auto max-w-xl space-y-8">
+          <section>
+            <p className="muted text-[11px] uppercase tracking-[0.08em]">
+              Workspace
             </p>
-            <div className="mt-4">
-              <NewProgramForm projectId={project.id} />
-            </div>
-          </div>
-
-          {isStaff ? (
-            <div className="mt-6 panel p-6">
-              <h2 className="text-lg">Request a small change</h2>
-              <p className="muted mt-2 text-sm">
-                Staff only — tweaks to an existing automation.
+            <h1 className="mt-1 text-[18px] font-medium tracking-tight">
+              {project.name}
+            </h1>
+            {project.description ? (
+              <p className="muted mt-2 text-[13px] leading-relaxed">
+                {project.description}
               </p>
-              <div className="mt-4">
-                <NewChangeForm projectId={project.id} />
+            ) : null}
+
+            <div className="mt-6">
+              <h2 className="text-[13px] font-medium">New program</h2>
+              <p className="muted mt-1 text-[12px] leading-relaxed">
+                Start a back-and-forth with Koda. Attach docs in chat when
+                ready, then submit to a developer for building.
+              </p>
+              <div className="mt-3">
+                <NewProgramForm projectId={project.id} />
               </div>
             </div>
-          ) : null}
-        </div>
 
-        <div>
-          <h2 className="text-lg">Your programs</h2>
-          <ul className="mt-4 space-y-3">
-            {visibleWork.map((cr) => (
-              <li key={cr.id}>
-                <Link
-                  href={`/change-requests/${cr.id}`}
-                  className="block rounded-xl border border-[var(--line)] p-3 hover:bg-white/5"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-medium">
+            {isStaff ? (
+              <div className="mt-6">
+                <h2 className="text-[13px] font-medium">
+                  Request a small change
+                </h2>
+                <p className="muted mt-1 text-[12px]">
+                  Staff only — tweaks to an existing automation.
+                </p>
+                <div className="mt-3">
+                  <NewChangeForm projectId={project.id} />
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <section>
+            <h2 className="text-[13px] font-medium">Your programs</h2>
+            <ul className="mt-2 divide-y" style={{ borderColor: "var(--ide-line)" }}>
+              {visibleWork.map((cr) => (
+                <li key={cr.id}>
+                  <Link
+                    href={`/change-requests/${cr.id}`}
+                    className="flex items-center justify-between gap-3 py-2.5"
+                  >
+                    <span className="text-[13px]">
                       #{cr.number} {cr.title}
+                      {isStaff ? (
+                        <span className="muted ml-2 text-[11px]">
+                          {cr.kind === "PROGRAM" ? "Program" : "Change"}
+                        </span>
+                      ) : null}
                     </span>
                     <span className="status-pill">
                       {STATUS_LABELS[cr.status]}
                     </span>
-                  </div>
-                  {isStaff ? (
-                    <p className="muted mt-1 text-xs">
-                      {cr.kind === "PROGRAM" ? "Program" : "Change"}
-                    </p>
-                  ) : null}
-                </Link>
-              </li>
-            ))}
-            {visibleWork.length === 0 ? (
-              <li className="muted text-sm">No programs yet.</li>
-            ) : null}
-          </ul>
-          {cancelledArchive.length > 0 ? (
-            <details className="mt-6">
-              <summary className="muted cursor-pointer text-sm">
-                Cancelled archive ({cancelledArchive.length})
-              </summary>
-              <ul className="mt-3 space-y-2">
-                {cancelledArchive.map((cr) => (
-                  <li key={cr.id}>
-                    <Link
-                      href={`/change-requests/${cr.id}`}
-                      className="block rounded-xl border border-[var(--line)] p-3 opacity-70 hover:bg-white/5"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="font-medium">
+                  </Link>
+                </li>
+              ))}
+              {visibleWork.length === 0 ? (
+                <li className="muted py-3 text-[13px]">No programs yet.</li>
+              ) : null}
+            </ul>
+            {cancelledArchive.length > 0 ? (
+              <details className="mt-4">
+                <summary className="muted cursor-pointer text-[12px]">
+                  Cancelled archive ({cancelledArchive.length})
+                </summary>
+                <ul className="mt-2 space-y-1">
+                  {cancelledArchive.map((cr) => (
+                    <li key={cr.id}>
+                      <Link
+                        href={`/change-requests/${cr.id}`}
+                        className="ide-list-item opacity-70"
+                      >
+                        <span className="ide-list-item-title">
                           #{cr.number} {cr.title}
                         </span>
-                        <span className="status-pill">
-                          {STATUS_LABELS[cr.status]}
-                        </span>
-                      </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          ) : null}
-          {isStaff ? (
-            !project.repository ? (
-              <p className="mt-6 text-sm text-[var(--warn)]">
-                Repository not connected. Link one under Admin before live
-                builds.
-              </p>
-            ) : (
-              <p className="muted mt-6 text-sm">
-                Connected repository: {project.repository.githubOwner}/
-                {project.repository.githubRepo}
-              </p>
-            )
-          ) : null}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+            {isStaff ? (
+              !project.repository ? (
+                <p className="mt-4 text-[12px]" style={{ color: "var(--ide-warn)" }}>
+                  Repository not connected. Link one under Admin before live
+                  builds.
+                </p>
+              ) : (
+                <p className="muted mt-4 text-[12px]">
+                  Connected repository: {project.repository.githubOwner}/
+                  {project.repository.githubRepo}
+                </p>
+              )
+            ) : null}
+          </section>
         </div>
-      </section>
-    </main>
+      </div>
+    </IdeShell>
   );
 }

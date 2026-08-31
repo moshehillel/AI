@@ -57,8 +57,8 @@ export function ActionBar({
   }
 
   return (
-    <div className="panel flex flex-col gap-2 p-5">
-      <h2 className="text-lg">Actions</h2>
+    <div className="flex flex-col gap-2">
+      <p className="ide-right-label">Actions</p>
 
       {isProgram && (status === "PLANNING" || status === "AWAITING_PLAN_APPROVAL") ? (
         !confirmSubmit ? (

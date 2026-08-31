@@ -1,10 +1,10 @@
 export const dynamic = "force-dynamic";
-import { AppHeader } from "@/components/app-header";
 import { requirePageAuth } from "@/lib/page-auth";
 import { db } from "@automation-studio/db";
 import { STATUS_LABELS } from "@automation-studio/domain";
 import Link from "next/link";
 import { NewProgramForm } from "./[projectId]/new-program-form";
+import { IdeShell, IdeSidebar } from "@/components/ide-shell";
 
 const ONBOARDING_SLUG = "customer-onboarding";
 
@@ -44,109 +44,88 @@ export default async function ProjectsPage() {
     : [];
 
   return (
-    <main className="app-frame">
-      <AppHeader role={ctx.role} />
-
-      <section className="relative overflow-hidden rise">
-        <div className="hero-grid opacity-40" aria-hidden />
-        <div className="relative z-10">
-          <p
-            className="brand-mark text-5xl leading-none md:text-6xl"
-            style={{ animationDelay: "40ms" }}
-          >
-            Koda
-          </p>
-          <h1
-            className="rise mt-4 text-2xl font-medium leading-snug text-[var(--accent-soft)] md:text-3xl"
-            style={{ animationDelay: "100ms" }}
-          >
-            Customer onboarding
-          </h1>
-          <p
-            className="muted rise mt-3 max-w-xl text-base leading-relaxed"
-            style={{ animationDelay: "160ms" }}
-          >
-            Start a new program. Koda asks questions one at a time, drafts a
-            plan with you, then a developer builds it when you&apos;re ready.
-          </p>
+    <IdeShell
+      sidebar={
+        <IdeSidebar
+          programs={activePrograms}
+          role={ctx.role}
+          newHref="/projects"
+          projectName={onboardingProject?.name ?? "Programs"}
+        />
+      }
+    >
+      <div className="ide-main-header">
+        <div className="ide-main-title">
+          <span>Koda · Customer onboarding</span>
         </div>
-      </section>
-
-      <section className="rise mt-10 space-y-8">
-        <div className="panel p-6 md:p-8">
-          <h2 className="text-xl">New program</h2>
-          <p className="muted mt-2 text-sm">
-            Name what you want to automate — or leave a short note and let Koda
-            lead the conversation.
-          </p>
-          {onboardingProject ? (
-            <div className="mt-5">
-              <NewProgramForm projectId={onboardingProject.id} />
-            </div>
-          ) : (
-            <p className="muted mt-5 text-sm">
-              No workspace is available yet. Ask an admin to grant access to
-              customer onboarding.
+      </div>
+      <div className="flex-1 overflow-y-auto px-6 py-6">
+        <div className="mx-auto max-w-xl space-y-8">
+          <section>
+            <h1 className="text-[18px] font-medium tracking-tight">
+              New program
+            </h1>
+            <p className="muted mt-2 text-[13px] leading-relaxed">
+              Start a planning chat with Koda. Answer questions one at a time,
+              refine the living plan, then submit when you&apos;re ready for a
+              developer.
             </p>
-          )}
-        </div>
+            {onboardingProject ? (
+              <div className="mt-4">
+                <NewProgramForm projectId={onboardingProject.id} />
+              </div>
+            ) : (
+              <p className="muted mt-4 text-[13px]">
+                No workspace is available yet. Ask an admin to grant access to
+                customer onboarding.
+              </p>
+            )}
+          </section>
 
-        <div>
-          <h2 className="text-lg">Your programs</h2>
-          <p className="muted mt-1 text-sm">
-            Active plans and builds — cancelled items stay hidden.
-          </p>
-          <ul className="mt-4 space-y-3">
-            {activePrograms.map((cr) => (
-              <li key={cr.id}>
-                <Link
-                  href={`/change-requests/${cr.id}`}
-                  className="block rounded-xl border border-[var(--line)] p-3 transition hover:bg-white/5"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="font-medium">
+          <section>
+            <h2 className="text-[13px] font-medium">Your programs</h2>
+            <ul className="mt-3 divide-y" style={{ borderColor: "var(--ide-line)" }}>
+              {activePrograms.map((cr) => (
+                <li key={cr.id}>
+                  <Link
+                    href={`/change-requests/${cr.id}`}
+                    className="flex items-center justify-between gap-3 py-2.5 transition hover:bg-[var(--ide-bg-hover)]"
+                  >
+                    <span className="text-[13px]">
                       #{cr.number} {cr.title}
                     </span>
                     <span className="status-pill">
                       {STATUS_LABELS[cr.status]}
                     </span>
-                  </div>
-                </Link>
-              </li>
-            ))}
-            {activePrograms.length === 0 ? (
-              <li className="muted text-sm">
-                No programs yet. Start one above.
-              </li>
-            ) : null}
-          </ul>
-        </div>
-      </section>
+                  </Link>
+                </li>
+              ))}
+              {activePrograms.length === 0 ? (
+                <li className="muted py-3 text-[13px]">
+                  No programs yet. Start one above.
+                </li>
+              ) : null}
+            </ul>
+          </section>
 
-      {isStaff ? (
-        <section className="rise mt-10">
-          <h2 className="text-sm uppercase tracking-[0.18em] muted">
-            Staff · workspaces
-          </h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {projects.map((project) => (
-              <Link
-                key={project.id}
-                href={`/projects/${project.id}`}
-                className="rounded-xl border border-[var(--line)] p-4 text-sm transition hover:bg-white/5"
-              >
-                <span className="font-medium">{project.name}</span>
-                <p className="muted mt-1 text-xs leading-relaxed">
-                  {project.description ?? "Workspace"}
-                </p>
-              </Link>
-            ))}
-            {projects.length === 0 ? (
-              <p className="muted text-sm">No workspaces yet.</p>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-    </main>
+          {isStaff ? (
+            <section>
+              <h2 className="ide-right-label">Staff · workspaces</h2>
+              <div className="mt-2 space-y-1">
+                {projects.map((project) => (
+                  <Link
+                    key={project.id}
+                    href={`/projects/${project.id}`}
+                    className="ide-list-item"
+                  >
+                    <span className="ide-list-item-title">{project.name}</span>
+                  </Link>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </div>
+      </div>
+    </IdeShell>
   );
 }

@@ -10,6 +10,8 @@ import {
 } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
 import { loadPlanningAttachmentsForAgent } from "../lib/planning-attachment.js";
+import { persistPlanModeReply, clearLiveProgress } from "../lib/planning-persist.js";
+import { mirrorPlanningStream } from "../lib/planning-stream.js";
 
 function normalizeAttachmentRefs(data: {
   attachmentRef?: string;
@@ -131,7 +133,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
     `[cursor-start] LIVE start mode=${data.mode} cr=${cr.id} kind=${cr.kind} attachmentRefs=${attachmentRefs.join(",") || "none"} images=${images?.length ?? 0}`,
   );
 
-  const { agentId, wait, runId: immediateRunId } = await createTaskAgent({
+  const { agentId, wait, run, runId: immediateRunId } = await createTaskAgent({
     repoUrl,
     branch: branchName,
     prompt,
@@ -155,30 +157,56 @@ export async function handleCursorStart(data: CursorStartJobData) {
     },
   });
 
+  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+
   await db.changeRequest.update({
     where: { id: cr.id },
-    data: { cursorAgentId: agentId },
+    data: {
+      cursorAgentId: agentId,
+      ...(data.mode === "plan"
+        ? {
+            planningMeta: {
+              ...priorMeta,
+              liveProgress: "Connecting…",
+              liveDraft: null,
+            },
+            updatedAt: new Date(),
+          }
+        : {}),
+    },
   });
+
+  const streamMirror =
+    data.mode === "plan"
+      ? mirrorPlanningStream({
+          changeRequestId: cr.id,
+          priorMeta,
+          stream: run,
+        })
+      : Promise.resolve();
 
   let result: Awaited<ReturnType<typeof wait>>;
   try {
-    result = await wait();
+    [result] = await Promise.all([wait(), streamMirror]);
   } catch (error) {
     const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
     if (current?.status === "CANCELLED") {
       console.info(`[cursor-start] cancelled mid-wait cr=${cr.id}`);
+      if (data.mode === "plan") await clearLiveProgress(cr.id, priorMeta);
       return { agentId, mode: data.mode, cancelled: true };
     }
     await db.agentRun.update({
       where: { id: agentRun.id },
       data: { status: "FAILED", finishedAt: new Date() },
     });
+    if (data.mode === "plan") await clearLiveProgress(cr.id, priorMeta);
     throw error;
   }
 
   const afterWait = await db.agentRun.findUnique({ where: { id: agentRun.id } });
   if (afterWait?.status === "CANCELLED") {
     console.info(`[cursor-start] cancelled after wait cr=${cr.id}`);
+    if (data.mode === "plan") await clearLiveProgress(cr.id, priorMeta);
     return { agentId, mode: data.mode, cancelled: true };
   }
 
@@ -191,37 +219,18 @@ export async function handleCursorStart(data: CursorStartJobData) {
     },
   });
 
-  if (result.text) {
-    await db.changeRequestMessage.create({
-      data: {
+  if (data.mode === "plan") {
+    if (result.text) {
+      await persistPlanModeReply({
         changeRequestId: cr.id,
-        role: "ASSISTANT",
-        content: result.text,
+        priorMeta,
+        rawText: result.text,
         cursorRunId: result.runId,
         model: result.model,
-      },
-    });
-  }
-
-  if (data.mode === "plan") {
-    const planContent = result.text ?? "Plan generated";
-    await db.plan.create({
-      data: {
-        changeRequestId: cr.id,
-        content: planContent,
-      },
-    });
-    const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
-    await db.changeRequest.update({
-      where: { id: cr.id },
-      data: {
-        planningMeta: {
-          ...priorMeta,
-          planMarkdown: planContent,
-        },
-        updatedAt: new Date(),
-      },
-    });
+      });
+    } else {
+      await clearLiveProgress(cr.id, priorMeta);
+    }
     if (cr.kind === "PROGRAM") {
       // Stay in planning until client submits to developer
       await transitionChangeRequest({
@@ -238,6 +247,17 @@ export async function handleCursorStart(data: CursorStartJobData) {
       });
     }
   } else {
+    if (result.text) {
+      await db.changeRequestMessage.create({
+        data: {
+          changeRequestId: cr.id,
+          role: "ASSISTANT",
+          content: result.text,
+          cursorRunId: result.runId,
+          model: result.model,
+        },
+      });
+    }
     await transitionChangeRequest({
       changeRequestId: cr.id,
       companyId: data.companyId,

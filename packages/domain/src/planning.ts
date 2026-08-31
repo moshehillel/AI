@@ -22,6 +22,10 @@ export type PlanningMeta = {
   providedSecretKeys?: string[];
   /** Extra prerequisite lines Koda / staff added beyond inferred defaults. */
   neededItems?: string[];
+  /** Live agent step label while a turn is in flight (customer-facing). */
+  liveProgress?: string | null;
+  /** Partial assistant draft text while streaming (customer-facing). */
+  liveDraft?: string | null;
 };
 
 export const PLANNING_TOPICS: PlanningTopic[] = [
@@ -394,6 +398,108 @@ export function inferWhatYouNeedToProvide(opts: {
   return items;
 }
 
+/** Turn a plan need-item into a plain question a non-technical client can answer. */
+function needItemToPlainQuestion(item: string): string {
+  let text = item
+    .replace(/\s*—\s*use Add secrets.*/i, "")
+    .replace(/\s*\(optional[^)]*\)/i, "")
+    .trim();
+
+  if (/provider\s*soft.*login/i.test(text)) {
+    return "Please add your Provider Soft login under **Add secrets / credentials** if we should log in for you.";
+  }
+  if (/hha.*login/i.test(text)) {
+    return "Please add your HHA / HHAeXchange login under **Add secrets / credentials** if we should log in for you.";
+  }
+  if (/quickbooks/i.test(text)) {
+    return "Please add your QuickBooks connection details under **Add secrets / credentials** when you have them.";
+  }
+  if (/api docs|openapi|swagger|integration notes/i.test(text)) {
+    return "Do you have a link to documentation that explains how these systems connect, or should we plan around file exports?";
+  }
+  if (/vpn|remote desktop/i.test(text)) {
+    return "Will this need to run inside your office network (VPN or remote desktop)?";
+  }
+  if (/dedicated test login/i.test(text)) {
+    return "Can you provide a test login (not someone's personal production account) for us to try with?";
+  }
+  if (/sample file|screenshot/i.test(text)) {
+    return "Can you upload a sample file or screenshot that shows what the data looks like today?";
+  }
+  if (/downstream|oauth|api key/i.test(text)) {
+    return "Please add login or connection details for the other system under **Add secrets / credentials**.";
+  }
+  if (/confirm systems/i.test(text)) {
+    return "Which software or websites are involved in this workflow?";
+  }
+  if (/accounts.*api keys|to be confirmed/i.test(text)) {
+    return "What logins, files, or access will we need from you before we can build this?";
+  }
+  if (text.endsWith("?")) return text;
+  return `${text}?`;
+}
+
+/** Build 1–3 numbered plain-English questions about open plan items. */
+export function buildStillNeededQuestions(opts: {
+  systems: string[];
+  meta: PlanningMeta;
+  latestUserContent: string;
+  priorPlan?: string | null;
+  covered: Set<PlanningTopic>;
+}): string[] {
+  const context = `${opts.latestUserContent}\n${opts.priorPlan ?? ""}`;
+  const hasHhaProvider =
+    opts.systems.some((s) => /hha/i.test(s)) &&
+    opts.systems.some((s) => /provider soft/i.test(s));
+
+  const questions: string[] = [];
+
+  if (
+    hasHhaProvider &&
+    !/\b(upload|excel|file export|export file|spreadsheet)\b/i.test(context)
+  ) {
+    questions.push(
+      "Do staff only log into Provider Soft and HHA in a browser, or do you already get spreadsheet or file exports?",
+    );
+  }
+
+  const openNeeds = inferWhatYouNeedToProvide({
+    systems: opts.systems,
+    meta: opts.meta,
+    latestUserContent: opts.latestUserContent,
+    priorPlan: opts.priorPlan,
+  })
+    .filter((item) => !/—\s*received securely/i.test(item))
+    .filter((item) => !/^to be confirmed/i.test(item))
+    .filter((item) => !/sample file|screenshot/i.test(item) || questions.length < 2);
+
+  for (const item of openNeeds) {
+    const q = needItemToPlainQuestion(item);
+    if (!questions.includes(q)) questions.push(q);
+    if (questions.length >= 3) break;
+  }
+
+  if (questions.length === 0 && !opts.covered.has("edge_cases")) {
+    questions.push("What should happen when a record fails or is a duplicate?");
+  }
+  if (questions.length === 0) {
+    questions.push(
+      "Does this plan look right, or should we change anything before you submit it to a developer?",
+    );
+  }
+
+  return questions.slice(0, 3);
+}
+
+/** Format numbered still-needed questions for chat. */
+export function formatStillNeededSection(questions: string[]): string {
+  const numbered = questions.map((q, i) => {
+    const cleaned = q.replace(/^\d+\.\s*/, "").trim();
+    return `${i + 1}. ${cleaned}`;
+  });
+  return ["## What I still need from you", ...numbered].join("\n");
+}
+
 /** Prefer a durable goal; never copy a short question or attachment dump into ## Goal. */
 function deriveGoal(opts: {
   title?: string;
@@ -569,19 +675,21 @@ function answerDirectly(opts: {
     return [
       "I'm **Koda** — Advanced Automations' AI Builder.",
       "",
-      "I help you plan business automations in plain language: workflows, integrations, diagrams, and acceptance checks. When the plan looks right, you can submit it to a developer to build.",
+      "I help you plan business automations in plain language: what should happen, which systems are involved, and what we need from you before building. When the plan looks right, you can submit it to a developer.",
       "",
-      "What would you like to automate?",
-      "",
-      "Koda is AI and can make mistakes.",
+      formatStillNeededSection([
+        "What would you like to automate?",
+      ]),
     ].join("\n");
   }
 
   if (/^(hi|hello|hey)\b/.test(lower) && lower.length < 40) {
     return [
-      "Hey — I'm Koda. Tell me the automation you have in mind, or ask for a plan/diagram anytime.",
+      "Hey — I'm Koda. Tell me the automation you have in mind, or ask for a diagram anytime.",
       "",
-      "Koda is AI and can make mistakes.",
+      formatStillNeededSection([
+        "What should this automation do for your team?",
+      ]),
     ].join("\n");
   }
 
@@ -594,25 +702,25 @@ function answerDirectly(opts: {
       looksLikeQuestion(opts.latestUserContent))
   ) {
     return [
-      "For HHA / Provider Soft, I'd approach data access in this order:",
+      "Here's the simple order I'd use to move data between Provider Soft and HHA:",
       "",
-      "1. **Official API / partner integration** — if HHAeXchange (or your HHA vendor) and Provider Soft expose APIs or SFTP/CSV exports, we use those first. They're more stable than screen automation.",
-      "2. **Scheduled file export** — many home-health stacks can dump visits/authorizations/payroll to a folder or SFTP on a schedule; we pick up the file, validate, and push downstream.",
-      "3. **RPA (UI automation)** — only if there's no API/export. A bot logs into the UI, navigates the screens, and scrapes or enters data. It works, but it's brittle when the UI changes and usually needs a dedicated Windows worker.",
+      "1. **Official connection / file share** — if either system already offers a secure data connection (API) or scheduled file export, we use that first. It's the most reliable.",
+      "2. **Scheduled file export** — many offices already save visit or payroll files to a folder on a schedule. We can pick those up, check them, and send them onward.",
+      "3. **Screen automation (RPA)** — only if there is no better option. A bot logs into the website and clicks through screens. It works, but breaks more easily when the website changes.",
       "",
-      "So: **API/export first, RPA as a last resort.** For Provider Soft → HHA specifically, tell me whether either side already has an API key, EDI/export, or if staff only work in the browser today — that decides the path.",
+      "**Recommendation:** use a real data connection or file export first; use screen automation only as a last resort.",
       "",
-      "I've updated the living plan with that integration approach.",
+      "I've updated the Plan panel with this approach.",
       "",
-      opts.planMarkdown,
-      "",
-      "Koda is AI and can make mistakes.",
+      "## What I still need from you",
+      "1. Today, do staff only log into these systems in a browser, or do you already get file exports?",
+      "2. Which direction should data flow first — Provider Soft → HHA, HHA → Provider Soft, or both?",
     ].join("\n");
   }
 
   if (wantsDiagram(lower)) {
     return [
-      "Here's a working diagram of the software flow based on what we know so far. Tell me what to adjust.",
+      "Here's a simple diagram of the flow based on what we know so far.",
       "",
       opts.planMarkdown.includes("```mermaid")
         ? opts.planMarkdown.slice(opts.planMarkdown.indexOf("## Diagram"))
@@ -626,7 +734,9 @@ function answerDirectly(opts: {
       "",
       "I've also refreshed the living plan in the Plan panel.",
       "",
-      "Koda is AI and can make mistakes.",
+      "## What I still need from you",
+      "1. Does this match how work moves in your office today?",
+      "2. What should happen when a record fails or is incomplete?",
     ].join("\n");
   }
 
@@ -702,36 +812,37 @@ export function buildPlanningFollowUp(opts: {
 
   const attachAck =
     opts.attachmentKind === "api_docs_url"
-      ? "I've saved that API docs link into the plan."
+      ? "I've saved that documentation link into the plan."
       : opts.attachmentKind === "docs_text"
-        ? "I've added those docs into the plan notes."
+        ? "I've added those notes into the plan."
         : opts.attachmentKind === "examples"
           ? "Those examples are in the plan now."
           : opts.attachmentKind === "file"
-            ? "I've pulled that file into the plan notes."
+            ? "I've added that file to the plan."
             : null;
 
   const systems = inferSystems(opts.latestUserContent);
   const substantive = opts.latestUserContent.trim().length > 80 || systems.length > 0;
 
   if (substantive || isDirectQuestion(opts.latestUserContent)) {
-    const clarifying =
-      !covered.has("apis") && !meta.apiDocsUrl
-        ? "If you have API docs or sample payloads, attach them when you can — otherwise I can keep planning from what you described."
-        : !covered.has("edge_cases")
-          ? "One gap: what should happen on failures or duplicates?"
-          : "Anything you'd like to refine, or are you ready to **Submit to developer for building**?";
+    const systemsLabel = systems.length
+      ? systems.join(" and ")
+      : "the workflow you described";
+
+    const needQuestions = buildStillNeededQuestions({
+      systems,
+      meta,
+      latestUserContent: opts.latestUserContent,
+      priorPlan: planMarkdown,
+      covered,
+    });
 
     return {
       content: [
         attachAck,
-        "Here's an updated plan based on what you shared:",
+        `Thanks — I've updated the living plan for **${systemsLabel}** in the Plan panel.`,
         "",
-        planMarkdown,
-        "",
-        clarifying,
-        "",
-        "Koda is AI and can make mistakes.",
+        formatStillNeededSection(needQuestions),
       ]
         .filter(Boolean)
         .join("\n"),
@@ -744,13 +855,12 @@ export function buildPlanningFollowUp(opts: {
     content: [
       attachAck ?? "Happy to help.",
       "",
-      "Describe the automation in a few sentences (trigger → steps → destination), ask for a diagram, or tell me what to change in the plan.",
+      "In a few sentences, tell me what should happen: what starts the work, the steps, and where the result should go.",
       "",
-      meta.planMarkdown
-        ? "Current plan is in the Plan panel — I'll keep it updated as we go."
-        : "",
-      "",
-      "Koda is AI and can make mistakes.",
+      formatStillNeededSection([
+        "What systems are involved (for example Provider Soft, HHA, email, spreadsheets)?",
+        "What does a successful run look like for your team?",
+      ]),
     ]
       .filter((line) => line !== "")
       .join("\n"),

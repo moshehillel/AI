@@ -812,7 +812,10 @@ export function ChatPanel({
           if (message.role === "USER") {
             return (
               <div key={message.id} className="agent-msg agent-msg-user rise">
-                <p className="agent-msg-body">{message.content}</p>
+                <MarkdownBody
+                  content={message.content}
+                  className="agent-msg-body koda-markdown"
+                />
               </div>
             );
           }
@@ -823,7 +826,7 @@ export function ChatPanel({
             >
               <MarkdownBody
                 content={message.content}
-                className="agent-msg-body"
+                className="agent-msg-body koda-markdown"
               />
               <div className="agent-msg-actions" aria-hidden="true">
                 <button type="button" tabIndex={-1} title="Helpful">

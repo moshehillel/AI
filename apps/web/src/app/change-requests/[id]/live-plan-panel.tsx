@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MarkdownBody } from "@/components/markdown-body";
 
 type Plan = {
@@ -21,6 +21,9 @@ export function LivePlanPanel({
 }) {
   const [plan, setPlan] = useState<Plan | null>(initialPlan);
   const [tab, setTab] = useState<"plan" | "context">("plan");
+  const [liveProgress, setLiveProgress] = useState<string | null>(null);
+  const [justUpdated, setJustUpdated] = useState(false);
+  const lastPlanId = useRef(initialPlan?.id ?? null);
 
   useEffect(() => {
     const source = new EventSource(
@@ -31,9 +34,19 @@ export function LivePlanPanel({
         const data = JSON.parse(event.data) as {
           type: string;
           plan?: Plan | null;
+          liveProgress?: string | null;
         };
-        if (data.type === "snapshot" && data.plan) {
+        if (data.type !== "snapshot") return;
+        if (typeof data.liveProgress !== "undefined") {
+          setLiveProgress(data.liveProgress);
+        }
+        if (data.plan) {
           setPlan(data.plan);
+          if (data.plan.id !== lastPlanId.current) {
+            lastPlanId.current = data.plan.id;
+            setJustUpdated(true);
+            window.setTimeout(() => setJustUpdated(false), 1600);
+          }
         }
       } catch {
         // ignore malformed events
@@ -44,7 +57,7 @@ export function LivePlanPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="ide-right-section">
+      <div className="ide-right-section ide-right-section-tight">
         <p className="ide-right-label">Open tabs</p>
         <div className="ide-tab-row">
           <button
@@ -64,7 +77,7 @@ export function LivePlanPanel({
         </div>
       </div>
 
-      <div className="ide-right-section">
+      <div className="ide-right-section ide-right-section-tight">
         <p className="ide-right-label">On this program</p>
         <div
           className="space-y-1 text-[12px]"
@@ -73,17 +86,32 @@ export function LivePlanPanel({
           <div className="flex items-center justify-between gap-2">
             <span>Living plan</span>
             <span className="muted text-[11px]">
-              {plan ? "Updates as you chat" : "Drafting…"}
+              {liveProgress
+                ? liveProgress
+                : plan
+                  ? justUpdated
+                    ? "Just updated"
+                    : "Updates as you chat"
+                  : "Drafting…"}
             </span>
           </div>
         </div>
       </div>
 
-      <div className="ide-right-section">
+      <div
+        className={`ide-right-section flex-1 min-h-0 ${justUpdated ? "plan-panel-flash" : ""}`}
+      >
         <p className="ide-right-label">{tab === "plan" ? "Plan" : "Context"}</p>
         {tab === "plan" ? (
           plan ? (
-            <MarkdownBody content={plan.content} className="plan-doc-body" />
+            <div className="plan-doc-scroll">
+              <MarkdownBody
+                content={plan.content}
+                className="plan-doc-body"
+                mode="plan"
+                compact
+              />
+            </div>
           ) : (
             <p className="muted text-[12px] leading-relaxed">
               Koda keeps a living plan here — goals, systems, workflow, and

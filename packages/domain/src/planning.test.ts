@@ -5,6 +5,7 @@ import {
   buildPlanningFollowUp,
   buildPlanningStartPrompt,
   planningAgentInstructions,
+  splitPlanFromReply,
   synthesizePlanMarkdown,
 } from "./planning.js";
 
@@ -23,7 +24,7 @@ describe("planning Q&A", () => {
       hasInitialPrompt: true,
     });
     assert.match(msg, /Invoice sync/);
-    assert.match(msg, /living plan|diagram|clarifying/i);
+    assert.match(msg, /living plan|Plan panel|numbered questions/i);
   });
 
   it("answers identity questions directly instead of ignoring them", () => {
@@ -34,6 +35,7 @@ describe("planning Q&A", () => {
     assert.match(reply.content, /I'm \*\*Koda\*\*/i);
     assert.doesNotMatch(reply.content, /API docs/);
     assert.doesNotMatch(reply.content, /^Got it\./m);
+    assert.match(reply.content, /What I still need from you/i);
   });
 
   it("returns a mermaid diagram when asked for a digram", () => {
@@ -44,6 +46,7 @@ describe("planning Q&A", () => {
     });
     assert.match(reply.content, /mermaid/);
     assert.match(reply.planMarkdown, /# Plan:/);
+    assert.match(reply.content, /What I still need from you/i);
   });
 
   it("synthesizes a real plan from an invoice → QuickBooks description", () => {
@@ -53,8 +56,9 @@ describe("planning Q&A", () => {
       latestUserContent:
         "When an invoice email arrives, extract the fields and create a bill in QuickBooks. Then notify accounting in Slack if it fails.",
     });
-    assert.match(reply.content, /# Plan:/);
-    assert.match(reply.content, /QuickBooks/);
+    assert.doesNotMatch(reply.content, /^# Plan:/m);
+    assert.match(reply.content, /Plan panel|QuickBooks/i);
+    assert.match(reply.content, /What I still need from you/i);
     assert.match(reply.planMarkdown, /## Workflow/);
     assert.doesNotMatch(reply.content, /^Got it\./m);
   });
@@ -63,7 +67,16 @@ describe("planning Q&A", () => {
     const prompt = planningAgentInstructions();
     assert.match(prompt, /Koda/);
     assert.match(prompt, /mermaid|diagram/i);
+    assert.match(prompt, /```plan|plan fence|conversational/i);
     assert.doesNotMatch(prompt, /Cursor/);
+  });
+
+  it("planning instructions require plain English and clear numbered asks", () => {
+    const prompt = planningAgentInstructions();
+    assert.match(prompt, /plain, simple English|school admin/i);
+    assert.match(prompt, /What I still need from you/);
+    assert.match(prompt, /numbered questions|1\., 2\., 3\./i);
+    assert.match(prompt, /Do NOT paste the full living plan/i);
   });
 
   it("start prompt includes conversation and instructions", () => {
@@ -108,8 +121,12 @@ describe("planning Q&A", () => {
       latestUserContent: "how will you pull the data from hha?",
     });
     assert.doesNotMatch(reply.planMarkdown, /## Goal\nhow will you pull/i);
-    assert.match(reply.content, /API|RPA|export/i);
+    assert.match(
+      reply.content,
+      /connection|screen automation|file export|browser/i,
+    );
     assert.match(reply.planMarkdown, /Provider Soft|HHA/i);
+    assert.match(reply.content, /What I still need from you/i);
   });
 
   it("does not put HTML attachment dumps into Goal", () => {
@@ -186,4 +203,40 @@ describe("planning Q&A", () => {
     assert.match(prompt, /Add secrets \/ credentials/);
   });
 
+  it("splitPlanFromReply keeps chat light and extracts plan fences", () => {
+    const raw = [
+      "Updated the workflow for invoice sync.",
+      "",
+      "## What I still need from you",
+      "1. Does this look right?",
+      "",
+      "```plan",
+      "# Plan: Invoice",
+      "## Goal",
+      "Sync invoices",
+      "```",
+    ].join("\n");
+    const split = splitPlanFromReply(raw);
+    assert.match(split.chatContent, /Updated the workflow/);
+    assert.match(split.chatContent, /What I still need from you/i);
+    assert.doesNotMatch(split.chatContent, /## Goal/);
+    assert.match(split.planMarkdown, /## Goal/);
+  });
+
+  it("follow-ups ask numbered questions instead of dumping the plan", () => {
+    const reply = buildPlanningFollowUp({
+      meta: { coveredTopics: [] },
+      title: "School Program",
+      latestUserContent:
+        "Connect Provider Soft to HHA so visit notes sync for our school program office.",
+    });
+    assert.doesNotMatch(reply.content, /^# Plan:/m);
+    assert.match(reply.content, /What I still need from you/i);
+    assert.match(reply.content, /1\./);
+    assert.match(reply.planMarkdown, /## What you need to provide/);
+    assert.match(
+      reply.content,
+      /Add secrets|browser|file export|Provider Soft/i,
+    );
+  });
 });

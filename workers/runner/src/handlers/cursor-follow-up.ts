@@ -8,6 +8,8 @@ import {
 } from "@automation-studio/domain";
 import { transitionChangeRequest } from "../lib/transition.js";
 import { loadPlanningAttachmentsForAgent } from "../lib/planning-attachment.js";
+import { persistPlanModeReply, clearLiveProgress } from "../lib/planning-persist.js";
+import { mirrorPlanningStream } from "../lib/planning-stream.js";
 
 function normalizeAttachmentRefs(data: {
   attachmentRef?: string;
@@ -105,7 +107,9 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     },
   });
 
-  const { wait, runId: immediateRunId } = await resumeAndSend({
+  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+
+  const { wait, run, runId: immediateRunId } = await resumeAndSend({
     agentId: cr.cursorAgentId,
     prompt,
     mode,
@@ -119,25 +123,51 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     });
   }
 
+  if (mode === "plan") {
+    await db.changeRequest.update({
+      where: { id: cr.id },
+      data: {
+        planningMeta: {
+          ...priorMeta,
+          liveProgress: "Starting…",
+          liveDraft: null,
+        },
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  const streamMirror =
+    mode === "plan"
+      ? mirrorPlanningStream({
+          changeRequestId: cr.id,
+          priorMeta,
+          stream: run,
+        })
+      : Promise.resolve();
+
   let result: Awaited<ReturnType<typeof wait>>;
   try {
-    result = await wait();
+    [result] = await Promise.all([wait(), streamMirror]);
   } catch (error) {
     const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
     if (current?.status === "CANCELLED") {
       console.info(`[cursor-follow-up] cancelled mid-wait cr=${cr.id}`);
+      if (mode === "plan") await clearLiveProgress(cr.id, priorMeta);
       return { cancelled: true };
     }
     await db.agentRun.update({
       where: { id: agentRun.id },
       data: { status: "FAILED", finishedAt: new Date() },
     });
+    if (mode === "plan") await clearLiveProgress(cr.id, priorMeta);
     throw error;
   }
 
   const afterWait = await db.agentRun.findUnique({ where: { id: agentRun.id } });
   if (afterWait?.status === "CANCELLED") {
     console.info(`[cursor-follow-up] cancelled after wait cr=${cr.id}`);
+    if (mode === "plan") await clearLiveProgress(cr.id, priorMeta);
     return { cancelled: true };
   }
 
@@ -150,19 +180,18 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     },
   });
 
-  if (result.text) {
-    await db.changeRequestMessage.create({
-      data: {
-        changeRequestId: cr.id,
-        role: "ASSISTANT",
-        content: result.text,
-        cursorRunId: result.runId,
-        model: result.model,
-      },
-    });
-  }
-
   if (mode === "agent") {
+    if (result.text) {
+      await db.changeRequestMessage.create({
+        data: {
+          changeRequestId: cr.id,
+          role: "ASSISTANT",
+          content: result.text,
+          cursorRunId: result.runId,
+          model: result.model,
+        },
+      });
+    }
     await transitionChangeRequest({
       changeRequestId: cr.id,
       companyId: data.companyId,
@@ -173,24 +202,17 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       companyId: data.companyId,
     });
   } else {
-    const planContent = result.text ?? "Updated plan";
-    await db.plan.create({
-      data: {
+    if (result.text) {
+      await persistPlanModeReply({
         changeRequestId: cr.id,
-        content: planContent,
-      },
-    });
-    const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
-    await db.changeRequest.update({
-      where: { id: cr.id },
-      data: {
-        planningMeta: {
-          ...priorMeta,
-          planMarkdown: planContent,
-        },
-        updatedAt: new Date(),
-      },
-    });
+        priorMeta,
+        rawText: result.text,
+        cursorRunId: result.runId,
+        model: result.model,
+      });
+    } else {
+      await clearLiveProgress(cr.id, priorMeta);
+    }
     if (cr.kind !== "PROGRAM") {
       await transitionChangeRequest({
         changeRequestId: cr.id,

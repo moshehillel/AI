@@ -44,12 +44,12 @@ export default async function ProjectsPage() {
     : [];
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="app-frame">
       <AppHeader role={ctx.role} />
 
       <section className="relative overflow-hidden rise">
         <div className="hero-grid opacity-40" aria-hidden />
-        <div className="relative z-10 max-w-3xl">
+        <div className="relative z-10">
           <p
             className="brand-mark text-5xl leading-none md:text-6xl"
             style={{ animationDelay: "40ms" }}
@@ -72,7 +72,7 @@ export default async function ProjectsPage() {
         </div>
       </section>
 
-      <section className="rise mt-10 grid gap-8 lg:grid-cols-[1.15fr_0.85fr]">
+      <section className="rise mt-10 space-y-8">
         <div className="panel p-6 md:p-8">
           <h2 className="text-xl">New program</h2>
           <p className="muted mt-2 text-sm">
@@ -91,7 +91,7 @@ export default async function ProjectsPage() {
           )}
         </div>
 
-        <div className="panel p-6">
+        <div>
           <h2 className="text-lg">Your programs</h2>
           <p className="muted mt-1 text-sm">
             Active plans and builds — cancelled items stay hidden.
@@ -116,7 +116,7 @@ export default async function ProjectsPage() {
             ))}
             {activePrograms.length === 0 ? (
               <li className="muted text-sm">
-                No programs yet. Start one on the left.
+                No programs yet. Start one above.
               </li>
             ) : null}
           </ul>
@@ -128,7 +128,7 @@ export default async function ProjectsPage() {
           <h2 className="text-sm uppercase tracking-[0.18em] muted">
             Staff · workspaces
           </h2>
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {projects.map((project) => (
               <Link
                 key={project.id}

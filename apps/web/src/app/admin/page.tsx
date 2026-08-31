@@ -20,7 +20,7 @@ export default async function AdminPage({
 
   if (ctx.role !== "ADMIN" && ctx.role !== "DEVELOPER") {
     return (
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="app-frame">
         <AppHeader role={ctx.role} />
         <div className="panel p-6">Admin access required.</div>
       </main>
@@ -71,7 +71,7 @@ export default async function AdminPage({
       : githubNotice;
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="app-frame">
       <AppHeader role={ctx.role} />
       <section className="rise space-y-6">
         <div>

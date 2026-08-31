@@ -15,7 +15,7 @@ export default function AppError({
   }, [error]);
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-xl flex-col items-center justify-center gap-4 px-6 text-center">
+    <main className="app-frame-narrow flex min-h-screen flex-col items-center justify-center gap-4 text-center">
       <p className="brand-mark text-3xl">Koda</p>
       <h1 className="text-xl font-medium">Something went wrong</h1>
       <p className="muted text-sm">

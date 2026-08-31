@@ -15,6 +15,10 @@
   --shadow: 0 28px 70px rgba(0, 0, 0, 0.42);
   --font-display: "Fraunces", Georgia, serif;
   --font-body: "Outfit", "Segoe UI", sans-serif;
+  /* Comfortable reading/working widths — not ultrawide dashboard sprawl */
+  --frame-page: 56rem; /* ~896px onboarding, lists, forms */
+  --frame-work: 60rem; /* ~960px chat + plan composition */
+  --measure-chat: 40rem; /* ~640px bubble reading measure */
 }
 
 * {
@@ -49,6 +53,38 @@ select {
 .studio-shell {
   min-height: 100vh;
   padding-bottom: 3.5rem;
+}
+
+/* Centered content frames — gutters grow on large screens; content does not stretch */
+.app-frame {
+  width: min(100%, var(--frame-page));
+  margin-inline: auto;
+  padding: 2rem 1.5rem;
+}
+
+.app-frame-work {
+  width: min(100%, var(--frame-work));
+  margin-inline: auto;
+  padding: 2rem 1.5rem;
+}
+
+.app-frame-narrow {
+  width: min(100%, 42rem);
+  margin-inline: auto;
+  padding: 2rem 1.5rem;
+}
+
+/* Chat + plan: intentional split, plan column capped so chat stays readable */
+.work-split {
+  display: grid;
+  gap: 1.5rem;
+}
+
+@media (min-width: 1024px) {
+  .work-split {
+    grid-template-columns: minmax(0, 1fr) minmax(15rem, 18.5rem);
+    align-items: start;
+  }
 }
 
 .brand-mark {
@@ -261,20 +297,22 @@ select {
   border-radius: 16px;
   border: 1px solid var(--line);
   padding: 0.85rem 1rem;
+  max-width: min(100%, var(--measure-chat));
 }
 
 .chat-bubble-user {
   background: color-mix(in oklab, var(--accent) 12%, rgba(255, 255, 255, 0.04));
-  margin-left: 1.5rem;
+  margin-left: auto;
 }
 
 .chat-bubble-koda {
   background: rgba(0, 0, 0, 0.22);
-  margin-right: 1.5rem;
+  margin-right: auto;
   border-color: color-mix(in oklab, var(--accent-soft) 18%, var(--line));
 }
 
 .chat-bubble-system {
   background: transparent;
   border-style: dashed;
+  max-width: 100%;
 }

@@ -11,7 +11,7 @@ export default async function UsagePage() {
   const ctx = await requirePageAuth();
   if (ctx.role === "EMPLOYEE") {
     return (
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="app-frame">
         <AppHeader role={ctx.role} />
         <div className="panel p-6">
           Usage reporting is available to developers and admins.
@@ -64,7 +64,7 @@ export default async function UsagePage() {
   );
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="app-frame">
       <AppHeader role={ctx.role} />
       <section className="rise space-y-6">
         <div>

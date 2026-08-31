@@ -55,9 +55,9 @@ export default async function ProjectDetailPage({
     : project.changeRequests.filter((cr) => cr.kind === "PROGRAM");
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="app-frame">
       <AppHeader role={ctx.role} />
-      <section className="rise grid gap-8 lg:grid-cols-[1.1fr_0.9fr]">
+      <section className="rise space-y-8">
         <div>
           <p className="muted text-sm uppercase tracking-[0.18em]">Workspace</p>
           <h1 className="brand-mark mt-2 text-4xl">{project.name}</h1>
@@ -88,7 +88,7 @@ export default async function ProjectDetailPage({
           ) : null}
         </div>
 
-        <div className="panel p-6">
+        <div>
           <h2 className="text-lg">Your programs</h2>
           <ul className="mt-4 space-y-3">
             {visibleWork.map((cr) => (

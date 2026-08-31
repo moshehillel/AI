@@ -10,7 +10,7 @@ export default async function ReviewQueuePage() {
 
   if (ctx.role !== "DEVELOPER" && ctx.role !== "ADMIN") {
     return (
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="app-frame">
         <AppHeader role={ctx.role} />
         <div className="panel p-6">
           Developer access is required to view the review queue.
@@ -44,7 +44,7 @@ export default async function ReviewQueuePage() {
   });
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="app-frame">
       <AppHeader role={ctx.role} />
       <section className="rise">
         <h1 className="brand-mark text-4xl">Review queue</h1>

@@ -58,9 +58,9 @@ export default async function ChangeRequestPage({
   };
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="app-frame-work">
       <AppHeader role={ctx.role} />
-      <section className="rise grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+      <section className="work-split rise">
         <div className="panel flex min-h-[70vh] flex-col p-5">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>

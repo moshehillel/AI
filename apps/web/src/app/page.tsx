@@ -16,7 +16,7 @@ export default function HomePage() {
 
   if (!clerkEnabled) {
     return (
-      <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">
+      <main className="app-frame relative flex min-h-screen flex-col">
         <header className="relative z-10 flex items-center justify-between rise">
           <div className="brand-mark text-2xl tracking-tight">Koda</div>
           <Link className="btn btn-primary" href="/projects">
@@ -80,7 +80,7 @@ async function ClerkHome() {
   }
 
   return (
-    <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-8">
+    <main className="app-frame relative flex min-h-screen flex-col">
       <header className="relative z-10 flex items-center justify-between rise">
         <div className="brand-mark text-2xl tracking-tight">Koda</div>
         <div className="flex gap-3">

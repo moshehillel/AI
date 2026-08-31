@@ -17,7 +17,7 @@ export default async function SelectOrgPage() {
   }
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-3xl flex-col items-center justify-center gap-6 px-6 py-10">
+    <main className="app-frame-narrow flex min-h-screen flex-col items-center justify-center gap-6">
       <div className="text-center">
         <p className="brand-mark text-4xl">Koda</p>
         <h1 className="mt-3 text-2xl font-medium">Select an organization</h1>

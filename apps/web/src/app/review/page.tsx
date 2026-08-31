@@ -12,8 +12,15 @@ export default async function ReviewQueuePage() {
     return (
       <main className="app-frame">
         <AppHeader role={ctx.role} />
-        <div className="panel p-6">
-          Developer access is required to view the review queue.
+        <div className="panel space-y-3 p-6">
+          <p>Developer access is required to view the review queue.</p>
+          <p className="muted text-sm">
+            While open access is on, unlock developer tools at{" "}
+            <Link className="underline" href="/staff">
+              /staff
+            </Link>{" "}
+            with your staff token.
+          </p>
         </div>
       </main>
     );
@@ -25,6 +32,8 @@ export default async function ReviewQueuePage() {
       status: {
         in: [
           "AWAITING_DEV_BUILD",
+          "BUILDING",
+          "TESTING",
           "AWAITING_FINAL_REVIEW",
           "READY_FOR_REVIEW",
           "DEVELOPER_REVIEW",
@@ -49,7 +58,7 @@ export default async function ReviewQueuePage() {
       <section className="rise">
         <h1 className="brand-mark text-4xl">Review queue</h1>
         <p className="muted mt-2">
-          Programs waiting for build setup or final deploy approval.
+          Submitted plans → Open in Cursor → Build → Test & Improve → deploy.
         </p>
         <div className="mt-8 space-y-4">
           {items.map((item) => (

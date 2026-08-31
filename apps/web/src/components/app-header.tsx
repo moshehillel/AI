@@ -30,6 +30,9 @@ export function AppHeader({ role }: { role?: string | null }) {
         </nav>
       </div>
       <div className="flex items-center gap-3">
+        {isStaff ? (
+          <span className="status-pill text-xs">Developer mode</span>
+        ) : null}
         {hideAuthChrome || !clerkEnabled ? null : (
           <>
             <SignedIn>

@@ -39,24 +39,26 @@ export function LivePlanPanel({
   }, [changeRequestId]);
 
   return (
-    <div className="panel p-5">
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-lg">Plan</h2>
+    <div className="plan-doc panel overflow-hidden">
+      <div className="plan-doc-header">
+        <div>
+          <p className="muted text-xs uppercase tracking-[0.14em]">Living plan</p>
+          <h2 className="text-lg">Plan</h2>
+        </div>
         {plan ? (
-          <span className="muted text-xs">Updates as you chat</span>
+          <span className="muted text-xs pulse-soft">Updates as you chat</span>
         ) : (
-          <span className="muted text-xs">Living document</span>
+          <span className="muted text-xs">Drafting…</span>
         )}
       </div>
       {plan ? (
-        <pre className="muted mt-3 max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed">
+        <pre className="plan-doc-body muted whitespace-pre-wrap text-sm leading-relaxed">
           {plan.content}
         </pre>
       ) : (
-        <p className="muted mt-3 text-sm">
-          Koda will keep a markdown plan here — goals, systems, workflow,
-          diagrams, and acceptance checks — and refresh it as the conversation
-          progresses.
+        <p className="muted px-5 pb-5 text-sm">
+          Koda keeps a living plan here — goals, systems, workflow, diagrams,
+          and acceptance checks — refreshed as the conversation progresses.
         </p>
       )}
     </div>

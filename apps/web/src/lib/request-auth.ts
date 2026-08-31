@@ -2,6 +2,10 @@ import { AuthError, resolveAuthContext } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
 import { isDemoAuthEnabled, isOpenAccess } from "@/lib/access-mode";
 import { syncClerkOrgMembership } from "@/lib/clerk-sync";
+import {
+  clerkUserIdForStaffRole,
+  readStaffRoleCookie,
+} from "@/lib/staff-access";
 
 const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
@@ -34,16 +38,19 @@ async function seededAuthContext(clerkUserId: string) {
  */
 export async function getRequestAuth() {
   if (isOpenAccess() || isDemoAuthEnabled()) {
-    // Always the single customer while open access / demo is on — no role UI.
-    const clerkUserId =
-      !isOpenAccess() && process.env.DEMO_ROLE
-        ? process.env.DEMO_ROLE === "developer" ||
-          process.env.DEMO_ROLE === "dev"
+    const staffRole = isOpenAccess() ? await readStaffRoleCookie() : null;
+    let clerkUserId = "seed_employee";
+    if (staffRole) {
+      clerkUserId = clerkUserIdForStaffRole(staffRole);
+    } else if (!isOpenAccess() && process.env.DEMO_ROLE) {
+      clerkUserId =
+        process.env.DEMO_ROLE === "developer" ||
+        process.env.DEMO_ROLE === "dev"
           ? "seed_developer"
           : process.env.DEMO_ROLE === "admin"
             ? "seed_admin"
-            : "seed_employee"
-        : "seed_employee";
+            : "seed_employee";
+    }
 
     const ctx = await seededAuthContext(clerkUserId);
     if (ctx) return ctx;

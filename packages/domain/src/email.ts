@@ -106,6 +106,7 @@ export function programSubmittedEmail(input: {
   programNumber: number;
   requesterName: string;
   reviewUrl: string;
+  staffUnlockUrl?: string | null;
 }) {
   return {
     subject: `[Koda] Program #${input.programNumber} ready for build: ${input.programTitle}`,
@@ -115,12 +116,20 @@ export function programSubmittedEmail(input: {
       `Program: #${input.programNumber} ${input.programTitle}`,
       `Requested by: ${input.requesterName}`,
       ``,
-      `Open in Koda Admin / Review:`,
+      `1. Open the program in Koda Review:`,
       input.reviewUrl,
+      input.staffUnlockUrl
+        ? `\nIf the public site is in customer mode, unlock developer tools first:\n${input.staffUnlockUrl}`
+        : "",
+      ``,
+      `2. Click "Open in Cursor" to review the customer's plan in Cursor (not in Koda as the build workspace).`,
+      `3. Click Build, then confirm to open the Test & Improve workspace (code edit + deploy).`,
       ``,
       `— Koda`,
       `Koda is AI and can make mistakes.`,
-    ].join("\n"),
+    ]
+      .filter((line) => line !== "")
+      .join("\n"),
   };
 }
 

@@ -13,6 +13,8 @@ export type Permission =
   | "program:submit_to_dev"
   | "program:reopen_planning"
   | "program:start_build"
+  | "program:open_in_cursor"
+  | "program:grant_test_improve"
   | "program:final_approve"
   | "company:admin"
   | "members:manage"
@@ -40,6 +42,8 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
     "program:submit_to_dev",
     "program:reopen_planning",
     "program:start_build",
+    "program:open_in_cursor",
+    "program:grant_test_improve",
     "program:final_approve",
     "inbox:read",
   ],
@@ -56,6 +60,8 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
     "program:submit_to_dev",
     "program:reopen_planning",
     "program:start_build",
+    "program:open_in_cursor",
+    "program:grant_test_improve",
     "program:final_approve",
     "company:admin",
     "members:manage",

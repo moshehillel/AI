@@ -10,3 +10,4 @@ export * from "./planning.js";
 export * from "./planning-files.js";
 export * from "./planning-excel.js";
 export * from "./default-repo.js";
+export * from "./build-setup.js";

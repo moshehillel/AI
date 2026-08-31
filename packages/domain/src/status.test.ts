@@ -33,6 +33,8 @@ describe("status machine", () => {
     assert.equal(canTransition("PLANNING", "AWAITING_DEV_BUILD"), true);
     assert.equal(canTransition("AWAITING_DEV_BUILD", "BUILDING"), true);
     assert.equal(canTransition("AWAITING_DEV_BUILD", "PLANNING"), true);
+    assert.equal(canTransition("BUILDING", "TESTING"), true);
+    assert.equal(canTransition("TESTING", "DEPLOYING"), true);
     assert.equal(canTransition("BUILDING", "CLIENT_VERIFY"), true);
     assert.equal(canTransition("CLIENT_VERIFY", "AWAITING_FINAL_REVIEW"), true);
     assert.equal(canTransition("AWAITING_FINAL_REVIEW", "DEPLOYING"), true);
@@ -113,6 +115,13 @@ describe("permissions", () => {
   it("lets employees reopen planning after submit", () => {
     assert.equal(roleHasPermission("EMPLOYEE", "program:reopen_planning"), true);
     assert.equal(roleHasPermission("DEVELOPER", "program:reopen_planning"), true);
+  });
+
+  it("reserves open-in-cursor and test-improve for staff", () => {
+    assert.equal(roleHasPermission("EMPLOYEE", "program:open_in_cursor"), false);
+    assert.equal(roleHasPermission("DEVELOPER", "program:open_in_cursor"), true);
+    assert.equal(roleHasPermission("EMPLOYEE", "program:grant_test_improve"), false);
+    assert.equal(roleHasPermission("ADMIN", "program:grant_test_improve"), true);
   });
 });
 

@@ -54,6 +54,29 @@ If a program is in **Submitted — waiting for developer** (`AWAITING_DEV_BUILD`
 2. Click **Continue planning (reopen)** in chat or Actions
 3. Status returns to **Planning with Koda** (`PLANNING`)
 
+### Developer flow: Open in Cursor → Build → Test & Improve
+
+While `OPEN_ACCESS=1`, the public site is always the seeded **EMPLOYEE**.
+Developers unlock staff tools with `STAFF_ACCESS_TOKEN`:
+
+```bash
+railway variable set --service web STAFF_ACCESS_TOKEN="$(openssl rand -hex 24)"
+# Redeploy web after setting. Bookmark:
+# https://koda.advancedautomations.net/staff?token=<token>
+```
+
+Then for each submitted program:
+
+1. Open **Review queue** → program (or the link from the notify email)
+2. Click **Open in Cursor** — resumes/creates a plan-mode agent with the
+   customer's living plan and opens `cursor.com/background-agent?bcId=…`
+   (falls back to `cursor.com/agents/{id}` in the browser)
+3. Click **Build** (server label + auto-deploy) → status `BUILDING`, agent
+   switches to agent/build mode on the plan
+4. Confirm **Grant Test & Improve workspace** → status `TESTING`, workspace
+   panel with Continue in Cursor + Deploy
+5. Customer verifies in Koda chat only — they never see Cursor / Git / Railway
+
 ### Developer email on submit
 
 On submit, Koda queues (and sends via Resend when configured) a notify email.

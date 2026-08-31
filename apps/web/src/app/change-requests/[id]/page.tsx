@@ -2,11 +2,12 @@ import { AppHeader } from "@/components/app-header";
 import { requirePageAuth } from "@/lib/page-auth";
 import { requireChangeRequestAccess } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
-import { STATUS_LABELS } from "@automation-studio/domain";
+import { STATUS_LABELS, parseBuildSetup } from "@automation-studio/domain";
 import { notFound, redirect } from "next/navigation";
 import { ChatPanel } from "./chat-panel";
 import { ActionBar } from "./action-bar";
 import { LivePlanPanel } from "./live-plan-panel";
+import { DeveloperWorkbench } from "./developer-workbench";
 
 export default async function ChangeRequestPage({
   params,
@@ -33,7 +34,10 @@ export default async function ChangeRequestPage({
       pullRequests: { orderBy: { createdAt: "desc" }, take: 1 },
       ciChecks: { orderBy: { createdAt: "desc" }, take: 1 },
       statusEvents: { orderBy: { createdAt: "asc" } },
-      secretRefs: { where: { purpose: "CHAT" }, select: { keyName: true, createdAt: true } },
+      secretRefs: {
+        where: { purpose: "CHAT" },
+        select: { keyName: true, createdAt: true },
+      },
     },
   });
 
@@ -43,7 +47,6 @@ export default async function ChangeRequestPage({
   const ci = full.ciChecks[0];
   const isProgram = full.kind === "PROGRAM";
   const isStaff = ctx.role === "DEVELOPER" || ctx.role === "ADMIN";
-  // Customers should not linger on cancelled programs; staff can open archive links
   if (full.status === "CANCELLED" && !isStaff) {
     redirect("/projects");
   }
@@ -52,23 +55,32 @@ export default async function ChangeRequestPage({
     docsText?: string | null;
     examples?: string | null;
   };
-  const buildSetup = (full.buildSetup ?? {}) as {
-    serverLabel?: string;
-    autoDeploy?: boolean;
-  };
+  const buildSetup = parseBuildSetup(full.buildSetup);
+  const showDevWorkbench =
+    isStaff &&
+    isProgram &&
+    [
+      "AWAITING_DEV_BUILD",
+      "BUILDING",
+      "TESTING",
+      "CHANGES_REQUESTED",
+      "CLIENT_VERIFY",
+      "PREVIEW_READY",
+      "AWAITING_FINAL_REVIEW",
+    ].includes(full.status);
 
   return (
     <main className="app-frame-work">
       <AppHeader role={ctx.role} />
       <section className="work-split rise">
-        <div className="panel flex min-h-[70vh] flex-col p-5">
-          <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div className="agent-window panel flex min-h-[70vh] flex-col overflow-hidden">
+          <div className="agent-window-header">
             <div>
-              <p className="muted text-sm">
+              <p className="muted text-xs uppercase tracking-[0.14em]">
                 {full.project.name}
                 {isProgram ? " · Program" : " · Change"}
               </p>
-              <h1 className="brand-mark text-3xl">
+              <h1 className="brand-mark text-2xl md:text-3xl">
                 #{full.number} {full.title}
               </h1>
             </div>
@@ -88,6 +100,33 @@ export default async function ChangeRequestPage({
         </div>
 
         <aside className="space-y-4">
+          {showDevWorkbench ? (
+            <DeveloperWorkbench
+              changeRequestId={full.id}
+              status={full.status}
+              buildSetup={buildSetup}
+              branchName={full.branchName}
+              previewUrl={preview?.url}
+              hasPlan={Boolean(plan)}
+            />
+          ) : null}
+
+          {(isProgram || plan) && (
+            <LivePlanPanel
+              changeRequestId={full.id}
+              initialPlan={
+                plan
+                  ? {
+                      id: plan.id,
+                      content: plan.content,
+                      createdAt: plan.createdAt.toISOString(),
+                      updatedAt: plan.updatedAt.toISOString(),
+                    }
+                  : null
+              }
+            />
+          )}
+
           <div className="panel p-5">
             <h2 className="text-lg">Progress</h2>
             <ul className="mt-3 space-y-2 text-sm">
@@ -154,22 +193,6 @@ export default async function ChangeRequestPage({
             ) : null}
           </div>
 
-          {(isProgram || plan) && (
-            <LivePlanPanel
-              changeRequestId={full.id}
-              initialPlan={
-                plan
-                  ? {
-                      id: plan.id,
-                      content: plan.content,
-                      createdAt: plan.createdAt.toISOString(),
-                      updatedAt: plan.updatedAt.toISOString(),
-                    }
-                  : null
-              }
-            />
-          )}
-
           <ActionBar
             changeRequestId={full.id}
             status={full.status}
@@ -177,6 +200,7 @@ export default async function ChangeRequestPage({
             hasPlan={Boolean(plan)}
             kind={full.kind}
             projectId={full.projectId}
+            hideProgramBuild={showDevWorkbench}
           />
         </aside>
       </section>

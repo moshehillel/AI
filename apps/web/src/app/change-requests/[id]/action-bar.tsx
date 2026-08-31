@@ -10,6 +10,7 @@ export function ActionBar({
   hasPlan,
   kind,
   projectId,
+  hideProgramBuild = false,
 }: {
   changeRequestId: string;
   status: string;
@@ -17,6 +18,7 @@ export function ActionBar({
   hasPlan: boolean;
   kind: string;
   projectId: string;
+  hideProgramBuild?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -108,7 +110,8 @@ export function ActionBar({
 
       {isProgram &&
       (status === "AWAITING_DEV_BUILD" || status === "CHANGES_REQUESTED") &&
-      isStaff ? (
+      isStaff &&
+      !hideProgramBuild ? (
         <div className="space-y-3 rounded-xl border border-[var(--line)] p-3">
           <p className="text-sm muted">Build setup</p>
           <input

@@ -374,8 +374,8 @@ export function ChatPanel({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="mb-3 flex items-start justify-between gap-3 rounded-xl border border-[var(--line)] bg-black/20 px-3 py-2">
+    <div className="agent-chat flex min-h-0 flex-1 flex-col">
+      <div className="agent-chat-banner">
         <p className="text-xs muted">
           {isPlanning
             ? "Planning with Koda — real Q&A and a living plan. Attach docs anytime."
@@ -386,7 +386,7 @@ export function ChatPanel({
         <p className="shrink-0 text-xs muted">Koda is AI and can make mistakes.</p>
       </div>
 
-      <div ref={scrollerRef} className="flex-1 space-y-3 overflow-y-auto pr-1">
+      <div ref={scrollerRef} className="agent-chat-scroll flex-1 space-y-3 overflow-y-auto">
         {messages.map((message) => (
           <div
             key={message.id}
@@ -527,7 +527,7 @@ export function ChatPanel({
       ) : null}
 
       <form
-        className="mt-3 flex gap-2"
+        className="agent-composer"
         onSubmit={(event) => {
           event.preventDefault();
           if (inputBusy) return;
@@ -535,7 +535,7 @@ export function ChatPanel({
         }}
       >
         <input
-          className="field"
+          className="field agent-composer-input"
           placeholder={
             inputBusy
               ? preparingFile

@@ -15,9 +15,19 @@ import {
   programSubmittedEmail,
   finalReviewEmail,
   resolveDeveloperNotifyEmails,
+  parseBuildSetup,
+  developerPlanReviewPrompt,
+  developerBuildPrompt,
+  developerTestImprovePrompt,
+  type ProgramBuildSetup,
 } from "@automation-studio/domain";
+import {
+  agentOpenUrls,
+  createTaskAgent,
+} from "@automation-studio/cursor-adapter";
 import { getAppBaseUrl } from "@/lib/app-url";
 import { queueAndMaybeSendEmail } from "@/lib/notify";
+import { getStaffAccessToken } from "@/lib/staff-access";
 
 const bodySchema = z.object({
   action: z.enum([
@@ -26,7 +36,9 @@ const bodySchema = z.object({
     "submit_review",
     "submit_to_dev",
     "reopen_planning",
+    "open_in_cursor",
     "start_build",
+    "grant_test_improve",
     "submit_final_review",
     "approve_deploy",
     "approve",
@@ -38,6 +50,8 @@ const bodySchema = z.object({
   ]),
   /** Required for submit_to_dev — blocks accidental one-click submits. */
   confirmSubmit: z.boolean().optional(),
+  /** Required for grant_test_improve — explicit permission step. */
+  confirmGrant: z.boolean().optional(),
   serverLabel: z.string().max(200).optional(),
   autoDeploy: z.boolean().optional(),
   notes: z.string().max(4000).optional(),
@@ -122,6 +136,22 @@ async function transition(
   });
 }
 
+
+async function loadProgramPlanText(changeRequestId: string) {
+  const full = await db.changeRequest.findFirstOrThrow({
+    where: { id: changeRequestId },
+    include: {
+      plans: { orderBy: { createdAt: "desc" }, take: 1 },
+      project: { include: { repository: true } },
+    },
+  });
+  const planText =
+    full.plans[0]?.content ??
+    (full.planningMeta as { planMarkdown?: string } | null)?.planMarkdown ??
+    full.description;
+  return { full, planText };
+}
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -168,11 +198,16 @@ export async function POST(
         });
 
         const reviewUrl = `${getAppBaseUrl()}/change-requests/${cr.id}`;
+        const staffToken = getStaffAccessToken();
+        const staffUnlockUrl = staffToken
+          ? `${getAppBaseUrl()}/staff?token=${encodeURIComponent(staffToken)}&next=${encodeURIComponent(`/change-requests/${cr.id}`)}`
+          : null;
         const emailContent = programSubmittedEmail({
           programTitle: cr.title,
           programNumber: cr.number,
           requesterName: ctx.user.name ?? ctx.user.email,
           reviewUrl,
+          staffUnlockUrl,
         });
         await notifyDevelopers({
           companyId: ctx.company.id,
@@ -213,6 +248,121 @@ export async function POST(
         });
         break;
       }
+
+      case "open_in_cursor": {
+        await requirePermission(ctx, "program:open_in_cursor");
+        if (cr.kind !== "PROGRAM") {
+          throw new AuthError("Only programs support Open in Cursor", 400);
+        }
+        if (
+          ![
+            "AWAITING_DEV_BUILD",
+            "BUILDING",
+            "TESTING",
+            "CHANGES_REQUESTED",
+            "CLIENT_VERIFY",
+            "PREVIEW_READY",
+            "AWAITING_FINAL_REVIEW",
+          ].includes(cr.status)
+        ) {
+          throw new AuthError(
+            "Program must be submitted before opening in Cursor",
+            400,
+          );
+        }
+
+        const { full, planText } = await loadProgramPlanText(cr.id);
+        const prior = parseBuildSetup(full.buildSetup);
+        let agentId = full.cursorAgentId ?? prior.planAgentId ?? null;
+        const resumed = Boolean(agentId);
+
+        if (agentId) {
+          await enqueueJob("cursor.follow-up", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+            mode: "plan",
+            prompt: developerPlanReviewPrompt({
+              title: full.title,
+              planMarkdown: planText,
+              description: full.description,
+            }),
+          });
+        } else {
+          const repo = full.project.repository;
+          if (!repo) {
+            throw new AuthError(
+              "No repository linked — connect a repo in Admin, then retry Open in Cursor",
+              400,
+            );
+          }
+          const branchName = full.branchName || repo.defaultBranch || "main";
+          const repoUrl = `https://github.com/${repo.githubOwner}/${repo.githubRepo}`;
+          const created = await createTaskAgent({
+            repoUrl,
+            branch: branchName,
+            mode: "plan",
+            prompt: developerPlanReviewPrompt({
+              title: full.title,
+              planMarkdown: planText,
+              description: full.description,
+            }),
+            metadata: {
+              company_id: ctx.company.id,
+              project_id: full.projectId,
+              change_request_id: cr.id,
+              purpose: "developer_plan_review",
+            },
+          });
+          agentId = created.agentId;
+          void created.wait().catch((err) => {
+            console.error("[open_in_cursor] agent wait failed", err);
+          });
+          await db.agentRun.create({
+            data: {
+              changeRequestId: cr.id,
+              cursorAgentId: agentId,
+              mode: "PLAN",
+              status: "RUNNING",
+              startedAt: new Date(),
+            },
+          });
+          await db.changeRequest.update({
+            where: { id: cr.id },
+            data: {
+              cursorAgentId: agentId,
+              branchName: full.branchName ?? branchName,
+            },
+          });
+        }
+
+        const urls = agentOpenUrls(agentId);
+        const nextSetup: ProgramBuildSetup = {
+          ...prior,
+          planAgentId: agentId,
+          openInWebUrl: urls.openInWebUrl,
+          openInCursorUrl: urls.openInCursorUrl,
+          lastOpenedInCursorAt: new Date().toISOString(),
+        };
+        await db.changeRequest.update({
+          where: { id: cr.id },
+          data: { buildSetup: nextSetup },
+        });
+        await writeAuditEvent({
+          companyId: ctx.company.id,
+          actorId: ctx.user.id,
+          action: "program.opened_in_cursor",
+          entityType: "change_request",
+          entityId: cr.id,
+          metadata: { agentId },
+        });
+
+        return NextResponse.json({
+          ok: true,
+          ...urls,
+          resumed,
+        });
+      }
+
       case "start_build": {
         await requirePermission(ctx, "program:start_build");
         if (cr.status !== "AWAITING_DEV_BUILD" && cr.status !== "CHANGES_REQUESTED") {
@@ -220,17 +370,22 @@ export async function POST(
         }
         const fromStatus =
           cr.status === "CHANGES_REQUESTED" ? "CHANGES_REQUESTED" : "AWAITING_DEV_BUILD";
+        const { full: buildFull, planText: buildPlanText } = await loadProgramPlanText(cr.id);
+        const priorBuild = parseBuildSetup(buildFull.buildSetup);
+        const nextBuildSetup: ProgramBuildSetup = {
+          ...priorBuild,
+          serverLabel: body.serverLabel ?? priorBuild.serverLabel ?? "default",
+          autoDeploy: body.autoDeploy ?? priorBuild.autoDeploy ?? true,
+          notes: body.notes ?? priorBuild.notes ?? null,
+          startedAt: new Date().toISOString(),
+          startedBy: ctx.user.id,
+          testImproveGranted: false,
+        };
         await db.changeRequest.update({
           where: { id: cr.id },
           data: {
             assignedDeveloperId: ctx.user.id,
-            buildSetup: {
-              serverLabel: body.serverLabel ?? "default",
-              autoDeploy: body.autoDeploy ?? true,
-              notes: body.notes ?? null,
-              startedAt: new Date().toISOString(),
-              startedBy: ctx.user.id,
-            },
+            buildSetup: nextBuildSetup,
           },
         });
         await transition(
@@ -250,18 +405,35 @@ export async function POST(
           },
         });
 
-        const full = await db.changeRequest.findFirstOrThrow({
-          where: { id: cr.id },
-          include: { project: { include: { repository: true } }, plans: true },
+        const full = buildFull;
+        const planText = buildPlanText;
+        const buildPrompt = developerBuildPrompt({
+          title: full.title,
+          planMarkdown: planText,
+          serverLabel: nextBuildSetup.serverLabel,
         });
-        const planText = full.plans[0]?.content ?? full.description;
         if (full.project.repository) {
           if (!full.branchName) {
             await enqueueJob("github.ensure-branch", {
               changeRequestId: cr.id,
               companyId: ctx.company.id,
             });
+          } else if (full.cursorAgentId) {
+            await enqueueJob("cursor.follow-up", {
+              changeRequestId: cr.id,
+              companyId: ctx.company.id,
+              mode: "agent",
+              prompt: buildPrompt,
+            });
           } else {
+            await enqueueJob("cursor.start-agent", {
+              changeRequestId: cr.id,
+              companyId: ctx.company.id,
+              mode: "agent",
+              prompt: buildPrompt,
+            });
+          }
+        } else {
             await enqueueJob("cursor.start-agent", {
               changeRequestId: cr.id,
               companyId: ctx.company.id,
@@ -307,6 +479,107 @@ export async function POST(
         }
         break;
       }
+
+      case "grant_test_improve": {
+        await requirePermission(ctx, "program:grant_test_improve");
+        if (cr.kind !== "PROGRAM") {
+          throw new AuthError("Only programs support Test & Improve", 400);
+        }
+        if (body.confirmGrant !== true) {
+          throw new AuthError(
+            "Confirm required — granting Test & Improve opens a workspace with code edit and deploy access",
+            400,
+          );
+        }
+        if (
+          cr.status !== "BUILDING" &&
+          cr.status !== "TESTING" &&
+          cr.status !== "CHANGES_REQUESTED"
+        ) {
+          throw new AuthError(
+            "Start Build first, then grant Test & Improve",
+            400,
+          );
+        }
+
+        const { full, planText } = await loadProgramPlanText(cr.id);
+        const prior = parseBuildSetup(full.buildSetup);
+        const agentId =
+          full.cursorAgentId ?? prior.buildAgentId ?? prior.planAgentId;
+        const urls = agentId ? agentOpenUrls(agentId) : null;
+        const nextSetup: ProgramBuildSetup = {
+          ...prior,
+          testImproveGranted: true,
+          testImproveGrantedAt: new Date().toISOString(),
+          testImproveGrantedBy: ctx.user.id,
+          buildAgentId: agentId ?? prior.buildAgentId,
+          openInWebUrl: urls?.openInWebUrl ?? prior.openInWebUrl,
+          openInCursorUrl: urls?.openInCursorUrl ?? prior.openInCursorUrl,
+        };
+        await db.changeRequest.update({
+          where: { id: cr.id },
+          data: { buildSetup: nextSetup },
+        });
+
+        if (cr.status === "BUILDING" || cr.status === "CHANGES_REQUESTED") {
+          await transition(
+            cr.id,
+            ctx.company.id,
+            cr.status,
+            "TESTING",
+            ctx.user.id,
+            "Test & Improve workspace granted",
+          );
+        }
+
+        if (agentId) {
+          await enqueueJob("cursor.follow-up", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+            mode: "agent",
+            prompt: developerTestImprovePrompt({
+              title: full.title,
+              planMarkdown: planText,
+            }),
+          });
+        } else if (full.project.repository) {
+          await enqueueJob("cursor.start-agent", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+            mode: "agent",
+            prompt: developerTestImprovePrompt({
+              title: full.title,
+              planMarkdown: planText,
+            }),
+          });
+        }
+
+        await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            authorId: ctx.user.id,
+            content:
+              "Developer opened the Test & Improve workspace. Preview updates will appear here for you to verify — you stay in Koda.",
+          },
+        });
+        await writeAuditEvent({
+          companyId: ctx.company.id,
+          actorId: ctx.user.id,
+          action: "program.test_improve_granted",
+          entityType: "change_request",
+          entityId: cr.id,
+          metadata: { agentId },
+        });
+
+        return NextResponse.json({
+          ok: true,
+          testImproveGranted: true,
+          ...(urls ?? {}),
+          workspace: "test-improve",
+        });
+      }
+
       case "submit_final_review": {
         await requirePermission(ctx, "change_request:submit_review");
         const from =
@@ -352,12 +625,17 @@ export async function POST(
         if (
           cr.status !== "AWAITING_FINAL_REVIEW" &&
           cr.status !== "APPROVED" &&
-          cr.status !== "DEVELOPER_REVIEW"
+          cr.status !== "DEVELOPER_REVIEW" &&
+          cr.status !== "TESTING"
         ) {
           throw new AuthError("Not awaiting final deploy approval", 400);
         }
         let from = cr.status;
-        if (from === "AWAITING_FINAL_REVIEW" || from === "DEVELOPER_REVIEW") {
+        if (
+          from === "AWAITING_FINAL_REVIEW" ||
+          from === "DEVELOPER_REVIEW" ||
+          from === "TESTING"
+        ) {
           await transition(
             cr.id,
             ctx.company.id,

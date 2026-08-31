@@ -9,6 +9,7 @@ import {
   formatPlanningFileRejection,
   validatePlanningFileSize,
 } from "@automation-studio/domain/planning-files";
+import { MarkdownBody } from "@/components/markdown-body";
 
 type Message = {
   id: string;
@@ -820,7 +821,10 @@ export function ChatPanel({
               key={message.id}
               className="agent-msg agent-msg-assistant rise"
             >
-              <p className="agent-msg-body">{message.content}</p>
+              <MarkdownBody
+                content={message.content}
+                className="agent-msg-body"
+              />
               <div className="agent-msg-actions" aria-hidden="true">
                 <button type="button" tabIndex={-1} title="Helpful">
                   <svg width="14" height="14" viewBox="0 0 16 16" fill="none">

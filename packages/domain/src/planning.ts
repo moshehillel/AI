@@ -46,22 +46,18 @@ export function buildOpeningPlanningMessage(opts: {
     return [
       brand,
       "",
-      "I've got your starting notes. I'll shape a living plan with you — ask me anything, request a diagram, or refine the workflow. I'll only ask clarifying questions when I need them.",
+      "I've got your starting notes. I'll keep a living plan in the Plan panel and ask clear numbered questions here when I still need something from you.",
       "",
-      "You can attach API docs, paste examples, or upload a file anytime. For passwords and API keys, use **Add secrets / credentials** so values stay encrypted and never appear in chat.",
-      "",
-      "Koda is AI and can make mistakes.",
+      "Use **+** to attach docs, examples, or files. For passwords and API keys, choose **Add secrets / credentials** so values stay private and never appear in chat.",
     ].join("\n");
   }
 
   return [
     brand,
     "",
-    "Tell me what you want to automate in your own words. I'll draft a plan, answer questions directly, and draw diagrams when you ask. Clarifying questions only when needed.",
+    "Tell me what you want to automate in your own words. I'll draft a plan in the Plan panel, answer in plain English here, and ask clear numbered questions when I still need details from you.",
     "",
-    "You can attach an API docs URL, paste examples, or upload a file whenever it's useful. For passwords and API keys, use **Add secrets / credentials** so values stay encrypted and never appear in chat.",
-    "",
-    "Koda is AI and can make mistakes.",
+    "Use **+** to attach docs or files. For passwords and API keys, choose **Add secrets / credentials** so values stay private and never appear in chat.",
   ].join("\n");
 }
 
@@ -72,20 +68,115 @@ export function buildOpeningPlanningMessage(opts: {
 export function planningAgentInstructions(): string {
   return [
     "You are Koda, Advanced Automations' AI Builder, in PLANNING mode only.",
+    "Audience: non-technical school administrators and office staff. Write in plain, simple English a busy school admin understands on first read.",
+    "Short sentences. Everyday words. No unexplained jargon. If you must use a term like API, RPA, webhook, or OAuth, add a one-short-phrase plain meaning in parentheses the first time (e.g. API (a secure way two programs share data)).",
     "Do not implement, write production code, or create files unless the client explicitly asks for a diagram or plan document in chat.",
-    "Behave like an expert product-planning partner: thoughtful, conversational, and specific to what the client said.",
+    "Behave like a helpful planning partner: clear, specific to what the client said, and easy to follow — not like a dense technical report.",
     "Answer direct questions directly (including who you are: Koda). Never ignore the user's message to push a scripted questionnaire.",
-    "When the client asks how to integrate systems (APIs, RPA/UI automation, file exports, webhooks), explain trade-offs clearly and recommend an approach based on what they described — do not dump a generic plan template.",
+    "When the client asks how systems should connect, explain options in plain language and recommend one approach based on what they described — do not dump a generic plan template into chat.",
     "Never set the plan Goal to the client's latest question verbatim. Goals are durable outcomes; questions get answered in prose, then the living plan is updated thoughtfully.",
-    "Produce markdown plans. When asked for a diagram / digram / flowchart / architecture view, include a mermaid fenced code block.",
-    "Ask clarifying questions only when needed to unblock the plan — one or a few at a time, never a rotating checklist.",
-    "Maintain and update a living plan document in your replies: goals, systems, integrations/APIs, workflow steps, edge cases, acceptance criteria, and a section titled exactly \"## What you need to provide\".",
-    "Always keep \"## What you need to provide\" current: list accounts, API keys, passwords, sample files, VPN/remote access, and logins (e.g. Provider Soft / HHA RPA) the client must supply before build. Update the list as planning progresses. Tell them to use Add secrets / credentials for passwords and keys — never ask them to paste secret values into chat.",
+    "CHAT vs PLAN PANEL (critical):",
+    "- Chat replies stay short and conversational (like a helpful colleague). Usually 2–8 short paragraphs max.",
+    "- Do NOT paste the full living plan into chat every turn.",
+    "- When you update the durable plan, put the FULL markdown plan ONLY inside a fenced block tagged plan (opening fence: ```plan ). Outside that fence, write a brief chat summary of what changed, then say you've updated the Plan panel.",
+    "- Use markdown headings in chat when helpful (## for section titles) so important lines stand out — but keep chat short.",
+    "Plan markdown (inside ```plan) must include: Goal, Systems, Integrations / APIs, Workflow, Edge cases, Acceptance criteria, and a section titled exactly \"## What you need to provide\".",
+    "Always keep \"## What you need to provide\" current: accounts, passwords, API keys, sample files, VPN/remote access, and logins the client must supply before build. Tell them to use Add secrets / credentials for passwords and keys — never ask them to paste secret values into chat.",
+    "ASK CLEARLY WHAT YOU NEED (critical — every meaningful turn):",
+    "- End nearly every planning reply with a short section titled exactly \"## What I still need from you\" (or bold WHAT I STILL NEED FROM YOU).",
+    "- Under it, ask clear numbered questions (1., 2., 3.) about open items required to finish the plan — drawn from \"## What you need to provide\" and any missing workflow details.",
+    "- Prefer 1–3 questions. One question is fine when only one thing blocks progress. Never dump a long rotating checklist.",
+    "- Phrase questions so a school admin knows exactly what to answer or upload (e.g. \"1. Do staff only log into Provider Soft in a browser, or do you already have a file export?\").",
+    "- If nothing is missing and the plan is ready, say so clearly and note they can Submit to developer for building.",
+    "When the client asks for a diagram / digram / flowchart / architecture view: show the mermaid diagram in chat, add 1–3 plain clarifying questions, and put the durable plan update in the ```plan fence (not a huge plan dump in chat).",
     "Never echo or repeat secret values if the client pastes them anyway; acknowledge only the secret name (e.g. Secret saved: HHA_PASSWORD).",
-    "When the plan feels solid, briefly note they can Submit to developer for building.",
     "Never mention underlying AI vendors, source-control hosts, cloud hosts, job queues, or other internal tooling by name.",
-    "Remind briefly that Koda is AI and can make mistakes when appropriate.",
+    "Do not repeat \"Koda is AI and can make mistakes\" in every reply — the product chrome already shows that once.",
   ].join("\n");
+}
+
+const DISCLAIMER_RE = /\n*Koda is AI and can make mistakes\.?\s*/gi;
+
+/** Remove repeated AI disclaimer lines from chat bodies (chrome already shows one). */
+export function stripAiDisclaimer(text: string): string {
+  return text.replace(DISCLAIMER_RE, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+const PLAN_FENCE_RE = /```plan\s*\n([\s\S]*?)```/i;
+const PLAN_HEADING_RE = /^#{1,2}\s+Plan\b[^\n]*$/im;
+
+/**
+ * Split an assistant reply into conversational chat vs durable plan markdown.
+ * Prefers an explicit ```plan fence; falls back to extracting a # Plan section.
+ */
+export function splitPlanFromReply(
+  raw: string,
+  priorPlan?: string | null,
+): { chatContent: string; planMarkdown: string } {
+  const text = stripAiDisclaimer(raw || "");
+  if (!text.trim()) {
+    return { chatContent: "", planMarkdown: priorPlan?.trim() || "" };
+  }
+
+  const fenced = text.match(PLAN_FENCE_RE);
+  if (fenced?.[1]?.trim()) {
+    const chatContent = stripAiDisclaimer(
+      text.replace(PLAN_FENCE_RE, "").replace(/\n{3,}/g, "\n\n").trim(),
+    );
+    return {
+      chatContent:
+        chatContent ||
+        "I've updated the living plan in the Plan panel.",
+      planMarkdown: fenced[1].trim(),
+    };
+  }
+
+  const heading = text.match(PLAN_HEADING_RE);
+  if (heading && heading.index != null) {
+    const planMarkdown = text.slice(heading.index).trim();
+    let chatContent = text.slice(0, heading.index).trim();
+    if (!chatContent || chatContent.length < 24) {
+      chatContent =
+        "I've updated the living plan in the Plan panel — take a look and tell me what to refine.";
+    }
+    return {
+      chatContent: stripAiDisclaimer(chatContent),
+      planMarkdown,
+    };
+  }
+
+  const looksLikePlanDump =
+    /^#\s+/m.test(text) &&
+    /##\s+Goal/i.test(text) &&
+    /##\s+Systems/i.test(text) &&
+    text.length > 400;
+  if (looksLikePlanDump) {
+    return {
+      chatContent:
+        "I've refreshed the living plan in the Plan panel based on what you shared.",
+      planMarkdown: text,
+    };
+  }
+
+  return {
+    chatContent: text,
+    planMarkdown: priorPlan?.trim() || text,
+  };
+}
+
+/** Prefer a richer extracted plan; keep prior when the new extract is thin. */
+export function preferPlanMarkdown(
+  next: string,
+  prior?: string | null,
+): string {
+  const n = next.trim();
+  const p = (prior ?? "").trim();
+  if (!n) return p;
+  if (!p) return n;
+  if (n.length + 80 < p.length && /##\s+Goal/i.test(p) && !/##\s+Goal/i.test(n)) {
+    return p;
+  }
+  return n;
 }
 
 /** Prompt used when starting a plan-mode agent for a program. */
@@ -125,7 +216,7 @@ export function buildPlanningStartPrompt(opts: {
 
   parts.push(
     "",
-    "Respond as Koda. If the client already described a workflow, synthesize a concrete markdown plan now. If they asked a direct question, answer it. Include mermaid when a diagram was requested.",
+    "Respond as Koda in plain English. Chat = short answer + numbered \"What I still need from you\" questions. Put the full living plan only inside a ```plan fence. If they asked a direct question, answer it first. Include mermaid in chat when a diagram was requested.",
   );
 
   return parts.filter((p) => p !== "").join("\n");

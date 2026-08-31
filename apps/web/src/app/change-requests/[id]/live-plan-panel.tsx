@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MarkdownBody } from "@/components/markdown-body";
 
 type Plan = {
   id: string;
@@ -82,7 +83,7 @@ export function LivePlanPanel({
         <p className="ide-right-label">{tab === "plan" ? "Plan" : "Context"}</p>
         {tab === "plan" ? (
           plan ? (
-            <pre className="plan-doc-body">{plan.content}</pre>
+            <MarkdownBody content={plan.content} className="plan-doc-body" />
           ) : (
             <p className="muted text-[12px] leading-relaxed">
               Koda keeps a living plan here — goals, systems, workflow, and

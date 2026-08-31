@@ -82,3 +82,26 @@ export function developerTestImprovePrompt(input: {
     input.planMarkdown.trim() || input.title,
   ].join("\n");
 }
+
+
+/** Dashboard URL for an agent (developer-facing only). */
+export function agentWebUrl(agentId: string): string {
+  return `https://cursor.com/agents/${agentId}`;
+}
+
+/** Deep link that opens / resumes the agent in the Cursor app. */
+export function agentCursorDeepLink(agentId: string): string {
+  return `https://cursor.com/background-agent?bcId=${encodeURIComponent(agentId)}`;
+}
+
+export function agentOpenUrls(agentId: string): {
+  agentId: string;
+  openInWebUrl: string;
+  openInCursorUrl: string;
+} {
+  return {
+    agentId,
+    openInWebUrl: agentWebUrl(agentId),
+    openInCursorUrl: agentCursorDeepLink(agentId),
+  };
+}

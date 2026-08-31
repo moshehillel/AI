@@ -19,12 +19,9 @@ import {
   developerPlanReviewPrompt,
   developerBuildPrompt,
   developerTestImprovePrompt,
+  agentOpenUrls,
   type ProgramBuildSetup,
 } from "@automation-studio/domain";
-import {
-  agentOpenUrls,
-  createTaskAgent,
-} from "@automation-studio/cursor-adapter";
 import { getAppBaseUrl } from "@/lib/app-url";
 import { queueAndMaybeSendEmail } from "@/lib/notify";
 import { getStaffAccessToken } from "@/lib/staff-access";
@@ -274,70 +271,62 @@ export async function POST(
         const { full, planText } = await loadProgramPlanText(cr.id);
         const prior = parseBuildSetup(full.buildSetup);
         let agentId = full.cursorAgentId ?? prior.planAgentId ?? null;
-        const resumed = Boolean(agentId);
+        const reviewPrompt = developerPlanReviewPrompt({
+          title: full.title,
+          planMarkdown: planText,
+          description: full.description,
+        });
 
         if (agentId) {
           await enqueueJob("cursor.follow-up", {
             changeRequestId: cr.id,
             companyId: ctx.company.id,
             mode: "plan",
-            prompt: developerPlanReviewPrompt({
-              title: full.title,
-              planMarkdown: planText,
-              description: full.description,
-            }),
+            prompt: reviewPrompt,
           });
         } else {
-          const repo = full.project.repository;
-          if (!repo) {
+          if (!full.project.repository) {
             throw new AuthError(
               "No repository linked — connect a repo in Admin, then retry Open in Cursor",
               400,
             );
           }
-          const branchName = full.branchName || repo.defaultBranch || "main";
-          const repoUrl = `https://github.com/${repo.githubOwner}/${repo.githubRepo}`;
-          const created = await createTaskAgent({
-            repoUrl,
-            branch: branchName,
+          // Worker creates the Cursor agent (keeps @cursor/sdk off the Next bundle).
+          await enqueueJob("cursor.start-agent", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
             mode: "plan",
-            prompt: developerPlanReviewPrompt({
-              title: full.title,
-              planMarkdown: planText,
-              description: full.description,
-            }),
-            metadata: {
-              company_id: ctx.company.id,
-              project_id: full.projectId,
-              change_request_id: cr.id,
-              purpose: "developer_plan_review",
-            },
-          });
-          agentId = created.agentId;
-          void created.wait().catch((err: unknown) => {
-            console.error("[open_in_cursor] agent wait failed", err);
-          });
-          await db.agentRun.create({
-            data: {
-              changeRequestId: cr.id,
-              cursorAgentId: agentId!,
-              mode: "PLAN",
-              status: "RUNNING",
-              startedAt: new Date(),
-            },
-          });
-          await db.changeRequest.update({
-            where: { id: cr.id },
-            data: {
-              cursorAgentId: agentId,
-              branchName: full.branchName ?? branchName,
-            },
+            prompt: reviewPrompt,
           });
         }
 
+        // Refresh in case the worker already persisted an id from planning.
+        const refreshed = await db.changeRequest.findFirst({
+          where: { id: cr.id },
+          select: { cursorAgentId: true, buildSetup: true },
+        });
+        agentId =
+          refreshed?.cursorAgentId ??
+          parseBuildSetup(refreshed?.buildSetup).planAgentId ??
+          agentId;
+
         if (!agentId) {
-          throw new AuthError("Could not open a Cursor agent for this program", 500);
+          await writeAuditEvent({
+            companyId: ctx.company.id,
+            actorId: ctx.user.id,
+            action: "program.open_in_cursor_pending",
+            entityType: "change_request",
+            entityId: cr.id,
+            metadata: {},
+          });
+          return NextResponse.json({
+            ok: true,
+            pending: true,
+            message:
+              "Starting Cursor plan session — click Open in Cursor again in a few seconds.",
+          });
         }
+
         const urls = agentOpenUrls(agentId);
         const nextSetup: ProgramBuildSetup = {
           ...prior,
@@ -362,7 +351,7 @@ export async function POST(
         return NextResponse.json({
           ok: true,
           ...urls,
-          resumed,
+          resumed: Boolean(full.cursorAgentId ?? prior.planAgentId),
         });
       }
 

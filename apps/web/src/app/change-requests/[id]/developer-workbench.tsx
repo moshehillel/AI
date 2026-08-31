@@ -62,6 +62,8 @@ export function DeveloperWorkbench({
       openInCursorUrl?: string;
       openInWebUrl?: string;
       testImproveGranted?: boolean;
+      pending?: boolean;
+      message?: string;
     };
     if (!res.ok) {
       setActionError(data.error ?? "Action failed — try again.");
@@ -72,6 +74,9 @@ export function DeveloperWorkbench({
         openInCursorUrl: data.openInCursorUrl,
         openInWebUrl: data.openInWebUrl,
       });
+    }
+    if (data.pending && data.message) {
+      setActionError(data.message);
     }
     return data;
   }

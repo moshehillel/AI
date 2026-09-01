@@ -1,163 +1,102 @@
-# Deploy Automation Studio
+# Deploy Automation Studio (Koda)
 
 Production hosting options:
 
 | Platform | Guide | Status |
 | --- | --- | --- |
-| **Railway** | This document | Current (`koda.advancedautomations.net`) |
-| **AWS** | [infra/aws/README.md](../infra/aws/README.md) + [aws-migration.md](./aws-migration.md) | Dedicated `koda-platform` stack (separate from Whiteglove) |
+| **AWS** | [infra/aws/README.md](../infra/aws/README.md) + [aws-migration.md](./aws-migration.md) | **Production target** (`koda-platform` stack, same AWS account as Whiteglove) |
+| **Railway** | Legacy section below | **Legacy** — project `bountiful-fascination`; decommission after AWS cutover |
 
-## Railway (current)
+## AWS (production)
 
-Production hosting uses **Railway** with Postgres, Redis, a **web** service, and a **worker** service.
+ECS Fargate web + worker, RDS Postgres, ElastiCache Redis, ALB + ACM. Full guide: [infra/aws/README.md](../infra/aws/README.md).
 
-## What gets deployed
+### First-time apply
+
+```bash
+cd infra/aws/terraform
+cp terraform.tfvars.example terraform.tfvars
+# Edit acm_certificate_arn, hosted_zone_id (optional), create_github_oidc_provider
+
+terraform init
+terraform plan
+terraform apply
+```
+
+After apply:
+
+```bash
+terraform output alb_dns_name          # Netlify CNAME target
+terraform output app_secrets_arn       # Populate Clerk/Cursor/GitHub keys
+terraform output github_deploy_role_arn
+```
+
+Populate Secrets Manager, then enable GitHub Actions:
+
+| GitHub setting | Value |
+| --- | --- |
+| Variable `AWS_DEPLOY_ENABLED` | `true` |
+| Secret `AWS_DEPLOY_ROLE_ARN` | `terraform output -raw github_deploy_role_arn` |
+| Secret `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `pk_live_…` |
+
+Trigger **Actions → Deploy Koda to AWS** or push to `main`.
+
+### DNS
+
+Point `koda.advancedautomations.net` CNAME to `terraform output -raw alb_dns_name`. See [aws-migration.md](./aws-migration.md) for cutover checklist.
+
+### What gets deployed
 
 | Resource | Role |
 |---|---|
-| Postgres | Prisma / app data |
-| Redis | BullMQ job queue |
-| `web` | Next.js UI + API (`Dockerfile.web`) |
-| `worker` | BullMQ runner (`Dockerfile.worker`) |
+| ECS `web` | Next.js UI + API (`Dockerfile.web`) |
+| ECS `worker` | BullMQ runner (`Dockerfile.worker`) |
+| RDS Postgres | Prisma / app data |
+| ElastiCache Redis | BullMQ job queue |
 
-First deploy expects **Clerk auth** (NetFree whitelabel complete):
+First deploy expects **Clerk auth**:
 
-- `OPEN_ACCESS=0` / `NEXT_PUBLIC_OPEN_ACCESS=0`
+- `OPEN_ACCESS=0` / `NEXT_PUBLIC_OPEN_ACCESS=0` (secret + web image build-args)
 - `ALLOW_DEMO_AUTH=0` / `NEXT_PUBLIC_ALLOW_DEMO_AUTH=0`
 - Clerk production keys on `clerk.advancedautomations.net`
 - Set `CURSOR_MOCK=0` + `CURSOR_API_KEY` when live agents are ready
 
-Web start runs `prisma migrate deploy` before `next start`.
-
-## Prerequisites
-
-1. [Railway account](https://railway.com) and CLI (`railway` ≥ 5.44)
-2. Auth for the CLI:
-   - Interactive: `railway login`
-   - Headless / CI: set **`RAILWAY_TOKEN`** (project token) or **`RAILWAY_API_TOKEN`** (account token)
-3. Optional: GitHub connected to Railway if you prefer git-triggered deploys over `railway up`
-
-## One-command bootstrap
-
-From the repo root (with `RAILWAY_TOKEN` set or after `railway login`):
-
-```bash
-chmod +x scripts/railway-bootstrap.sh
-./scripts/railway-bootstrap.sh
-```
-
-The script:
-
-1. Creates/links project `automation-studio` (override with `RAILWAY_PROJECT_NAME`)
-2. Adds Postgres + Redis if missing
-3. Creates `web` + `worker` services
-4. Points each service at **`Dockerfile.web`** / **`Dockerfile.worker`** (Railway does not reliably support `dockerBuildTarget`)
-5. Sets demo-mode variables and a generated **`ENCRYPTION_KEY`**
-6. Deploys both services, attaches a public domain, sets `NEXT_PUBLIC_APP_URL`, seeds demo data
-
-Useful env overrides:
-
-| Variable | Meaning |
-|---|---|
-| `RAILWAY_TOKEN` / `RAILWAY_API_TOKEN` | Auth (required headless) |
-| `ENCRYPTION_KEY` | Use your own 32-byte hex key instead of generating one |
-| `SKIP_DEPLOY=1` | Configure only; do not `railway up` |
-| `SKIP_SEED=1` | Skip `pnpm db:seed:deploy` |
-
-After bootstrap, open the printed **Live URL** (or `railway open`).
-
-Demo seed runs inside the web service over `railway ssh` (private `DATABASE_URL` is not reachable from the local agent). If seed was skipped:
-
-```bash
-railway ssh --service web -- pnpm db:seed:deploy
-```
-
-## ENCRYPTION_KEY
-
-Generate a 32-byte hex secret (never commit it):
-
-```bash
-openssl rand -hex 32
-```
-
-Set it on both services:
-
-```bash
-railway variable set --service web ENCRYPTION_KEY="<value>"
-railway variable set --service worker ENCRYPTION_KEY="<value>"
-```
-
-If you omit it, `scripts/railway-bootstrap.sh` generates one for you.
-
-## Infrastructure as Code
-
-Desired topology lives in [`.railway/railway.ts`](../.railway/railway.ts) (Postgres, Redis, web, worker, demo env references).
-
-```bash
-railway link          # once
-railway config plan   # preview
-railway config apply  # apply after review
-```
-
-**Note:** The current Railway IaC DSL does not fully express `build.dockerfilePath`. Bootstrap (or dashboard) still sets `Dockerfile.web` / `Dockerfile.worker`. Prefer IaC for services, databases, and variables; keep CaC files (`railway.json` / `railway.toml`) out of the repo so they do not conflict with IaC.
-
-## Manual deploy (after bootstrap)
-
-```bash
-railway up --service web -m "deploy web"
-railway up --service worker -m "deploy worker"
-railway domain --service web   # if no public URL yet
-railway run --service web pnpm db:seed:deploy
-```
+Web container runs `prisma migrate deploy` before `next start`.
 
 ## Clerk keys (development vs production)
 
-Railway currently can run with Clerk **development** keys (`pk_test_` / `sk_test_`). That works, but:
+For `https://koda.advancedautomations.net`, use a **Production** Clerk instance:
 
-- The browser shows a Clerk warning that development keys are loaded
-- Development instances have stricter limits and weaker custom-domain behavior
-- For `https://koda.advancedautomations.net`, prefer a **Production** Clerk instance
-
-### Switch to production keys
-
-1. Clerk Dashboard → create / open the **Production** instance (not Development)
-2. Enable **Organizations** (Configure → Organizations settings) with membership required
-3. Add roles with keys `org:admin`, `org:developer`, `org:employee`
-4. Configure → API Keys → copy **live** keys:
-   - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` = `pk_live_…`
-   - `CLERK_SECRET_KEY` = `sk_live_…`
-5. Webhooks → endpoint `https://koda.advancedautomations.net/api/webhooks/clerk`  
+1. Clerk Dashboard → **Production** instance
+2. Enable **Organizations** with membership required
+3. Roles: `org:admin`, `org:developer`, `org:employee`
+4. API Keys → `pk_live_…` / `sk_live_…`
+5. Webhooks → `https://koda.advancedautomations.net/api/webhooks/clerk`  
    Events: `user.*`, `organization.created`, `organizationMembership.*`  
-   Paste signing secret as `CLERK_WEBHOOK_SECRET`
+   Signing secret → `CLERK_WEBHOOK_SECRET`
 6. Allowed origins / redirect URLs: `https://koda.advancedautomations.net`
-7. Set the three vars on the Railway **web** service and redeploy
-
-Until live keys are pasted, test keys remain usable for smoke tests after signing in and selecting an organization (`/select-org`).
+7. Add keys to Secrets Manager app secret; rebuild web image; redeploy ECS
 
 ## Turning on Clerk auth (production)
 
-NetFree whitelabel is complete — production uses Clerk sign-in:
-
-1. Set real credentials (`NEXT_PUBLIC_CLERK_*`, `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SECRET`, …)
-2. Set `OPEN_ACCESS=0` / `NEXT_PUBLIC_OPEN_ACCESS=0` on **web and worker**
-3. Redeploy **web** from source (rebuilds client bundle with `NEXT_PUBLIC_OPEN_ACCESS=0`)
-4. Redeploy worker
-5. Follow [runbooks.md](./runbooks.md) production wiring checklist
+1. Set Clerk credentials in Secrets Manager
+2. `OPEN_ACCESS=0` / `NEXT_PUBLIC_OPEN_ACCESS=0` in secret + web build-args
+3. Redeploy web + worker ECS services
+4. Follow [runbooks.md](./runbooks.md) production wiring checklist
 
 ### Local open access (dev only)
 
-For no-login local dev, set `OPEN_ACCESS=1` / `NEXT_PUBLIC_OPEN_ACCESS=1` in `.env`.
+Set `OPEN_ACCESS=1` / `NEXT_PUBLIC_OPEN_ACCESS=1` in `.env` — never on production.
 
 ## Turning off mock integrations
 
-When Cursor / GitHub are ready:
-
-1. Set `CURSOR_API_KEY`, `GITHUB_APP_*`, remove `CURSOR_MOCK`, `GITHUB_MOCK`
-2. Prefer `pk_live_` / `sk_live_` on the custom domain (see Clerk section above)
+1. Set `CURSOR_API_KEY`, `GITHUB_APP_*` in Secrets Manager
+2. Remove `CURSOR_MOCK`, `GITHUB_MOCK`, `RAILWAY_MOCK` from app secret
+3. Redeploy worker + web
 
 ### GitHub App (one-click)
 
-See [github-app-setup.md](./github-app-setup.md). On Railway, set `RAILWAY_API_TOKEN` and `RAILWAY_WORKER_SERVICE_ID` on the **web** service, then open Admin → **Register GitHub App (one-time)** while logged into GitHub.
+See [github-app-setup.md](./github-app-setup.md). On AWS, paste `GITHUB_APP_*` into Secrets Manager after Admin → Register GitHub App.
 
 ## Local Docker smoke test
 
@@ -166,9 +105,38 @@ docker build -f Dockerfile.web -t automation-studio-web .
 docker build -f Dockerfile.worker -t automation-studio-worker .
 ```
 
-## Troubleshooting
+## Troubleshooting (AWS)
 
 - **Build fails on Prisma/OpenSSL** — images install `openssl` + `ca-certificates` in the base stage.
-- **Web unhealthy** — confirm `/api/health` returns 200 and `DATABASE_URL` / `REDIS_URL` reference the Postgres/Redis services.
-- **Worker idle** — same Redis URL as web; check `railway logs --service worker --lines 100`.
-- **Auth required** — without `RAILWAY_TOKEN`, bootstrap cannot create the project. Add the token to the Cloud Agent environment and re-run.
+- **Web unhealthy** — `curl https://koda.advancedautomations.net/api/ready`; check RDS/ElastiCache from ECS task logs.
+- **Worker idle** — same Redis URL as web; `aws logs tail /ecs/koda-platform-production/worker`.
+- **Deploy workflow skipped** — set repository variable `AWS_DEPLOY_ENABLED=true`.
+
+---
+
+## Railway (legacy — decommission after AWS cutover)
+
+> **Do not use for production.** Koda currently runs on Railway project `bountiful-fascination` until DNS cutover. See [aws-migration.md](./aws-migration.md).
+
+Production hosting used **Railway** with Postgres, Redis, **web**, and **worker** services.
+
+### One-command bootstrap (historical)
+
+```bash
+chmod +x scripts/railway-bootstrap.sh
+./scripts/railway-bootstrap.sh
+```
+
+Topology in [`.railway/railway.ts`](../.railway/railway.ts). IaC: `railway config plan` / `railway config apply`.
+
+### Manual deploy (historical)
+
+```bash
+railway up --service web -m "deploy web"
+railway up --service worker -m "deploy worker"
+```
+
+### Railway troubleshooting
+
+- **Worker idle** — `railway logs --service worker --lines 100`
+- **Web unhealthy** — `/api/health` and `DATABASE_URL` / `REDIS_URL`

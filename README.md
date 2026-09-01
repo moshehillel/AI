@@ -79,24 +79,21 @@ Without Clerk keys, set `OPEN_ACCESS=1` in `.env` to open as the seeded employee
 
 ## Deploy
 
-| Target | Guide |
-| --- | --- |
-| Railway (current) | [docs/deploy.md](docs/deploy.md) |
-| AWS (`koda-platform`, separate stack) | [infra/aws/README.md](infra/aws/README.md) |
+| Target | Guide | Status |
+| --- | --- | --- |
+| **AWS** (`koda-platform`) | [infra/aws/README.md](infra/aws/README.md) | **Production** |
+| Railway (legacy) | [docs/deploy.md](docs/deploy.md#railway-legacy--decommission-after-aws-cutover) | Decommission after cutover — [aws-migration.md](docs/aws-migration.md) |
 
-### Railway
-
-Host web + worker with managed Postgres and Redis. Full guide: [docs/deploy.md](docs/deploy.md).
+### AWS
 
 ```bash
-# Headless: export RAILWAY_TOKEN=...   (or railway login)
-pnpm railway:bootstrap
-# equivalent: ./scripts/railway-bootstrap.sh
+cd infra/aws/terraform && terraform apply
+# Enable GitHub Actions AWS_DEPLOY_ENABLED=true, then Actions → Deploy Koda to AWS
 ```
 
-First deploy uses **Clerk auth** (`OPEN_ACCESS=0`). For local no-login dev, set `OPEN_ACCESS=1` in `.env`. Images: `Dockerfile.web` and `Dockerfile.worker`. Topology: [`.railway/railway.ts`](.railway/railway.ts).
+### Railway (legacy)
 
-Generate `ENCRYPTION_KEY` with `openssl rand -hex 32` (bootstrap can generate one if unset).
+Host web + worker with managed Postgres and Redis. **Do not bootstrap new Railway production** — migrate to AWS per [docs/aws-migration.md](docs/aws-migration.md).
 
 ## External credentials (production wiring)
 
@@ -105,7 +102,7 @@ Generate `ENCRYPTION_KEY` with `openssl rand -hex 32` (bootstrap can generate on
 | Clerk | Auth + Organizations (`org:employee`, `org:developer`, `org:admin`) |
 | Cursor | `CURSOR_API_KEY` service account for Cloud Agents |
 | GitHub App | Branch/PR/check access per customer install |
-| Railway | Hosting + PR Environments inheriting from staging/preview-base |
+| Railway | Legacy hosting + PR preview helpers (decommission after AWS cutover) |
 | Postgres / Redis | App data + job queue |
 
 See [docs/architecture.md](docs/architecture.md), [docs/security.md](docs/security.md), and [docs/deploy.md](docs/deploy.md).

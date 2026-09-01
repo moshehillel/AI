@@ -17,3 +17,11 @@ packages/*/dist
 docker-data
 dump.rdb
 *.rdb
+
+# Terraform (never commit state or secrets)
+infra/aws/terraform/.terraform/
+infra/aws/terraform/*.tfstate
+infra/aws/terraform/*.tfstate.*
+infra/aws/terraform/terraform.tfvars
+infra/aws/terraform/*.auto.tfvars
+infra/aws/terraform/.terraform.lock.hcl

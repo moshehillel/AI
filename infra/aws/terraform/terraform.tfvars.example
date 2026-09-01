@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars and customize before apply.
+# Do not commit terraform.tfvars with secrets.
+
+aws_region   = "us-east-1"
+project_name = "koda-platform"
+environment  = "production"
+domain_name  = "koda.advancedautomations.net"
+
+# Leave empty when DNS is managed at Netlify (manual CNAME to alb_dns_name output).
+hosted_zone_id = ""
+
+# Request ACM cert in us-east-1 for domain_name, validate via DNS, then paste ARN.
+acm_certificate_arn = ""
+
+web_desired_count    = 2
+worker_desired_count = 1
+
+github_repository  = "moshehillel/AI"
+enable_github_oidc = true

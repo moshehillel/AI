@@ -8,7 +8,7 @@ import {
 } from "@/lib/staff-session";
 
 const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
-/** Skip Clerk gate for open access / demo until NetFree allows Clerk. */
+/** Single-customer no-login mode (local dev only in production). */
 const openAccess =
   process.env.OPEN_ACCESS === "1" || process.env.NEXT_PUBLIC_OPEN_ACCESS === "1";
 const skipClerkProtect =
@@ -23,20 +23,25 @@ async function getClerkHandler() {
   const { clerkMiddleware, createRouteMatcher } = await import(
     "@clerk/nextjs/server"
   );
-  const isPublicRoute = createRouteMatcher([
+  const publicRoutes = [
     "/",
     "/sign-in(.*)",
     "/sign-up(.*)",
+    "/staff(.*)",
     "/api/webhooks(.*)",
     "/api/github/app-manifest(.*)",
+    "/api/staff(.*)",
     "/api/health",
     "/api/ready",
     "/icon(.*)",
     "/favicon.ico",
     "/apple-icon(.*)",
-    "/projects(.*)",
-    "/select-org(.*)",
-  ]);
+  ];
+  // Open access only: customer routes without Clerk session.
+  if (openAccess) {
+    publicRoutes.push("/projects(.*)", "/select-org(.*)");
+  }
+  const isPublicRoute = createRouteMatcher(publicRoutes);
   const mw = clerkMiddleware(async (auth, request) => {
     if (isPublicRoute(request)) return;
     if (skipClerkProtect) return;
@@ -77,7 +82,7 @@ export default async function middleware(request: NextRequest) {
   const staffGate = await enforceStaffPasswordGate(request);
   if (staffGate) return staffGate;
 
-  // No Clerk keys, or open access → skip protect (Clerk code remains for later).
+  // No Clerk keys, open access, or demo auth → skip Clerk protect.
   if (!clerkEnabled || skipClerkProtect) {
     return NextResponse.next();
   }

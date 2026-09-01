@@ -1,0 +1,125 @@
+name: Deploy Koda to AWS
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Docker image tag (git SHA recommended)
+        required: true
+        default: latest
+      environment:
+        description: Terraform environment label
+        required: true
+        default: production
+  push:
+    branches:
+      - main
+      - cursor/koda-program-lifecycle-8b33
+    paths:
+      - "apps/**"
+      - "workers/**"
+      - "packages/**"
+      - "Dockerfile.web"
+      - "Dockerfile.worker"
+      - "infra/aws/**"
+      - ".github/workflows/aws-deploy.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: koda-platform
+  TF_DIR: infra/aws/terraform
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    # Skip until AWS secrets are configured in the repo.
+    if: ${{ vars.AWS_DEPLOY_ENABLED == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: meta
+        run: |
+          TAG="${{ github.event.inputs.image_tag || github.sha }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push web image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+          # NEXT_PUBLIC_* baked at build — must match Secrets Manager / production.
+          NEXT_PUBLIC_OPEN_ACCESS: "0"
+          NEXT_PUBLIC_ALLOW_DEMO_AUTH: "0"
+          NEXT_PUBLIC_APP_URL: https://koda.advancedautomations.net
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+        run: |
+          docker build -f Dockerfile.web \
+            --build-arg NEXT_PUBLIC_OPEN_ACCESS="$NEXT_PUBLIC_OPEN_ACCESS" \
+            --build-arg NEXT_PUBLIC_ALLOW_DEMO_AUTH="$NEXT_PUBLIC_ALLOW_DEMO_AUTH" \
+            --build-arg NEXT_PUBLIC_APP_URL="$NEXT_PUBLIC_APP_URL" \
+            --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" \
+            -t "$ECR_REGISTRY/${{ env.PROJECT_NAME }}/web:$IMAGE_TAG" .
+          docker push "$ECR_REGISTRY/${{ env.PROJECT_NAME }}/web:$IMAGE_TAG"
+
+      - name: Build and push worker image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          docker build -f Dockerfile.worker \
+            -t "$ECR_REGISTRY/${{ env.PROJECT_NAME }}/worker:$IMAGE_TAG" .
+          docker push "$ECR_REGISTRY/${{ env.PROJECT_NAME }}/worker:$IMAGE_TAG"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -input=false
+
+      - name: Register new ECS task definitions
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          terraform apply -input=false -auto-approve \
+            -var="image_tag=$IMAGE_TAG" \
+            -var="environment=${{ github.event.inputs.environment || 'production' }}" \
+            -target=aws_ecs_task_definition.web \
+            -target=aws_ecs_task_definition.worker
+
+      - name: Force ECS rolling deploy
+        env:
+          CLUSTER: ${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment || 'production' }}-cluster
+          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          for SERVICE in web worker; do
+            aws ecs update-service \
+              --cluster "$CLUSTER" \
+              --service "${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment || 'production' }}-$SERVICE" \
+              --force-new-deployment
+          done
+
+      - name: Wait for web service stability
+        env:
+          CLUSTER: ${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment || 'production' }}-cluster
+        run: |
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services "${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment || 'production' }}-web"

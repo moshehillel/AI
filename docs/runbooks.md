@@ -1,17 +1,34 @@
 # Runbooks
 
+## Production Clerk auth (Railway or AWS)
+
+Customers sign in via Clerk on `clerk.advancedautomations.net`. Required on **web** and **worker**:
+
+```bash
+# Railway example:
+railway variable set --service web \
+  OPEN_ACCESS=0 NEXT_PUBLIC_OPEN_ACCESS=0 \
+  ALLOW_DEMO_AUTH=0 NEXT_PUBLIC_ALLOW_DEMO_AUTH=0
+railway variable set --service worker \
+  OPEN_ACCESS=0 NEXT_PUBLIC_OPEN_ACCESS=0 \
+  ALLOW_DEMO_AUTH=0 NEXT_PUBLIC_ALLOW_DEMO_AUTH=0
+# NEXT_PUBLIC_* is baked at image build — redeploy web from source:
+railway up --service web -d -y -m "Clerk auth enabled"
+railway up --service worker -d -y -m "Clerk auth enabled"
+```
+
+On AWS, set the same values in Secrets Manager (`infra/aws/terraform/secrets.tf`) and rebuild the web image with `NEXT_PUBLIC_OPEN_ACCESS=0`.
+
+Then open https://koda.advancedautomations.net — Sign in → select organization → Programs.
+
+Staff developer tools: sign in with Clerk `org:developer` / `org:admin`, or use `/staff` password fallback (`ADMIN_PASSWORD`).
+
 ## Local open access (no login)
 
 ```bash
 cp .env.example .env
-# Ensure:
-# OPEN_ACCESS=1
-# NEXT_PUBLIC_OPEN_ACCESS=1
-# ALLOW_DEMO_AUTH=0
-# NEXT_PUBLIC_ALLOW_DEMO_AUTH=0
-# CURSOR_MOCK=1
-# GITHUB_MOCK=1
-# RAILWAY_MOCK=1
+# Production-like local: OPEN_ACCESS=0 + Clerk keys in .env
+# No-login local dev: OPEN_ACCESS=1, ALLOW_DEMO_AUTH=0, mocks on
 
 # Start Postgres + Redis (docker compose or local services)
 pnpm install
@@ -25,9 +42,11 @@ pnpm dev:worker
 
 Open http://localhost:3000 — redirects to `/projects` as the seeded customer (EMPLOYEE). No Sign in / role switcher.
 
-## Hosted open access (temporary, until NetFree allows Clerk)
+## Hosted open access (local dev pattern only)
 
-Single-customer mode on Railway **web** and **worker**:
+> **Deprecated for production.** NetFree whitelabel allows Clerk — use production Clerk auth above.
+
+Single-customer mode for temporary testing:
 
 ```bash
 railway variable set --service web \
@@ -171,7 +190,7 @@ railway variable set --service web 'EMAIL_FROM=Koda <onboarding@resend.dev>'
 Without `RESEND_API_KEY`, notifications are stored in Admin → Notification inbox only
 (open access runs as EMPLOYEE, so use Railway logs / DB / a developer session to inspect).
 
-### Restore Clerk later
+### Restore Clerk (if open access was re-enabled)
 
 ```bash
 railway variable set --service web OPEN_ACCESS=0 NEXT_PUBLIC_OPEN_ACCESS=0
@@ -179,6 +198,8 @@ railway variable set --service worker OPEN_ACCESS=0 NEXT_PUBLIC_OPEN_ACCESS=0
 railway up --service web -d -y -m "Restore Clerk auth"
 railway up --service worker -d -y -m "Restore Clerk auth"
 ```
+
+See also [aws-migration.md](./aws-migration.md) for AWS cutover.
 
 ## Local demo mode (optional, role switcher)
 

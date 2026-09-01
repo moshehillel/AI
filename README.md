@@ -24,6 +24,7 @@ packages/cursor-adapter  Thin @cursor/sdk wrapper (mockable)
 packages/github          GitHub App helpers (mockable)
 packages/railway         Railway GraphQL preview helpers (mockable)
 docs/                    Architecture, security, and deploy notes
+infra/aws/               Koda platform AWS Terraform (separate from Whiteglove)
 .railway/                Railway Infrastructure as Code (railway.ts)
 scripts/                 railway-bootstrap.sh and helpers
 ```
@@ -38,7 +39,7 @@ scripts/                 railway-bootstrap.sh and helpers
 
 ```bash
 cp .env.example .env
-# Defaults: OPEN_ACCESS=1 (no login); keep ALLOW_DEMO_AUTH=0; mocks on for local
+# Defaults: OPEN_ACCESS=0 (Clerk auth). For no-login local dev set OPEN_ACCESS=1 in .env.
 
 docker compose up -d
 pnpm install
@@ -74,9 +75,16 @@ pnpm packages:build
 
 Open http://localhost:3000
 
-Without Clerk keys (or with `OPEN_ACCESS=1`), the app opens as the seeded employee on `demo-co` — no login.
+Without Clerk keys, set `OPEN_ACCESS=1` in `.env` to open as the seeded employee on `demo-co` — no login.
 
-## Deploy (Railway)
+## Deploy
+
+| Target | Guide |
+| --- | --- |
+| Railway (current) | [docs/deploy.md](docs/deploy.md) |
+| AWS (`koda-platform`, separate stack) | [infra/aws/README.md](infra/aws/README.md) |
+
+### Railway
 
 Host web + worker with managed Postgres and Redis. Full guide: [docs/deploy.md](docs/deploy.md).
 
@@ -86,7 +94,7 @@ pnpm railway:bootstrap
 # equivalent: ./scripts/railway-bootstrap.sh
 ```
 
-First deploy uses **open access** (`OPEN_ACCESS=1`, demo auth off) plus provider mocks so the site works before Clerk/NetFree/Cursor/GitHub are fully wired. Images: `Dockerfile.web` and `Dockerfile.worker`. Topology: [`.railway/railway.ts`](.railway/railway.ts).
+First deploy uses **Clerk auth** (`OPEN_ACCESS=0`). For local no-login dev, set `OPEN_ACCESS=1` in `.env`. Images: `Dockerfile.web` and `Dockerfile.worker`. Topology: [`.railway/railway.ts`](.railway/railway.ts).
 
 Generate `ENCRYPTION_KEY` with `openssl rand -hex 32` (bootstrap can generate one if unset).
 

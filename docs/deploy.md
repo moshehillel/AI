@@ -1,4 +1,13 @@
-# Deploy Automation Studio (Railway)
+# Deploy Automation Studio
+
+Production hosting options:
+
+| Platform | Guide | Status |
+| --- | --- | --- |
+| **Railway** | This document | Current (`koda.advancedautomations.net`) |
+| **AWS** | [infra/aws/README.md](../infra/aws/README.md) + [aws-migration.md](./aws-migration.md) | Dedicated `koda-platform` stack (separate from Whiteglove) |
+
+## Railway (current)
 
 Production hosting uses **Railway** with Postgres, Redis, a **web** service, and a **worker** service.
 
@@ -11,11 +20,12 @@ Production hosting uses **Railway** with Postgres, Redis, a **web** service, and
 | `web` | Next.js UI + API (`Dockerfile.web`) |
 | `worker` | BullMQ runner (`Dockerfile.worker`) |
 
-First deploy runs in **open access** (no login; single customer on seed data):
+First deploy expects **Clerk auth** (NetFree whitelabel complete):
 
-- `OPEN_ACCESS=1` / `NEXT_PUBLIC_OPEN_ACCESS=1`
-- `ALLOW_DEMO_AUTH=0` / `NEXT_PUBLIC_ALLOW_DEMO_AUTH=0` (not demo mode)
-- `CURSOR_MOCK=1` / `GITHUB_MOCK=1` / `RAILWAY_MOCK=1`
+- `OPEN_ACCESS=0` / `NEXT_PUBLIC_OPEN_ACCESS=0`
+- `ALLOW_DEMO_AUTH=0` / `NEXT_PUBLIC_ALLOW_DEMO_AUTH=0`
+- Clerk production keys on `clerk.advancedautomations.net`
+- Set `CURSOR_MOCK=0` + `CURSOR_API_KEY` when live agents are ready
 
 Web start runs `prisma migrate deploy` before `next start`.
 
@@ -124,15 +134,26 @@ Railway currently can run with Clerk **development** keys (`pk_test_` / `sk_test
 
 Until live keys are pasted, test keys remain usable for smoke tests after signing in and selecting an organization (`/select-org`).
 
-## Turning off demo mode
+## Turning on Clerk auth (production)
 
-When Clerk / Cursor / GitHub are ready:
+NetFree whitelabel is complete — production uses Clerk sign-in:
 
-1. Set real credentials (`NEXT_PUBLIC_CLERK_*`, `CLERK_SECRET_KEY`, `CURSOR_API_KEY`, `GITHUB_APP_*`, …)
-2. Remove or set to `0`: `OPEN_ACCESS`, `NEXT_PUBLIC_OPEN_ACCESS`, `ALLOW_DEMO_AUTH`, `NEXT_PUBLIC_ALLOW_DEMO_AUTH`, `CURSOR_MOCK`, `GITHUB_MOCK`, `RAILWAY_MOCK`
-3. Redeploy web + worker
-4. Follow [runbooks.md](./runbooks.md) production wiring checklist
-5. Prefer `pk_live_` / `sk_live_` on the custom domain (see above)
+1. Set real credentials (`NEXT_PUBLIC_CLERK_*`, `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SECRET`, …)
+2. Set `OPEN_ACCESS=0` / `NEXT_PUBLIC_OPEN_ACCESS=0` on **web and worker**
+3. Redeploy **web** from source (rebuilds client bundle with `NEXT_PUBLIC_OPEN_ACCESS=0`)
+4. Redeploy worker
+5. Follow [runbooks.md](./runbooks.md) production wiring checklist
+
+### Local open access (dev only)
+
+For no-login local dev, set `OPEN_ACCESS=1` / `NEXT_PUBLIC_OPEN_ACCESS=1` in `.env`.
+
+## Turning off mock integrations
+
+When Cursor / GitHub are ready:
+
+1. Set `CURSOR_API_KEY`, `GITHUB_APP_*`, remove `CURSOR_MOCK`, `GITHUB_MOCK`
+2. Prefer `pk_live_` / `sk_live_` on the custom domain (see Clerk section above)
 
 ### GitHub App (one-click)
 

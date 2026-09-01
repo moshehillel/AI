@@ -20,13 +20,12 @@ import {
 
 const REPO = "moshehillel/AI";
 
-/** Shared open-access vars so the first deploy works without Clerk login.
- *  Production overrides CURSOR_MOCK=0 + CURSOR_API_KEY on Railway (do not re-apply demoEnv blindly).
- *  Set OPEN_ACCESS=0 / NEXT_PUBLIC_OPEN_ACCESS=0 when Clerk/NetFree is ready. */
-const demoEnv = {
+/** Production defaults — Clerk auth on (NetFree whitelabel complete).
+ *  Override CURSOR_MOCK / GITHUB_MOCK / RAILWAY_MOCK per service as needed. */
+const productionEnv = {
   NODE_ENV: "production",
-  OPEN_ACCESS: "1",
-  NEXT_PUBLIC_OPEN_ACCESS: "1",
+  OPEN_ACCESS: "0",
+  NEXT_PUBLIC_OPEN_ACCESS: "0",
   ALLOW_DEMO_AUTH: "0",
   NEXT_PUBLIC_ALLOW_DEMO_AUTH: "0",
   // Prefer live agent API when a key is present; bootstrap may still set CURSOR_MOCK=1 explicitly.
@@ -53,7 +52,7 @@ export default defineRailway(() => {
     healthcheck: "/api/health",
     healthcheckTimeout: 30,
     env: {
-      ...demoEnv,
+      ...productionEnv,
       PORT: "3000",
       HOSTNAME: "0.0.0.0",
       DATABASE_URL: db.env.DATABASE_URL,
@@ -70,7 +69,7 @@ export default defineRailway(() => {
     source: github(REPO),
     start: "pnpm --filter @automation-studio/worker start",
     env: {
-      ...demoEnv,
+      ...productionEnv,
       DATABASE_URL: db.env.DATABASE_URL,
       REDIS_URL: cache.env.REDIS_URL,
       WORKER_CONCURRENCY: "5",

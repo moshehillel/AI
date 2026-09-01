@@ -45,8 +45,9 @@ function StaffUnlockForm() {
       <section className="panel rise space-y-4 p-6">
         <h1 className="brand-mark text-3xl">Staff login</h1>
         <p className="muted text-sm">
-          Enter the admin password to open developer tools on this browser. The
-          public customer site stays open without login.
+          Enter the admin password to open developer tools on this browser when
+          you do not have a Clerk developer or admin role. With Clerk auth,
+          sign in with an org:developer or org:admin account instead.
         </p>
         <label className="block space-y-1.5">
           <span className="text-sm muted">Password</span>

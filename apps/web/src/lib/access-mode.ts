@@ -1,13 +1,14 @@
 /**
- * Access modes for Koda while Clerk is blocked (e.g. NetFree).
+ * Access modes for Koda.
  *
- * OPEN_ACCESS=1 — temporary single-customer open site: no login, fixed
- * EMPLOYEE (customer) on demo-co. Not demo mode — no role switcher.
+ * OPEN_ACCESS=1 — local single-customer mode: no login, fixed EMPLOYEE on
+ * demo-co. Not demo mode — no role switcher. Do not use in production.
  *
- * ALLOW_DEMO_AUTH=1 — local explore only. Keep at 0 while OPEN_ACCESS is on.
+ * OPEN_ACCESS=0 — production: Clerk sign-in + Organizations (default).
  *
- * Set both server and NEXT_PUBLIC_ variants so middleware/API and client UI agree.
- * When OPEN_ACCESS=0 (and ALLOW_DEMO_AUTH=0), Clerk protect + real sessions apply.
+ * ALLOW_DEMO_AUTH=1 — local explore with role switcher. Keep at 0 in production.
+ *
+ * Set both server and NEXT_PUBLIC_ variants so middleware/API and client agree.
  */
 
 export function isOpenAccess(): boolean {

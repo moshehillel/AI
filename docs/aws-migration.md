@@ -4,6 +4,30 @@ Migrate **Koda platform hosting only** from Railway to the dedicated `koda-platf
 
 **Same AWS account as Whiteglove is OK** — use a **separate Terraform state** (dedicated S3 bucket/key), a **dedicated VPC** (`10.20.0.0/16` by default — verify no CIDR overlap with Whiteglove), and the `Scope=koda-only` tag. Do **not** share Whiteglove state buckets, VPCs, or resource name prefixes. Whiteglove client automations remain in their own Terraform stack.
 
+## One-command deploy (operator)
+
+With AWS credentials in `1.txt` (key id + secret on one line) or `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars:
+
+```bash
+./scripts/aws-koda-deploy.sh
+```
+
+The script bootstraps Terraform state, applies `koda-platform` infra, copies Railway vars into Secrets Manager, builds/pushes ECR images, redeploys ECS, and prints ALB health + DNS cutover target. **Railway is left running** until public DNS verification passes.
+
+### Latest deploy attempt (2026-09-01)
+
+| Step | Status |
+| --- | --- |
+| AWS CLI + Docker installed on agent VM | Done |
+| Railway vars exported → `/tmp/koda-app-secrets.json` (16 keys) | Done |
+| `scripts/aws-koda-deploy.sh` automation | Done |
+| AWS credentials (`1.txt`) on agent VM | **Blocked** — file at `C:\Users\Moshe\Downloads\1.txt` not uploaded to workspace |
+| Terraform apply / ECR / ECS | **Blocked** — awaiting AWS credentials |
+| Railway production | **Still live** — `https://koda.advancedautomations.net/api/ready` healthy |
+| DNS | **Still Railway** — CNAME `j8333zn7.up.railway.app` |
+
+**Unblock:** Upload `1.txt` to the agent workspace root or set `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, then re-run `./scripts/aws-koda-deploy.sh`.
+
 ## Before you start
 
 - [ ] Clerk production on `clerk.advancedautomations.net` (NetFree whitelabel complete)

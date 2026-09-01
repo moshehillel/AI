@@ -63,7 +63,13 @@ backend "s3" {
 
 ## First-time apply
 
-Run from your machine with Whiteglove account credentials:
+**Automated (recommended):** from repo root with AWS credentials in env or `1.txt`:
+
+```bash
+./scripts/aws-koda-deploy.sh
+```
+
+**Manual:** run from your machine with Whiteglove account credentials:
 
 ```bash
 cd infra/aws/terraform

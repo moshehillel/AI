@@ -177,17 +177,73 @@ Current: `koda` CNAME → Railway hostname.
 - [ ] Archive Railway Postgres snapshot if data was migrated
 - [ ] Document rollback: repoint CNAME to Railway hostname
 
-## Rollback
-
-1. Repoint `koda` CNAME back to Railway hostname
-2. Redeploy Railway web+worker if env changed
-3. AWS stack can remain running for retry
-
 ## Post-cutover
 
 - Enable GitHub Actions: `AWS_DEPLOY_ENABLED=true`
 - Remove Railway-specific secrets from customer-facing docs
-- Keep Railway project read-only for one week, then decommission
+- Decommission Railway — see [Railway decommission](#railway-decommission) below
+
+## Railway decommission
+
+**Prerequisites (all required before deleting Railway):**
+
+| Check | Command / action |
+| --- | --- |
+| AWS ECS web + worker stable | `aws ecs describe-services --cluster koda-platform-production-cluster --services koda-platform-production-web koda-platform-production-worker` |
+| AWS `/api/ready` healthy on public URL | `curl -fsS https://koda.advancedautomations.net/api/ready` |
+| DNS on AWS ALB (not Railway) | `dig +short koda.advancedautomations.net CNAME` → `*.elb.amazonaws.com` (not `*.up.railway.app`) |
+| Clerk webhook + origins on AWS URL | Clerk Dashboard → Webhooks + Allowed origins |
+| Smoke test passed | Sign in, `/projects`, planning message, worker job in CloudWatch |
+
+**Do not delete Railway until every row above passes.** Pre-cutover, DNS still points to Railway (`j8333zn7.up.railway.app`).
+
+### Cutover + deletion checklist (operator)
+
+#### Phase 1 — AWS live (before DNS)
+
+1. `cd infra/aws/terraform && terraform apply` (same AWS account as Whiteglove; `create_github_oidc_provider=false` if OIDC exists)
+2. Populate Secrets Manager app secret (Clerk live keys, `ENCRYPTION_KEY`, Cursor, GitHub, `OPEN_ACCESS=0`)
+3. Set GitHub `AWS_DEPLOY_ENABLED=true`, `AWS_DEPLOY_ROLE_ARN`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+4. Run **Deploy Koda to AWS** workflow; wait for ECS stable
+5. Optional DB migrate: `pg_dump` from Railway → `pg_restore` to RDS (**same `ENCRYPTION_KEY`**)
+6. Hit ALB directly — `curl -fsS` against `terraform output -raw alb_dns_name` `/api/ready` (may need `--resolve` for ACM)
+
+#### Phase 2 — DNS cutover
+
+1. Lower TTL on `koda.advancedautomations.net` to 300s (24h before)
+2. Netlify DNS: `koda` CNAME → `terraform output -raw alb_dns_name`
+3. Wait propagation; verify CNAME is ALB
+4. `curl -fsS https://koda.advancedautomations.net/api/ready`
+5. Clerk: confirm webhook and allowed origin
+6. Smoke: Clerk sign-in → org → program → planning message → worker log
+
+#### Phase 3 — Railway decommission (T+24h after stable AWS)
+
+Railway project: **`bountiful-fascination`** (ID `8aede5cc-a506-4971-9f4b-875de921da11`).
+
+```bash
+railway link -p bountiful-fascination -e production
+
+# 1. Remove custom domain from Railway web (dashboard if CLI lacks remove)
+# 2. Scale down app services
+railway down --service worker -y
+railway down --service web -y
+
+# 3. Snapshot Postgres if data was not migrated (dashboard → Postgres → backup)
+# 4. Delete data services
+railway down --service Postgres -y
+railway down --service Redis -y
+
+# 5. Delete project (dashboard: Project Settings → Delete Project)
+```
+
+**Do not delete:** GitHub repo, AWS Whiteglove resources, or other Railway projects.
+
+## Rollback
+
+1. Repoint `koda` CNAME back to Railway hostname (`j8333zn7.up.railway.app` or `web-production-98ce0.up.railway.app`)
+2. `railway up --service web -d -y` and `railway up --service worker -d -y` if services were scaled down
+3. AWS stack can remain for retry
 
 ## Auth verification
 

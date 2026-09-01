@@ -12,11 +12,18 @@ import { transitionChangeRequest } from "../lib/transition.js";
 import { loadPlanningAttachmentsForAgent } from "../lib/planning-attachment.js";
 import { clearLiveProgress } from "../lib/planning-persist.js";
 import { mirrorPlanningStream } from "../lib/planning-stream.js";
+import { scheduleEmptyReplyRetry } from "../lib/planning-empty-retry.js";
+import {
+  flushQueuedFollowUp,
+  markTurnInFlight,
+  startPlanningHeartbeat,
+} from "../lib/planning-heartbeat.js";
 import {
   AGENT_TURN_TIMEOUT_MS,
   attachmentLoadFailureMessage,
   failPlanningTurn,
   finalizePlanModeTurn,
+  isEmptyAgentReply,
   planningTurnErrorMessage,
   postTurnMessage,
   withTimeout,
@@ -42,6 +49,20 @@ export async function handleCursorStart(data: CursorStartJobData) {
 
   if (cr.status === "AWAITING_HIGH_RISK_APPROVAL") {
     throw new Error("Blocked: high-risk approval required before implementation");
+  }
+
+  const runningTurn = await db.agentRun.count({
+    where: { changeRequestId: cr.id, status: "RUNNING" },
+  });
+  if (runningTurn > 0 && !data.isEmptyReplyRetry) {
+    console.info(
+      `[cursor-start] defer — turn in flight cr=${cr.id}`,
+    );
+    await enqueueJob("cursor.start-agent", data, {
+      delay: 5000,
+      jobId: `cursor-start-${cr.id}`,
+    });
+    return { deferred: true, reason: "turn_in_flight" };
   }
 
   const cap = await assertUnderUsageSoftCap(data.companyId);
@@ -209,7 +230,20 @@ export async function handleCursorStart(data: CursorStartJobData) {
 
   let streamedText = "";
   let result: Awaited<ReturnType<typeof wait>>;
+  const turnStartedMs = Date.now();
+  let stopHeartbeat: (() => void) | undefined;
+
   try {
+    if (data.mode === "plan") {
+      await markTurnInFlight(cr.id, priorMeta, "Connecting…");
+      stopHeartbeat = startPlanningHeartbeat({
+        changeRequestId: cr.id,
+        priorMeta,
+        startedAt: turnStartedMs,
+        baseLabel: "Connecting planning session",
+      });
+    }
+
     const [waitResult, mirrored] = await Promise.all([
       withTimeout(wait(), AGENT_TURN_TIMEOUT_MS, "AI reply"),
       data.mode === "plan"
@@ -223,6 +257,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
     result = waitResult;
     streamedText = mirrored;
   } catch (error) {
+    stopHeartbeat?.();
     const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
     if (current?.status === "CANCELLED") {
       console.info(`[cursor-start] cancelled mid-wait cr=${cr.id}`);
@@ -234,18 +269,25 @@ export async function handleCursorStart(data: CursorStartJobData) {
       data: { status: "FAILED", finishedAt: new Date() },
     });
     const reason = error instanceof Error ? error.message : "Something went wrong";
+    const isTimeout = /timed out/i.test(reason);
     if (data.mode === "plan") {
       await failPlanningTurn({
         changeRequestId: cr.id,
         priorMeta,
         reason,
         agentRunId: agentRun.id,
+        hadAttachments: attachmentRefs.length > 0,
+        wasLongMessage: Boolean(data.wasLongMessage),
+        isTimeout,
+        userMessageId: data.userMessageId,
       });
       return { ok: false, reason, agentId, mode: data.mode };
     }
     await postTurnMessage(cr.id, planningTurnErrorMessage(reason), "ASSISTANT");
     throw error;
   }
+
+  stopHeartbeat?.();
 
   const afterWait = await db.agentRun.findUnique({ where: { id: agentRun.id } });
   if (afterWait?.status === "CANCELLED") {
@@ -271,6 +313,26 @@ export async function handleCursorStart(data: CursorStartJobData) {
       })
     )?.planningMeta ?? priorMeta) as PlanningMeta;
 
+    if (
+      isEmptyAgentReply(result, streamedText, freshMeta.liveDraft) &&
+      (await scheduleEmptyReplyRetry({
+        changeRequestId: cr.id,
+        priorMeta: freshMeta,
+        jobName: "cursor.start-agent",
+        jobData: data,
+        result,
+        streamedText,
+        hadAttachments: attachmentRefs.length > 0,
+        wasLongMessage: Boolean(data.wasLongMessage),
+      }))
+    ) {
+      await db.agentRun.update({
+        where: { id: agentRun.id },
+        data: { status: "SUCCEEDED", finishedAt: new Date() },
+      });
+      return { ok: false, retryScheduled: true, agentId, mode: data.mode };
+    }
+
     await finalizePlanModeTurn({
       changeRequestId: cr.id,
       priorMeta: freshMeta,
@@ -279,6 +341,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
       userPrompt: data.prompt,
       hadAttachments: attachmentRefs.length > 0,
     });
+    await flushQueuedFollowUp(cr.id, data.companyId);
     if (cr.kind === "PROGRAM") {
       // Stay in planning until client submits to developer
       await transitionChangeRequest({

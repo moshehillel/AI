@@ -60,6 +60,12 @@ type AgentRunSnapshot = {
   finishedAt: string | null;
 };
 
+function isRecoverableTurnError(content: string): boolean {
+  return /couldn't finish that reply|finished without a reply|taking longer than expected/i.test(
+    content,
+  );
+}
+
 function isAwaitingAssistantReply(messages: Message[]): boolean {
   let lastUserIdx = -1;
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -281,6 +287,11 @@ export function ChatPanel({
   const [progressSteps, setProgressSteps] = useState<string[]>([]);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [replyTimedOut, setReplyTimedOut] = useState(false);
+  const [serverQueued, setServerQueued] = useState(false);
+  const [highDemandMessage, setHighDemandMessage] = useState<string | null>(
+    null,
+  );
+  const [lastSentContent, setLastSentContent] = useState<string | null>(null);
   const thinkingStarted = useRef<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -324,6 +335,16 @@ export function ChatPanel({
     working,
     status,
   });
+  const showRetry =
+    !showThinking &&
+    !chatLocked &&
+    (replyTimedOut ||
+      (messages.length > 0 &&
+        messages[messages.length - 1]?.role === "ASSISTANT" &&
+        isRecoverableTurnError(messages[messages.length - 1]!.content)));
+  const liveThoughtTitle = liveProgress
+    ? liveProgress.replace(/\s*\(\d+s\)$/, "")
+    : `Thought ${thoughtSeconds || 1}s`;
   const liveThoughtSummary = liveProgress || label;
   const queuedPreview = queued
     ? queued.content.trim() ||
@@ -351,6 +372,10 @@ export function ChatPanel({
           messages?: Message[];
           liveProgress?: string | null;
           liveDraft?: string | null;
+          inFlightTurnAt?: string | null;
+          serverQueued?: boolean;
+          highDemandMessage?: string | null;
+          workerHeartbeatAt?: string | null;
           plan?: { content?: string } | null;
           latestAgentRun?: AgentRunSnapshot | null;
         };
@@ -378,6 +403,12 @@ export function ChatPanel({
           }
           if (typeof data.liveDraft !== "undefined") {
             setLiveDraft(data.liveDraft);
+          }
+          if (typeof data.serverQueued === "boolean") {
+            setServerQueued(data.serverQueued);
+          }
+          if (typeof data.highDemandMessage !== "undefined") {
+            setHighDemandMessage(data.highDemandMessage);
           }
           if (data.plan?.content) {
             setPlanContent(data.plan.content);
@@ -612,6 +643,7 @@ export function ChatPanel({
     setTurnInterrupted(false);
     setReplyTimedOut(false);
     setAwaitingReply(true);
+    setLastSentContent(content);
     startTransition(async () => {
       const response = await fetch(
         `/api/change-requests/${changeRequestId}/messages`,
@@ -633,7 +665,9 @@ export function ChatPanel({
         const json = (await response.json()) as {
           message: Message;
           assistantMessage?: Message | null;
+          turnQueued?: boolean;
         };
+        if (json.turnQueued) setServerQueued(true);
         setMessages((prev) => {
           const next = [...prev, json.message];
           if (json.assistantMessage) next.push(json.assistantMessage);
@@ -660,6 +694,22 @@ export function ChatPanel({
         setAttachError(err || "Could not send — try again.");
       }
     });
+  }
+
+  function retryLastMessage() {
+    let content = lastSentContent;
+    if (!content) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        if (messages[i]?.role === "USER") {
+          content = messages[i]!.content;
+          break;
+        }
+      }
+    }
+    if (!content?.trim()) return;
+    setReplyTimedOut(false);
+    setServerQueued(false);
+    sendMessage({ content, force: true });
   }
 
   function editQueued() {
@@ -1010,7 +1060,7 @@ export function ChatPanel({
         {showThinking ? (
           <>
             <ThoughtBlock
-              title={`Thought ${thoughtSeconds || 1}s`}
+              title={liveThoughtTitle}
               summary={liveThoughtSummary}
               steps={progressSteps}
               openDefault
@@ -1033,9 +1083,45 @@ export function ChatPanel({
             <p className="agent-msg-body" style={{ margin: 0 }}>
               {turnInterrupted
                 ? "That response was stopped. Send your message again when you are ready."
-                : "This is taking longer than expected and no reply arrived. Click Interrupt below, then send your message again. If you attached files, try one at a time or a smaller PDF."}
+                : "This is taking longer than expected and no reply arrived. Use Retry last message below, or Interrupt and send again. If you attached files, try one at a time or a smaller PDF."}
             </p>
+            {!turnInterrupted ? (
+              <button
+                type="button"
+                className="btn btn-primary mt-3"
+                disabled={inputBusy}
+                onClick={retryLastMessage}
+              >
+                Retry last message
+              </button>
+            ) : null}
           </div>
+        ) : null}
+
+        {showRetry && !replyTimedOut ? (
+          <div className="composer-submit mx-auto mt-2 px-1">
+            <button
+              type="button"
+              className="btn btn-primary w-full"
+              disabled={inputBusy}
+              onClick={retryLastMessage}
+            >
+              Retry last message
+            </button>
+          </div>
+        ) : null}
+
+        {highDemandMessage && showThinking ? (
+          <p className="text-xs muted text-center mt-2" role="status">
+            {highDemandMessage}
+          </p>
+        ) : null}
+
+        {serverQueued && showThinking ? (
+          <p className="text-xs muted text-center mt-2" role="status">
+            Your note is queued on the server — it will send when the current reply
+            finishes.
+          </p>
         ) : null}
 
         {isBuildLocked ? (

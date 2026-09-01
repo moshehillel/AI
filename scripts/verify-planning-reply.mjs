@@ -1,14 +1,21 @@
 /** Live smoke test: long text-only planning message gets a real Koda reply. */
 const BASE = process.env.KODA_BASE_URL ?? "https://koda.advancedautomations.net";
 
-const STAFFING_EXCERPT = `NYC Early Intervention staffing workflow:
+const STAFFING_EXCERPT = `NYC Early Intervention staffing workflow (long verify paste):
 Each week our coordinators pull authorized service hours from the municipal EI portal,
 match them against therapist caseloads in our scheduling spreadsheet, and email branch
 managers when a slot is unfilled or a therapist is over capacity. We need this to run
 automatically every Monday at 6am, flag exceptions in red, and post a summary to Slack
 #ei-staffing. Systems involved: NYC EI portal (browser login), Google Sheets master roster,
 Slack workspace. Edge cases: duplicate authorizations, therapists on PTO, new intakes with
-missing Medicaid IDs. Success = managers get one consolidated report without manual exports.`;
+missing Medicaid IDs. Success = managers get one consolidated report without manual exports.
+
+Additional detail for robustness testing — branch managers currently re-check the portal
+when email totals look wrong, which adds 2–3 hours every Monday. Therapists on PTO should
+still appear on the roster but flagged as unavailable. New intakes missing Medicaid IDs
+should land in a separate "needs data" tab, not block the main report. If the portal export
+format changes, we need a visible error in Slack rather than silent bad numbers. Coordinators
+also want a CSV attachment alongside the Slack summary for archiving.`.repeat(2);
 
 async function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -53,7 +60,7 @@ async function main() {
     const created = await createRes.json();
     crId = created.changeRequest?.id ?? created.id;
     console.log("created", crId);
-    await sleep(8000);
+    await sleep(25000);
   }
 
   const msgRes = await fetch(`${BASE}/api/change-requests/${crId}/messages`, {

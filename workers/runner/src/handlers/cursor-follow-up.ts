@@ -10,11 +10,18 @@ import { transitionChangeRequest } from "../lib/transition.js";
 import { loadPlanningAttachmentsForAgent } from "../lib/planning-attachment.js";
 import { clearLiveProgress } from "../lib/planning-persist.js";
 import { mirrorPlanningStream } from "../lib/planning-stream.js";
+import { scheduleEmptyReplyRetry } from "../lib/planning-empty-retry.js";
+import {
+  flushQueuedFollowUp,
+  markTurnInFlight,
+  startPlanningHeartbeat,
+} from "../lib/planning-heartbeat.js";
 import {
   AGENT_TURN_TIMEOUT_MS,
   attachmentLoadFailureMessage,
   failPlanningTurn,
   finalizePlanModeTurn,
+  isEmptyAgentReply,
   planningTurnErrorMessage,
   postTurnMessage,
   withTimeout,
@@ -167,6 +174,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
   });
 
   const agentRunStartedAt = new Date();
+  const turnStartedMs = Date.now();
   const agentRun = await db.agentRun.create({
     data: {
       changeRequestId: cr.id,
@@ -178,8 +186,13 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
   });
 
   let result: Awaited<ReturnType<Awaited<ReturnType<typeof resumeAndSend>>["wait"]>>;
+  let stopHeartbeat: (() => void) | undefined;
 
   try {
+    if (mode === "plan") {
+      await markTurnInFlight(cr.id, priorMeta, "Starting…");
+    }
+
     let waitFn: Awaited<ReturnType<typeof resumeAndSend>>["wait"];
     let runStream: Awaited<ReturnType<typeof resumeAndSend>>["run"];
     let immediateRunId: string | undefined;
@@ -221,6 +234,11 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
 
     if (mode === "plan") {
       await writeLiveProgress(cr.id, priorMeta, "Starting…", null);
+      stopHeartbeat = startPlanningHeartbeat({
+        changeRequestId: cr.id,
+        priorMeta,
+        startedAt: turnStartedMs,
+      });
     }
 
     let streamedText = "";
@@ -238,6 +256,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       result = waitResult;
       streamedText = mirrored;
     } catch (error) {
+      stopHeartbeat?.();
       const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
       if (current?.status === "CANCELLED") {
         console.info(`[cursor-follow-up] cancelled mid-wait cr=${cr.id}`);
@@ -250,6 +269,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       });
       const reason =
         error instanceof Error ? error.message : "Something went wrong";
+      const isTimeout = /timed out/i.test(reason);
       if (mode === "plan") {
         await failPlanningTurn({
           changeRequestId: cr.id,
@@ -257,6 +277,9 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
           reason,
           agentRunId: agentRun.id,
           hadAttachments: attachmentRefs.length > 0,
+          wasLongMessage: Boolean(data.wasLongMessage),
+          isTimeout,
+          userMessageId: data.userMessageId,
         });
         return { ok: false, reason };
       }
@@ -267,6 +290,8 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       );
       throw error;
     }
+
+    stopHeartbeat?.();
 
     const afterWait = await db.agentRun.findUnique({ where: { id: agentRun.id } });
     if (afterWait?.status === "CANCELLED") {
@@ -322,6 +347,26 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
         })
       )?.planningMeta ?? priorMeta) as PlanningMeta;
 
+      if (
+        isEmptyAgentReply(result, streamedText, freshMeta.liveDraft) &&
+        (await scheduleEmptyReplyRetry({
+          changeRequestId: cr.id,
+          priorMeta: freshMeta,
+          jobName: "cursor.follow-up",
+          jobData: data,
+          result,
+          streamedText,
+          hadAttachments: attachmentRefs.length > 0,
+          wasLongMessage: Boolean(data.wasLongMessage),
+        }))
+      ) {
+        await db.agentRun.update({
+          where: { id: agentRun.id },
+          data: { status: "SUCCEEDED", finishedAt: new Date() },
+        });
+        return { ok: false, retryScheduled: true };
+      }
+
       await finalizePlanModeTurn({
         changeRequestId: cr.id,
         priorMeta: freshMeta,
@@ -331,6 +376,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
         hadAttachments: attachmentRefs.length > 0,
         wasInterrupted: Boolean(recentInterrupt),
       });
+      await flushQueuedFollowUp(cr.id, data.companyId);
       if (cr.kind !== "PROGRAM") {
         await transitionChangeRequest({
           changeRequestId: cr.id,
@@ -369,6 +415,8 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
           reason,
           agentRunId: agentRun.id,
           hadAttachments: attachmentRefs.length > 0,
+          wasLongMessage: Boolean(data.wasLongMessage),
+          userMessageId: data.userMessageId,
         });
       }
       return { ok: false, reason };

@@ -55,6 +55,9 @@ export async function GET(
           const meta = (cr.planningMeta ?? {}) as {
             liveProgress?: string | null;
             liveDraft?: string | null;
+            inFlightTurnAt?: string | null;
+            queuedFollowUp?: { prompt?: string } | null;
+            workerHeartbeatAt?: string | null;
           };
 
           const latestAgentRun = cr.agentRuns[0] ?? null;
@@ -73,6 +76,9 @@ export async function GET(
             secretKeys: credentialSecrets.map((s) => s.keyName),
             liveProgress: meta.liveProgress ?? null,
             liveDraft: meta.liveDraft ?? null,
+            inFlightTurnAt: meta.inFlightTurnAt ?? null,
+            serverQueued: Boolean(meta.queuedFollowUp?.prompt),
+            workerHeartbeatAt: meta.workerHeartbeatAt ?? null,
             updatedAt: cr.updatedAt.toISOString(),
           });
 
@@ -105,6 +111,9 @@ export async function GET(
                 : null,
               liveProgress: meta.liveProgress ?? null,
               liveDraft: meta.liveDraft ?? null,
+              inFlightTurnAt: meta.inFlightTurnAt ?? null,
+              serverQueued: Boolean(meta.queuedFollowUp?.prompt),
+              workerHeartbeatAt: meta.workerHeartbeatAt ?? null,
               secretKeys: credentialSecrets.map((s) => ({
                 keyName: s.keyName,
                 createdAt: s.createdAt.toISOString(),

@@ -20,6 +20,7 @@ import {
   isLiveCursorConfigured,
   planningAgentInstructions,
   clientVerifyFollowUpPrompt,
+  preparePlanningUserPrompt,
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { enqueueJob } from "@automation-studio/jobs";
@@ -88,6 +89,124 @@ function normalizeAttachments(body: z.infer<typeof bodySchema>): AttachmentItem[
     out.push(a);
   }
   return out.slice(0, 5);
+}
+
+function buildPlanFollowUpPrompt(userContent: string): {
+  prompt: string;
+  wasLong: boolean;
+} {
+  const prepared = preparePlanningUserPrompt(userContent);
+  return {
+    prompt: `${planningAgentInstructions()}\n\nClient message:\n${prepared.prompt}`,
+    wasLong: prepared.wasLong,
+  };
+}
+
+async function enqueueOrQueuePlanningTurn(opts: {
+  changeRequestId: string;
+  companyId: string;
+  userMessageId: string;
+  followUpPrompt?: string;
+  startPrompt?: string;
+  wasLongMessage: boolean;
+  attachmentRefs: string[];
+  delayMs?: number;
+  mode?: "plan" | "agent";
+}): Promise<{ queued: boolean }> {
+  const runningTurn = await db.agentRun.count({
+    where: { changeRequestId: opts.changeRequestId, status: "RUNNING" },
+  });
+  const row = await db.changeRequest.findUnique({
+    where: { id: opts.changeRequestId },
+    select: { planningMeta: true, cursorAgentId: true },
+  });
+  const meta = (row?.planningMeta ?? {}) as PlanningMeta;
+  const turnBusy = runningTurn > 0 || Boolean(meta.inFlightTurnAt);
+
+  const progressLabel = opts.wasLongMessage
+    ? "Processing your long note…"
+    : turnBusy
+      ? "Queued — will send when the current reply finishes…"
+      : null;
+
+  if (turnBusy && opts.followUpPrompt) {
+    await db.changeRequest.update({
+      where: { id: opts.changeRequestId },
+      data: {
+        planningMeta: {
+          ...meta,
+          queuedFollowUp: {
+            prompt: opts.followUpPrompt,
+            attachmentRefs: opts.attachmentRefs.length
+              ? opts.attachmentRefs
+              : undefined,
+            userMessageId: opts.userMessageId,
+          },
+          ...(progressLabel ? { liveProgress: progressLabel } : {}),
+        } as Prisma.InputJsonValue,
+        updatedAt: new Date(),
+      },
+    });
+    return { queued: true };
+  }
+
+  if (progressLabel) {
+    await db.changeRequest.update({
+      where: { id: opts.changeRequestId },
+      data: {
+        planningMeta: {
+          ...meta,
+          liveProgress: progressLabel,
+        } as Prisma.InputJsonValue,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  const jobOpts = {
+    delay: opts.delayMs,
+    jobId: opts.followUpPrompt
+      ? `cursor-follow-up-${opts.changeRequestId}`
+      : `cursor-start-${opts.changeRequestId}`,
+  };
+
+  if (opts.followUpPrompt && row?.cursorAgentId) {
+    await enqueueJob(
+      "cursor.follow-up",
+      {
+        changeRequestId: opts.changeRequestId,
+        companyId: opts.companyId,
+        prompt: opts.followUpPrompt,
+        mode: opts.mode ?? "plan",
+        attachmentRefs: opts.attachmentRefs.length
+          ? opts.attachmentRefs
+          : undefined,
+        attachmentRef: opts.attachmentRefs[0],
+        wasLongMessage: opts.wasLongMessage,
+        userMessageId: opts.userMessageId,
+      },
+      jobOpts,
+    );
+  } else if (opts.startPrompt) {
+    await enqueueJob(
+      "cursor.start-agent",
+      {
+        changeRequestId: opts.changeRequestId,
+        companyId: opts.companyId,
+        mode: "plan",
+        prompt: opts.startPrompt,
+        attachmentRefs: opts.attachmentRefs.length
+          ? opts.attachmentRefs
+          : undefined,
+        attachmentRef: opts.attachmentRefs[0],
+        wasLongMessage: opts.wasLongMessage,
+        userMessageId: opts.userMessageId,
+      },
+      jobOpts,
+    );
+  }
+
+  return { queued: false };
 }
 
 function composeUserContent(
@@ -202,7 +321,7 @@ export async function POST(
         },
         update: {
           externalRef: `chat://${cr.id}/${secret.keyName}`,
-          ciphertext: encryptSecret(secret.value),
+          ciphertext: encryptSecret(secret.value, ctx.company.id),
           provider: "ENCRYPTED",
           changeRequestId: cr.id,
         },
@@ -214,7 +333,7 @@ export async function POST(
           provider: "ENCRYPTED",
           keyName: secret.keyName,
           externalRef: `chat://${cr.id}/${secret.keyName}`,
-          ciphertext: encryptSecret(secret.value),
+          ciphertext: encryptSecret(secret.value, ctx.company.id),
         },
       });
     }
@@ -311,31 +430,46 @@ export async function POST(
       content: string;
       createdAt: string;
     } | null = null;
+    let turnQueued = false;
+
+    const planFollowUp = buildPlanFollowUpPrompt(redacted);
 
     if (cr.cursorAgentId) {
-      const verifyPrompt =
-        fullForVerify && isProgramVerifyPhase(cr.status)
-          ? clientVerifyFollowUpPrompt({
-              title: cr.title,
-              planMarkdown:
-                fullForVerify.plans[0]?.content ??
-                (cr.planningMeta as { planMarkdown?: string } | null)
-                  ?.planMarkdown ??
-                cr.description,
-              customerMessage: redacted,
-              previewUrl: fullForVerify.previews[0]?.url,
-            })
-          : redacted;
-      await enqueueJob("cursor.follow-up", {
-        changeRequestId: cr.id,
-        companyId: ctx.company.id,
-        prompt: verifyPrompt,
-        mode: forcePlan ? "plan" : "agent",
-        attachmentRef: fileAttachmentRefs[0],
-        attachmentRefs: fileAttachmentRefs.length
-          ? fileAttachmentRefs
-          : undefined,
-      });
+      if (fullForVerify && isProgramVerifyPhase(cr.status)) {
+        const verifyPrompt = clientVerifyFollowUpPrompt({
+          title: cr.title,
+          planMarkdown:
+            fullForVerify.plans[0]?.content ??
+            (cr.planningMeta as { planMarkdown?: string } | null)
+              ?.planMarkdown ??
+            cr.description,
+          customerMessage: preparePlanningUserPrompt(redacted).prompt,
+          previewUrl: fullForVerify.previews[0]?.url,
+        });
+        await enqueueJob("cursor.follow-up", {
+          changeRequestId: cr.id,
+          companyId: ctx.company.id,
+          prompt: verifyPrompt,
+          mode: "agent",
+          attachmentRef: fileAttachmentRefs[0],
+          attachmentRefs: fileAttachmentRefs.length
+            ? fileAttachmentRefs
+            : undefined,
+          wasLongMessage: preparePlanningUserPrompt(redacted).wasLong,
+          userMessageId: message.id,
+        });
+      } else {
+        const { queued } = await enqueueOrQueuePlanningTurn({
+          changeRequestId: cr.id,
+          companyId: ctx.company.id,
+          userMessageId: message.id,
+          followUpPrompt: planFollowUp.prompt,
+          wasLongMessage: planFollowUp.wasLong,
+          attachmentRefs: fileAttachmentRefs,
+          mode: forcePlan ? "plan" : "agent",
+        });
+        turnQueued = queued;
+      }
     } else if (fullForVerify && isProgramVerifyPhase(cr.status)) {
       const repository = fullForVerify.project.repository;
       if (!repository) {
@@ -429,49 +563,41 @@ export async function POST(
           const bootstrapping = await db.agentRun.count({
             where: { changeRequestId: cr.id, status: "RUNNING" },
           });
-          if (bootstrapping > 0) {
-            await enqueueJob(
-              "cursor.follow-up",
-              {
-                changeRequestId: cr.id,
-                companyId: ctx.company.id,
-                prompt: `${planningAgentInstructions()}\n\nClient message:\n${redacted}`,
-                mode: "plan",
-                attachmentRef: fileAttachmentRefs[0],
-                attachmentRefs: fileAttachmentRefs.length
-                  ? fileAttachmentRefs
-                  : undefined,
-              },
-              {
-                delay: 12000,
-                jobId: `cursor-follow-up-${cr.id}`,
-              },
-            );
+          const startPrompt = buildPlanningStartPrompt({
+            title: cr.title,
+            description: cr.description,
+            messages: history.map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
+            planningMeta: currentMeta,
+          });
+
+          if (full.cursorAgentId || bootstrapping > 0) {
+            const { queued } = await enqueueOrQueuePlanningTurn({
+              changeRequestId: cr.id,
+              companyId: ctx.company.id,
+              userMessageId: message.id,
+              followUpPrompt: full.cursorAgentId ? planFollowUp.prompt : undefined,
+              startPrompt: full.cursorAgentId ? undefined : startPrompt,
+              wasLongMessage: planFollowUp.wasLong,
+              attachmentRefs: fileAttachmentRefs,
+              delayMs: bootstrapping > 0 && !full.cursorAgentId ? 12000 : undefined,
+            });
+            turnQueued = queued;
           } else {
-            await enqueueJob(
-              "cursor.start-agent",
-              {
-                changeRequestId: cr.id,
-                companyId: ctx.company.id,
-                mode: "plan",
-                prompt: buildPlanningStartPrompt({
-                  title: cr.title,
-                  description: cr.description,
-                  messages: history.map((m) => ({
-                    role: m.role,
-                    content: m.content,
-                  })),
-                  planningMeta: currentMeta,
-                }),
-                attachmentRef: fileAttachmentRefs[0],
-                attachmentRefs: fileAttachmentRefs.length
-                  ? fileAttachmentRefs
-                  : undefined,
-              },
-              { jobId: `cursor-start-${cr.id}` },
-            );
+            const { queued } = await enqueueOrQueuePlanningTurn({
+              changeRequestId: cr.id,
+              companyId: ctx.company.id,
+              userMessageId: message.id,
+              startPrompt,
+              wasLongMessage: planFollowUp.wasLong,
+              attachmentRefs: fileAttachmentRefs,
+            });
+            turnQueued = queued;
           }
         } else {
+          // Single bootstrap path: branch first, then cursor.start-agent from worker.
           await enqueueJob(
             "github.ensure-branch",
             {
@@ -480,23 +606,54 @@ export async function POST(
             },
             { jobId: `plan-branch-${cr.id}` },
           );
+          if (planFollowUp.wasLong) {
+            await db.changeRequest.update({
+              where: { id: cr.id },
+              data: {
+                planningMeta: {
+                  ...currentMeta,
+                  liveProgress: "Processing your long note…",
+                } as Prisma.InputJsonValue,
+                updatedAt: new Date(),
+              },
+            });
+          }
         }
 
-        const created = await db.changeRequestMessage.create({
-          data: {
-            changeRequestId: cr.id,
-            role: "SYSTEM",
-            content:
-              "Koda is connecting your live planning session… replies will appear here in a moment.",
-            metadata: { planningSessionStarting: true },
-          },
-        });
-        assistantMessage = {
-          id: created.id,
-          role: created.role,
-          content: created.content,
-          createdAt: created.createdAt.toISOString(),
-        };
+        if (!turnQueued) {
+          const created = await db.changeRequestMessage.create({
+            data: {
+              changeRequestId: cr.id,
+              role: "SYSTEM",
+              content:
+                "Koda is connecting your live planning session… replies will appear here in a moment.",
+              metadata: { planningSessionStarting: true },
+            },
+          });
+          assistantMessage = {
+            id: created.id,
+            role: created.role,
+            content: created.content,
+            createdAt: created.createdAt.toISOString(),
+          };
+        } else {
+          const created = await db.changeRequestMessage.create({
+            data: {
+              changeRequestId: cr.id,
+              role: "SYSTEM",
+              content: planFollowUp.wasLong
+                ? "Processing your long note — it will send when the current reply finishes."
+                : "Your message is queued — it will send when the current reply finishes.",
+              metadata: { planningTurnQueued: true },
+            },
+          });
+          assistantMessage = {
+            id: created.id,
+            role: created.role,
+            content: created.content,
+            createdAt: created.createdAt.toISOString(),
+          };
+        }
       } else {
         // No live Cursor path available — keyword-aware local planning.
         const { content, nextMeta, planMarkdown } = buildPlanningFollowUp({
@@ -568,6 +725,7 @@ export async function POST(
         createdAt: message.createdAt.toISOString(),
       },
       assistantMessage,
+      turnQueued,
     });
   } catch (error) {
     if (error instanceof AuthError) {

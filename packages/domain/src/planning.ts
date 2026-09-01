@@ -26,6 +26,20 @@ export type PlanningMeta = {
   liveProgress?: string | null;
   /** Partial assistant draft text while streaming (customer-facing). */
   liveDraft?: string | null;
+  /** ISO timestamp while a planning turn is in flight (idempotency). */
+  inFlightTurnAt?: string | null;
+  /** Follow-up held server-side until the current turn finishes. */
+  queuedFollowUp?: {
+    prompt: string;
+    attachmentRefs?: string[];
+    userMessageId?: string;
+  } | null;
+  /** Last user message id when a turn failed (one-click retry in UI). */
+  lastFailedUserMessageId?: string | null;
+  /** Worker heartbeat while waiting on Cursor (ISO timestamp). */
+  workerHeartbeatAt?: string | null;
+  /** Debug: which path recovered reply text on the last turn (no secrets). */
+  lastReplyRecovery?: string | null;
 };
 
 export const PLANNING_TOPICS: PlanningTopic[] = [

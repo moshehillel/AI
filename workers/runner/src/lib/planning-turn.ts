@@ -1,6 +1,10 @@
 import { db } from "@automation-studio/db";
 import type { AgentRunResult } from "@automation-studio/cursor-adapter";
 import type { PlanningMeta } from "@automation-studio/domain";
+import {
+  classifyEmptyReplyRecovery,
+  type EmptyReplyRecoveryPath,
+} from "@automation-studio/domain";
 import { clearLiveProgress, persistPlanModeReply } from "./planning-persist.js";
 
 /** Max time to wait for a Cursor agent turn before surfacing an error. */
@@ -45,14 +49,34 @@ export async function postTurnMessage(
 /** User-visible error when a planning turn fails or times out. */
 export function planningTurnErrorMessage(
   reason: string,
-  opts?: { hadAttachments?: boolean; isMetaQuestion?: boolean },
+  opts?: {
+    hadAttachments?: boolean;
+    isMetaQuestion?: boolean;
+    wasLongMessage?: boolean;
+    isTimeout?: boolean;
+  },
 ): string {
   const detail = reason.trim().replace(/\.$/, "");
-  const retryHint = opts?.isMetaQuestion
-    ? "You can send your original question again and I will pick up where we left off."
-    : opts?.hadAttachments
-      ? "Try **Interrupt**, then send your message again with one file at a time or a smaller PDF."
-      : "Try sending your message again. If it is very long, split it into two shorter messages.";
+  let retryHint: string;
+  if (opts?.isMetaQuestion) {
+    retryHint =
+      "You can send your original question again and I will pick up where we left off.";
+  } else if (opts?.hadAttachments && opts?.wasLongMessage) {
+    retryHint =
+      "Try **Retry last message** below with one file at a time, or split a long note into two shorter messages.";
+  } else if (opts?.hadAttachments) {
+    retryHint =
+      "Try **Retry last message** below with one file at a time or a smaller PDF.";
+  } else if (opts?.wasLongMessage) {
+    retryHint =
+      "Try **Retry last message** below, or split your note into two shorter messages.";
+  } else if (opts?.isTimeout) {
+    retryHint =
+      "Try **Retry last message** below — long notes sometimes need a second attempt.";
+  } else {
+    retryHint =
+      "Try **Retry last message** below. If it is very long, split it into two shorter messages.";
+  }
 
   return [
     "Sorry — I couldn't finish that reply.",
@@ -101,6 +125,10 @@ export async function failPlanningTurn(opts: {
   reason: string;
   agentRunId?: string;
   hadAttachments?: boolean;
+  wasLongMessage?: boolean;
+  isTimeout?: boolean;
+  userMessageId?: string;
+  recoveryPath?: EmptyReplyRecoveryPath;
 }) {
   if (opts.agentRunId) {
     await db.agentRun.updateMany({
@@ -109,13 +137,69 @@ export async function failPlanningTurn(opts: {
     });
   }
   await clearLiveProgress(opts.changeRequestId, opts.priorMeta);
+  if (opts.recoveryPath) {
+    console.info(
+      `[planning-turn] empty-reply recovery=${opts.recoveryPath} cr=${opts.changeRequestId} attachments=${Boolean(opts.hadAttachments)} long=${Boolean(opts.wasLongMessage)}`,
+    );
+  }
+  const { inFlightTurnAt: _a, workerHeartbeatAt: _b, ...restMeta } = opts.priorMeta;
+  await db.changeRequest.update({
+    where: { id: opts.changeRequestId },
+    data: {
+      planningMeta: {
+        ...restMeta,
+        inFlightTurnAt: null,
+        workerHeartbeatAt: null,
+        lastFailedUserMessageId: opts.userMessageId ?? restMeta.lastFailedUserMessageId ?? null,
+        lastReplyRecovery: opts.recoveryPath ?? restMeta.lastReplyRecovery ?? null,
+      },
+      updatedAt: new Date(),
+    },
+  });
   await postTurnMessage(
     opts.changeRequestId,
     planningTurnErrorMessage(opts.reason, {
       hadAttachments: opts.hadAttachments,
+      wasLongMessage: opts.wasLongMessage,
+      isTimeout: opts.isTimeout,
     }),
     "ASSISTANT",
   );
+}
+
+/** True when the agent finished without usable text and we should retry once. */
+export function isEmptyAgentReply(
+  result: AgentRunResult,
+  streamedText?: string | null,
+  liveDraft?: string | null,
+): boolean {
+  const raw =
+    result.text?.trim() ||
+    streamedText?.trim() ||
+    liveDraft?.trim() ||
+    "";
+  return !raw;
+}
+
+export function logReplyRecovery(
+  changeRequestId: string,
+  opts: {
+    waitText?: string | null;
+    streamedText?: string | null;
+    liveDraft?: string | null;
+  },
+): EmptyReplyRecoveryPath {
+  const path = classifyEmptyReplyRecovery({
+    waitText: opts.waitText,
+    streamedText: opts.streamedText,
+    liveDraft: opts.liveDraft,
+  });
+  if (path !== "none") {
+    console.info(
+      `[planning-turn] reply-recovery=${path} cr=${changeRequestId}`,
+    );
+  }
+  return path;
 }
 
 /**
@@ -137,8 +221,26 @@ export async function finalizePlanModeTurn(opts: {
     opts.priorMeta.liveDraft?.trim() ||
     "";
 
+  const recoveryPath = logReplyRecovery(opts.changeRequestId, {
+    waitText: opts.result.text,
+    streamedText: opts.streamedText,
+    liveDraft: opts.priorMeta.liveDraft,
+  });
+
   if (opts.userPrompt && isMetaStopQuestion(opts.userPrompt)) {
     await clearLiveProgress(opts.changeRequestId, opts.priorMeta);
+    await db.changeRequest.update({
+      where: { id: opts.changeRequestId },
+      data: {
+        planningMeta: {
+          ...opts.priorMeta,
+          inFlightTurnAt: null,
+          workerHeartbeatAt: null,
+          lastReplyRecovery: recoveryPath,
+        },
+        updatedAt: new Date(),
+      },
+    });
     await postTurnMessage(
       opts.changeRequestId,
       metaStopExplanation({
@@ -159,11 +261,24 @@ export async function finalizePlanModeTurn(opts: {
       cursorRunId: opts.result.runId,
       model: opts.result.model,
     });
+    await db.changeRequest.update({
+      where: { id: opts.changeRequestId },
+      data: {
+        planningMeta: {
+          ...opts.priorMeta,
+          inFlightTurnAt: null,
+          workerHeartbeatAt: null,
+          lastFailedUserMessageId: null,
+          lastReplyRecovery: recoveryPath,
+        },
+        updatedAt: new Date(),
+      },
+    });
     return;
   }
 
   console.warn(
-    `[finalizePlanModeTurn] empty reply cr=${opts.changeRequestId} runId=${opts.result.runId ?? "none"} streamed=${Boolean(opts.streamedText?.trim())} liveDraft=${Boolean(opts.priorMeta.liveDraft?.trim())}`,
+    `[finalizePlanModeTurn] empty reply cr=${opts.changeRequestId} runId=${opts.result.runId ?? "none"} recovery=${recoveryPath} streamed=${Boolean(opts.streamedText?.trim())} liveDraft=${Boolean(opts.priorMeta.liveDraft?.trim())}`,
   );
 
   await clearLiveProgress(opts.changeRequestId, opts.priorMeta);

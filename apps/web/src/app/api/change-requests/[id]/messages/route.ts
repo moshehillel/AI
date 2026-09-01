@@ -18,6 +18,7 @@ import {
   buildPlanningStartPrompt,
   getDefaultGithubRepoConfig,
   isLiveCursorConfigured,
+  planningAgentInstructions,
   clientVerifyFollowUpPrompt,
   type PlanningMeta,
 } from "@automation-studio/domain";
@@ -425,24 +426,51 @@ export async function POST(
             orderBy: { createdAt: "asc" },
             take: 40,
           });
-          await enqueueJob("cursor.start-agent", {
-            changeRequestId: cr.id,
-            companyId: ctx.company.id,
-            mode: "plan",
-            prompt: buildPlanningStartPrompt({
-              title: cr.title,
-              description: cr.description,
-              messages: history.map((m) => ({
-                role: m.role,
-                content: m.content,
-              })),
-              planningMeta: currentMeta,
-            }),
-            attachmentRef: fileAttachmentRefs[0],
-            attachmentRefs: fileAttachmentRefs.length
-              ? fileAttachmentRefs
-              : undefined,
+          const bootstrapping = await db.agentRun.count({
+            where: { changeRequestId: cr.id, status: "RUNNING" },
           });
+          if (bootstrapping > 0) {
+            await enqueueJob(
+              "cursor.follow-up",
+              {
+                changeRequestId: cr.id,
+                companyId: ctx.company.id,
+                prompt: `${planningAgentInstructions()}\n\nClient message:\n${redacted}`,
+                mode: "plan",
+                attachmentRef: fileAttachmentRefs[0],
+                attachmentRefs: fileAttachmentRefs.length
+                  ? fileAttachmentRefs
+                  : undefined,
+              },
+              {
+                delay: 12000,
+                jobId: `cursor-follow-up-${cr.id}`,
+              },
+            );
+          } else {
+            await enqueueJob(
+              "cursor.start-agent",
+              {
+                changeRequestId: cr.id,
+                companyId: ctx.company.id,
+                mode: "plan",
+                prompt: buildPlanningStartPrompt({
+                  title: cr.title,
+                  description: cr.description,
+                  messages: history.map((m) => ({
+                    role: m.role,
+                    content: m.content,
+                  })),
+                  planningMeta: currentMeta,
+                }),
+                attachmentRef: fileAttachmentRefs[0],
+                attachmentRefs: fileAttachmentRefs.length
+                  ? fileAttachmentRefs
+                  : undefined,
+              },
+              { jobId: `cursor-start-${cr.id}` },
+            );
+          }
         } else {
           await enqueueJob(
             "github.ensure-branch",

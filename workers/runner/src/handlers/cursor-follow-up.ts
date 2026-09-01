@@ -21,6 +21,13 @@ import {
   writeLiveProgress,
 } from "../lib/planning-turn.js";
 
+function isAgentBusyError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /agent_busy|AgentBusyError|already has an active run/i.test(error.message)
+  );
+}
+
 function normalizeAttachmentRefs(data: {
   attachmentRef?: string;
   attachmentRefs?: string[];
@@ -33,10 +40,24 @@ function normalizeAttachmentRefs(data: {
 }
 
 export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
-  const cr = await db.changeRequest.findFirstOrThrow({
+  let cr = await db.changeRequest.findFirstOrThrow({
     where: { id: data.changeRequestId, companyId: data.companyId },
     include: { project: { include: { repository: true } } },
   });
+
+  if (!cr.cursorAgentId) {
+    for (let i = 0; i < 45; i += 1) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const fresh = await db.changeRequest.findFirst({
+        where: { id: data.changeRequestId, companyId: data.companyId },
+        include: { project: { include: { repository: true } } },
+      });
+      if (fresh?.cursorAgentId) {
+        cr = fresh;
+        break;
+      }
+    }
+  }
 
   if (!cr.cursorAgentId) {
     throw new Error("No AI build session associated with this program");
@@ -156,13 +177,40 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     },
   });
 
+  let result: Awaited<ReturnType<Awaited<ReturnType<typeof resumeAndSend>>["wait"]>>;
+
   try {
-    const { wait, run, runId: immediateRunId } = await resumeAndSend({
-      agentId: cr.cursorAgentId,
-      prompt,
-      mode,
-      images,
-    });
+    let waitFn: Awaited<ReturnType<typeof resumeAndSend>>["wait"];
+    let runStream: Awaited<ReturnType<typeof resumeAndSend>>["run"];
+    let immediateRunId: string | undefined;
+
+    try {
+      const session = await resumeAndSend({
+        agentId: cr.cursorAgentId,
+        prompt,
+        mode,
+        images,
+      });
+      waitFn = session.wait;
+      runStream = session.run;
+      immediateRunId = session.runId;
+    } catch (error) {
+      if (isAgentBusyError(error)) {
+        console.info(
+          `[cursor-follow-up] agent busy — retry cr=${cr.id} in 12s`,
+        );
+        await db.agentRun.update({
+          where: { id: agentRun.id },
+          data: { status: "FAILED", finishedAt: new Date() },
+        });
+        await enqueueJob("cursor.follow-up", data, {
+          delay: 12000,
+          jobId: `cursor-follow-up-retry-${cr.id}`,
+        });
+        return { deferred: true, reason: "agent_busy" };
+      }
+      throw error;
+    }
 
     if (immediateRunId) {
       await db.agentRun.update({
@@ -176,15 +224,14 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     }
 
     let streamedText = "";
-    let result: Awaited<ReturnType<typeof wait>>;
     try {
       const [waitResult, mirrored] = await Promise.all([
-        withTimeout(wait(), AGENT_TURN_TIMEOUT_MS, "AI reply"),
+        withTimeout(waitFn(), AGENT_TURN_TIMEOUT_MS, "AI reply"),
         mode === "plan"
           ? mirrorPlanningStream({
               changeRequestId: cr.id,
               priorMeta,
-              stream: run,
+              stream: runStream,
             })
           : Promise.resolve(""),
       ]);

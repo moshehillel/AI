@@ -176,10 +176,15 @@ export async function createTaskAgent(
     wait: async () => {
       const result = await run.wait();
       const branchInfo = result.git?.branches?.[0];
+      const text = await resolveRunTextWithFallbacks(
+        run,
+        result.result,
+        streamed.assistantText,
+      );
       return {
         agentId: agent.agentId,
         runId: run.id,
-        text: resolveRunText(result.result, run, streamed.assistantText),
+        text,
         model: result.model?.id,
         branch: branchInfo?.branch,
         prUrl: branchInfo?.prUrl,
@@ -231,10 +236,15 @@ export async function resumeAndSend(
     ),
     wait: async () => {
       const result = await run.wait();
+      const text = await resolveRunTextWithFallbacks(
+        run,
+        result.result,
+        streamed.assistantText,
+      );
       return {
         agentId: agent.agentId,
         runId: run.id,
-        text: resolveRunText(result.result, run, streamed.assistantText),
+        text,
         model: result.model?.id,
         usage: result.usage
           ? {
@@ -382,6 +392,60 @@ function resolveRunText(
   const fromStream = streamed.trim();
   if (fromStream) return fromStream;
   return undefined;
+}
+
+/** Last assistant prose from SDK conversation turns (when result.result is empty). */
+function extractLatestAssistantText(
+  turns: Array<{
+    type?: string;
+    turn?: {
+      steps?: Array<{
+        type?: string;
+        message?: { text?: string };
+      }>;
+    };
+  }>,
+): string | undefined {
+  for (let i = turns.length - 1; i >= 0; i -= 1) {
+    const turn = turns[i];
+    const steps =
+      turn?.type === "agentConversationTurn" ? turn.turn?.steps : undefined;
+    if (!steps?.length) continue;
+    for (let j = steps.length - 1; j >= 0; j -= 1) {
+      const step = steps[j];
+      if (step?.type === "assistantMessage") {
+        const text = step.message?.text?.trim();
+        if (text) return text;
+      }
+    }
+  }
+  return undefined;
+}
+
+async function resolveRunTextWithFallbacks(
+  run: {
+    result?: string | null;
+    supports: (operation: "stream" | "wait" | "cancel" | "conversation") => boolean;
+    conversation: () => Promise<unknown[]>;
+  },
+  waitResult: string | null | undefined,
+  streamed: string,
+): Promise<string | undefined> {
+  let text = resolveRunText(waitResult, run, streamed);
+  if (!text && run.supports("conversation")) {
+    try {
+      const turns = (await run.conversation()) as Parameters<
+        typeof extractLatestAssistantText
+      >[0];
+      text = extractLatestAssistantText(turns);
+      if (text) {
+        console.info("[cursor-adapter] used conversation() fallback for reply text");
+      }
+    } catch (error) {
+      console.warn("[cursor-adapter] conversation fallback failed", error);
+    }
+  }
+  return text;
 }
 
 function mockPlanReply(prompt: string): string {

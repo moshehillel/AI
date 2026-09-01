@@ -92,18 +92,22 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
         })
       : `${cr.title}\n\n${cr.description}`.trim();
 
-  await enqueueJob("cursor.start-agent", {
-    changeRequestId: cr.id,
-    companyId: data.companyId,
-    mode: mode as "plan" | "agent",
-    prompt,
-    attachmentRef:
-      ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRef ??
-      undefined,
-    attachmentRefs:
-      ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRefs ??
-      undefined,
-  });
+  await enqueueJob(
+    "cursor.start-agent",
+    {
+      changeRequestId: cr.id,
+      companyId: data.companyId,
+      mode: mode as "plan" | "agent",
+      prompt,
+      attachmentRef:
+        ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRef ??
+        undefined,
+      attachmentRefs:
+        ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRefs ??
+        undefined,
+    },
+    { jobId: `cursor-start-${cr.id}` },
+  );
 
   // Clear one-shot pending attachment so it is not re-sent on later starts.
   const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;

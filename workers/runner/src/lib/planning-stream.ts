@@ -4,12 +4,12 @@ import type { PlanningMeta } from "@automation-studio/domain";
 
 const PROGRESS_MIN_MS = 900;
 
-/** Mirror agent stream progress into planningMeta for live Thought / Plan UI. */
+/** Mirror agent stream progress into planningMeta for live Thought / Plan UI. Returns full streamed draft. */
 export async function mirrorPlanningStream(opts: {
   changeRequestId: string;
   priorMeta: PlanningMeta;
   stream: AsyncIterable<NormalizedStreamEvent>;
-}): Promise<void> {
+}): Promise<string> {
   let draft = "";
   let lastWrite = 0;
   let lastLabel = "";
@@ -60,4 +60,5 @@ export async function mirrorPlanningStream(opts: {
   } catch (error) {
     console.warn("[planning-stream] mirror failed", error);
   }
+  return draft.trim();
 }

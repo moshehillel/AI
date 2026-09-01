@@ -385,6 +385,10 @@ export function ChatPanel({
           if (data.messages) {
             setMessages(data.messages);
             const stillAwaiting = isAwaitingAssistantReply(data.messages);
+            const lastMsg = data.messages[data.messages.length - 1];
+            const wasUserInterrupted =
+              lastMsg?.role === "SYSTEM" &&
+              lastMsg.content.startsWith("Interrupted — stopped");
             setAwaitingReply(stillAwaiting);
             if (!stillAwaiting) {
               setTurnInterrupted(false);
@@ -392,13 +396,21 @@ export function ChatPanel({
               setLiveProgress(null);
               setLiveDraft(null);
               setProgressSteps([]);
+            } else if (wasUserInterrupted) {
+              setTurnInterrupted(true);
+              setReplyTimedOut(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
             } else if (
               data.latestAgentRun &&
               (data.latestAgentRun.status === "FAILED" ||
-                data.latestAgentRun.status === "SUCCEEDED")
+                data.latestAgentRun.status === "SUCCEEDED" ||
+                data.latestAgentRun.status === "CANCELLED")
             ) {
               // Agent finished but no assistant message landed — surface recovery UI.
-              setReplyTimedOut(true);
+              setReplyTimedOut(data.latestAgentRun.status !== "CANCELLED");
+              setTurnInterrupted(data.latestAgentRun.status === "CANCELLED");
               setAwaitingReply(false);
               setLiveProgress(null);
               setLiveDraft(null);
@@ -1019,9 +1031,9 @@ export function ChatPanel({
             style={{ borderColor: "var(--ide-danger)" }}
           >
             <p className="agent-msg-body" style={{ margin: 0 }}>
-              This is taking longer than expected and no reply arrived. Click{" "}
-              <strong>Interrupt</strong> below, then send your message again. If
-              you attached files, try one at a time or a smaller PDF.
+              {turnInterrupted
+                ? "That response was stopped. Send your message again when you are ready."
+                : "This is taking longer than expected and no reply arrived. Click Interrupt below, then send your message again. If you attached files, try one at a time or a smaller PDF."}
             </p>
           </div>
         ) : null}

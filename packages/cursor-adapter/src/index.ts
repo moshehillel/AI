@@ -164,18 +164,22 @@ export async function createTaskAgent(
     );
   }
   const run = await agent.send(message);
+  const streamed = { assistantText: "" };
 
   return {
     agentId: agent.agentId,
     runId: run.id,
-    run: mapStream(run.stream() as AsyncIterable<{ type: string } & Record<string, unknown>>),
+    run: mapStream(
+      run.stream() as AsyncIterable<{ type: string } & Record<string, unknown>>,
+      streamed,
+    ),
     wait: async () => {
       const result = await run.wait();
       const branchInfo = result.git?.branches?.[0];
       return {
         agentId: agent.agentId,
         runId: run.id,
-        text: result.result,
+        text: resolveRunText(result.result, run, streamed.assistantText),
         model: result.model?.id,
         branch: branchInfo?.branch,
         prUrl: branchInfo?.prUrl,
@@ -216,17 +220,21 @@ export async function resumeAndSend(
   const run = await agent.send(message, {
     mode: input.mode,
   });
+  const streamed = { assistantText: "" };
 
   return {
     agentId: agent.agentId,
     runId: run.id,
-    run: mapStream(run.stream() as AsyncIterable<{ type: string } & Record<string, unknown>>),
+    run: mapStream(
+      run.stream() as AsyncIterable<{ type: string } & Record<string, unknown>>,
+      streamed,
+    ),
     wait: async () => {
       const result = await run.wait();
       return {
         agentId: agent.agentId,
         runId: run.id,
-        text: result.result,
+        text: resolveRunText(result.result, run, streamed.assistantText),
         model: result.model?.id,
         usage: result.usage
           ? {
@@ -313,8 +321,11 @@ export async function cancelAgentRun(input: {
   return { cancelled: true };
 }
 
+type StreamAccumulator = { assistantText: string };
+
 async function* mapStream(
   stream: AsyncIterable<{ type: string } & Record<string, unknown>>,
+  accumulator?: StreamAccumulator,
 ): AsyncGenerator<NormalizedStreamEvent> {
   for await (const event of stream as AsyncIterable<{
     type: string;
@@ -330,7 +341,10 @@ async function* mapStream(
     if (event.type === "assistant") {
       const message = event.message as { content?: Array<{ type: string; text?: string }> } | undefined;
       const text = message?.content?.map((c) => c.text ?? "").join("") ?? "";
-      if (text) yield { type: "assistant", text };
+      if (text) {
+        if (accumulator) accumulator.assistantText += text;
+        yield { type: "assistant", text };
+      }
     } else if (event.type === "status") {
       yield {
         type: "status",
@@ -353,6 +367,21 @@ async function* mapStream(
     }
   }
   yield { type: "done" };
+}
+
+/** Prefer wait() result, then run handle, then streamed assistant chunks. */
+function resolveRunText(
+  waitResult: string | null | undefined,
+  runHandle: { result?: string | null },
+  streamed: string,
+): string | undefined {
+  const fromWait = waitResult?.trim();
+  if (fromWait) return fromWait;
+  const fromHandle = runHandle.result?.trim();
+  if (fromHandle) return fromHandle;
+  const fromStream = streamed.trim();
+  if (fromStream) return fromStream;
+  return undefined;
 }
 
 function mockPlanReply(prompt: string): string {

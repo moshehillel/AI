@@ -43,15 +43,56 @@ export async function postTurnMessage(
 }
 
 /** User-visible error when a planning turn fails or times out. */
-export function planningTurnErrorMessage(reason: string): string {
+export function planningTurnErrorMessage(
+  reason: string,
+  opts?: { hadAttachments?: boolean; isMetaQuestion?: boolean },
+): string {
   const detail = reason.trim().replace(/\.$/, "");
+  const retryHint = opts?.isMetaQuestion
+    ? "You can send your original question again and I will pick up where we left off."
+    : opts?.hadAttachments
+      ? "Try **Interrupt**, then send your message again with one file at a time or a smaller PDF."
+      : "Try sending your message again. If it is very long, split it into two shorter messages.";
+
   return [
     "Sorry — I couldn't finish that reply.",
     detail ? `${detail}.` : "",
-    "Try **Interrupt**, then send your message again. If it keeps failing, attach one file at a time or use a smaller PDF.",
+    retryHint,
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+const META_STOP_QUESTION_RE =
+  /\b(why (was|did) (it |you )?stop|why stopped|what happened|why didn't you (reply|respond|finish)|why no (reply|response))\b/i;
+
+export function isMetaStopQuestion(text: string): boolean {
+  return META_STOP_QUESTION_RE.test(text.trim());
+}
+
+export function metaStopExplanation(opts: {
+  hadAttachments: boolean;
+  wasInterrupted: boolean;
+}): string {
+  if (opts.wasInterrupted) {
+    return [
+      "That turn was **interrupted** — either you clicked Interrupt or a new message replaced the in-flight reply.",
+      "",
+      "Nothing was lost from your chat history. Send your question again (or edit and resend from the queue) and I will answer normally.",
+    ].join("\n");
+  }
+  if (opts.hadAttachments) {
+    return [
+      "The last turn ended before a reply was saved — this sometimes happens with large or multiple file uploads.",
+      "",
+      "Your message is still in the thread. Try again with one smaller file, or paste the key details as text.",
+    ].join("\n");
+  }
+  return [
+    "The last turn ended before a reply was saved — the AI session returned empty even though it may have been thinking.",
+    "",
+    "Your message is still in the thread. Please send it again (split very long notes into two messages if needed).",
+  ].join("\n");
 }
 
 export async function failPlanningTurn(opts: {
@@ -59,6 +100,7 @@ export async function failPlanningTurn(opts: {
   priorMeta: PlanningMeta;
   reason: string;
   agentRunId?: string;
+  hadAttachments?: boolean;
 }) {
   if (opts.agentRunId) {
     await db.agentRun.updateMany({
@@ -69,7 +111,9 @@ export async function failPlanningTurn(opts: {
   await clearLiveProgress(opts.changeRequestId, opts.priorMeta);
   await postTurnMessage(
     opts.changeRequestId,
-    planningTurnErrorMessage(opts.reason),
+    planningTurnErrorMessage(opts.reason, {
+      hadAttachments: opts.hadAttachments,
+    }),
     "ASSISTANT",
   );
 }
@@ -82,8 +126,31 @@ export async function finalizePlanModeTurn(opts: {
   changeRequestId: string;
   priorMeta: PlanningMeta;
   result: AgentRunResult;
+  streamedText?: string | null;
+  userPrompt?: string;
+  hadAttachments?: boolean;
+  wasInterrupted?: boolean;
 }) {
-  const rawText = opts.result.text?.trim() ?? "";
+  const rawText =
+    opts.result.text?.trim() ||
+    opts.streamedText?.trim() ||
+    opts.priorMeta.liveDraft?.trim() ||
+    "";
+
+  if (opts.userPrompt && isMetaStopQuestion(opts.userPrompt)) {
+    await clearLiveProgress(opts.changeRequestId, opts.priorMeta);
+    await postTurnMessage(
+      opts.changeRequestId,
+      metaStopExplanation({
+        hadAttachments: Boolean(opts.hadAttachments),
+        wasInterrupted: Boolean(opts.wasInterrupted),
+      }),
+      "ASSISTANT",
+      { cursorRunId: opts.result.runId, model: opts.result.model },
+    );
+    return;
+  }
+
   if (rawText) {
     await persistPlanModeReply({
       changeRequestId: opts.changeRequestId,
@@ -95,11 +162,16 @@ export async function finalizePlanModeTurn(opts: {
     return;
   }
 
+  console.warn(
+    `[finalizePlanModeTurn] empty reply cr=${opts.changeRequestId} runId=${opts.result.runId ?? "none"} streamed=${Boolean(opts.streamedText?.trim())} liveDraft=${Boolean(opts.priorMeta.liveDraft?.trim())}`,
+  );
+
   await clearLiveProgress(opts.changeRequestId, opts.priorMeta);
   await postTurnMessage(
     opts.changeRequestId,
     planningTurnErrorMessage(
-      "The AI session finished without a reply (this can happen with large file uploads)",
+      "The AI session finished without a reply",
+      { hadAttachments: opts.hadAttachments },
     ),
     "ASSISTANT",
     { cursorRunId: opts.result.runId, model: opts.result.model },

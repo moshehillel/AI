@@ -91,6 +91,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
           changeRequestId: cr.id,
           priorMeta,
           reason: attachError,
+          hadAttachments: true,
         });
         return { ok: false, reason: attachError };
       }
@@ -124,15 +125,25 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     }
   }
 
-  // After Interrupt, a prior wait may still be winding down. Wait briefly for
-  // RUNNING rows to clear so we do not race two Cursor sends on one agent.
-  for (let i = 0; i < 25; i += 1) {
+  // After Interrupt, a prior wait may still be winding down. Wait for RUNNING
+  // rows to clear so we do not race two Cursor sends on one agent.
+  for (let i = 0; i < 150; i += 1) {
     const stillRunning = await db.agentRun.count({
       where: { changeRequestId: cr.id, status: "RUNNING" },
     });
     if (stillRunning === 0) break;
     await new Promise((r) => setTimeout(r, 200));
   }
+
+  const recentInterrupt = await db.changeRequestMessage.findFirst({
+    where: {
+      changeRequestId: cr.id,
+      role: "SYSTEM",
+      content: { startsWith: "Interrupted — stopped" },
+      createdAt: { gte: new Date(Date.now() - 15 * 60 * 1000) },
+    },
+    orderBy: { createdAt: "desc" },
+  });
 
   const agentRunStartedAt = new Date();
   const agentRun = await db.agentRun.create({
@@ -144,8 +155,6 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       startedAt: agentRunStartedAt,
     },
   });
-
-  let result: Awaited<ReturnType<Awaited<ReturnType<typeof resumeAndSend>>["wait"]>>;
 
   try {
     const { wait, run, runId: immediateRunId } = await resumeAndSend({
@@ -166,20 +175,21 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       await writeLiveProgress(cr.id, priorMeta, "Starting…", null);
     }
 
-    const streamMirror =
-      mode === "plan"
-        ? mirrorPlanningStream({
-            changeRequestId: cr.id,
-            priorMeta,
-            stream: run,
-          })
-        : Promise.resolve();
-
+    let streamedText = "";
+    let result: Awaited<ReturnType<typeof wait>>;
     try {
-      [result] = await Promise.all([
+      const [waitResult, mirrored] = await Promise.all([
         withTimeout(wait(), AGENT_TURN_TIMEOUT_MS, "AI reply"),
-        streamMirror,
+        mode === "plan"
+          ? mirrorPlanningStream({
+              changeRequestId: cr.id,
+              priorMeta,
+              stream: run,
+            })
+          : Promise.resolve(""),
       ]);
+      result = waitResult;
+      streamedText = mirrored;
     } catch (error) {
       const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
       if (current?.status === "CANCELLED") {
@@ -199,6 +209,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
           priorMeta,
           reason,
           agentRunId: agentRun.id,
+          hadAttachments: attachmentRefs.length > 0,
         });
         return { ok: false, reason };
       }
@@ -240,7 +251,9 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       } else {
         await postTurnMessage(
           cr.id,
-          planningTurnErrorMessage("The AI session finished without a reply"),
+          planningTurnErrorMessage("The AI session finished without a reply", {
+            hadAttachments: attachmentRefs.length > 0,
+          }),
           "ASSISTANT",
           { cursorRunId: result.runId, model: result.model },
         );
@@ -255,10 +268,21 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
         companyId: data.companyId,
       });
     } else {
+      const freshMeta = ((
+        await db.changeRequest.findUnique({
+          where: { id: cr.id },
+          select: { planningMeta: true },
+        })
+      )?.planningMeta ?? priorMeta) as PlanningMeta;
+
       await finalizePlanModeTurn({
         changeRequestId: cr.id,
-        priorMeta,
+        priorMeta: freshMeta,
         result,
+        streamedText,
+        userPrompt: data.prompt,
+        hadAttachments: attachmentRefs.length > 0,
+        wasInterrupted: Boolean(recentInterrupt),
       });
       if (cr.kind !== "PROGRAM") {
         await transitionChangeRequest({
@@ -297,6 +321,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
           priorMeta,
           reason,
           agentRunId: agentRun.id,
+          hadAttachments: attachmentRefs.length > 0,
         });
       }
       return { ok: false, reason };

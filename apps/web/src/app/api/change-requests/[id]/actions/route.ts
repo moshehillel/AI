@@ -1035,14 +1035,25 @@ export async function POST(
           });
         }
 
-        await db.changeRequestMessage.create({
-          data: {
+        // Avoid duplicate interrupt banners when the client retries the action.
+        const recentInterrupt = await db.changeRequestMessage.findFirst({
+          where: {
             changeRequestId: cr.id,
             role: "SYSTEM",
-            authorId: ctx.user.id,
             content: "Interrupted — stopped the current response.",
+            createdAt: { gte: new Date(Date.now() - 5000) },
           },
         });
+        if (!recentInterrupt) {
+          await db.changeRequestMessage.create({
+            data: {
+              changeRequestId: cr.id,
+              role: "SYSTEM",
+              authorId: ctx.user.id,
+              content: "Interrupted — stopped the current response.",
+            },
+          });
+        }
 
         await writeAuditEvent({
           companyId: ctx.company.id,

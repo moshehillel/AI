@@ -207,21 +207,21 @@ export async function handleCursorStart(data: CursorStartJobData) {
     },
   });
 
-  const streamMirror =
-    data.mode === "plan"
-      ? mirrorPlanningStream({
-          changeRequestId: cr.id,
-          priorMeta,
-          stream: run,
-        })
-      : Promise.resolve();
-
+  let streamedText = "";
   let result: Awaited<ReturnType<typeof wait>>;
   try {
-    [result] = await Promise.all([
+    const [waitResult, mirrored] = await Promise.all([
       withTimeout(wait(), AGENT_TURN_TIMEOUT_MS, "AI reply"),
-      streamMirror,
+      data.mode === "plan"
+        ? mirrorPlanningStream({
+            changeRequestId: cr.id,
+            priorMeta,
+            stream: run,
+          })
+        : Promise.resolve(""),
     ]);
+    result = waitResult;
+    streamedText = mirrored;
   } catch (error) {
     const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
     if (current?.status === "CANCELLED") {
@@ -264,10 +264,20 @@ export async function handleCursorStart(data: CursorStartJobData) {
   });
 
   if (data.mode === "plan") {
+    const freshMeta = ((
+      await db.changeRequest.findUnique({
+        where: { id: cr.id },
+        select: { planningMeta: true },
+      })
+    )?.planningMeta ?? priorMeta) as PlanningMeta;
+
     await finalizePlanModeTurn({
       changeRequestId: cr.id,
-      priorMeta,
+      priorMeta: freshMeta,
       result,
+      streamedText,
+      userPrompt: data.prompt,
+      hadAttachments: attachmentRefs.length > 0,
     });
     if (cr.kind === "PROGRAM") {
       // Stay in planning until client submits to developer
@@ -298,7 +308,9 @@ export async function handleCursorStart(data: CursorStartJobData) {
     } else {
       await postTurnMessage(
         cr.id,
-        planningTurnErrorMessage("The AI session finished without a reply"),
+        planningTurnErrorMessage("The AI session finished without a reply", {
+          hadAttachments: attachmentRefs.length > 0,
+        }),
         "ASSISTANT",
         { cursorRunId: result.runId, model: result.model },
       );

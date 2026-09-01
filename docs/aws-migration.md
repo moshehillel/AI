@@ -1,24 +1,54 @@
 # Koda — Railway → AWS migration
 
-Migrate **Koda platform hosting only** from Railway to the dedicated `koda-platform` AWS stack. Whiteglove client automations stay in their own AWS project/account.
+Migrate **Koda platform hosting only** from Railway to the dedicated `koda-platform` AWS stack.
+
+**Same AWS account as Whiteglove is OK** — use a **separate Terraform state** (dedicated S3 bucket/key), a **dedicated VPC** (`10.20.0.0/16` by default — verify no CIDR overlap with Whiteglove), and the `Scope=koda-only` tag. Do **not** share Whiteglove state buckets, VPCs, or resource name prefixes. Whiteglove client automations remain in their own Terraform stack.
 
 ## Before you start
 
 - [ ] Clerk production on `clerk.advancedautomations.net` (NetFree whitelabel complete)
 - [ ] `OPEN_ACCESS=0` / `NEXT_PUBLIC_OPEN_ACCESS=0` on current Railway (or set during cutover)
 - [ ] Terraform applied: `infra/aws/terraform` (see [infra/aws/README.md](../infra/aws/README.md))
-- [ ] Secrets Manager populated with production keys
+- [ ] Secrets Manager populated with production keys (from Railway vars — see below)
 - [ ] ACM certificate issued and attached to ALB
 - [ ] Docker images pushed to ECR (or GitHub Actions deploy enabled)
+
+## Terraform state (separate from Whiteglove)
+
+Koda state must live in its **own** S3 object — never reuse Whiteglove's state bucket or key.
+
+| Setting | Koda value | Do **not** use |
+| --- | --- | --- |
+| S3 bucket | `koda-platform-tfstate` (or your choice) | Whiteglove tfstate bucket |
+| State key | `koda-platform/terraform.tfstate` | Whiteglove state key |
+| DynamoDB lock | `koda-platform-tflock` | Whiteglove lock table |
+
+Bootstrap (run once with Whiteglove account credentials):
+
+```bash
+export AWS_REGION=us-east-1
+export TF_STATE_BUCKET=koda-platform-tfstate
+export TF_LOCK_TABLE=koda-platform-tflock
+
+aws s3api create-bucket --bucket "$TF_STATE_BUCKET" --region "$AWS_REGION"
+aws s3api put-bucket-versioning --bucket "$TF_STATE_BUCKET" \
+  --versioning-configuration Status=Enabled
+aws dynamodb create-table --table-name "$TF_LOCK_TABLE" \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST --region "$AWS_REGION"
+```
+
+Then uncomment the `backend "s3"` block in `infra/aws/terraform/versions.tf` and run `terraform init -migrate-state`.
 
 ## Environment variable mapping
 
 | Variable | Railway | AWS |
 | --- | --- | --- |
-| `DATABASE_URL` | Postgres plugin | Secrets Manager `…/database-url` (auto) |
-| `REDIS_URL` | Redis plugin | Secrets Manager `…/redis-url` (auto) |
+| `DATABASE_URL` | Postgres plugin | Secrets Manager `koda-platform-production/database-url` (auto) |
+| `REDIS_URL` | Redis plugin | Secrets Manager `koda-platform-production/redis-url` (auto) |
 | `NEXT_PUBLIC_APP_URL` | Railway domain / custom | `https://koda.advancedautomations.net` |
-| Clerk keys | Railway web vars | Secrets Manager `…/app-env` |
+| Clerk keys | Railway web vars | Secrets Manager `koda-platform-production/app-env` |
 | `ENCRYPTION_KEY` | Railway web + worker | Same secret on both ECS services |
 | `OPEN_ACCESS` | `0` | `0` |
 | `NEXT_PUBLIC_OPEN_ACCESS` | `0` (rebuild web image) | `0` (baked at Docker build) |
@@ -28,6 +58,68 @@ Migrate **Koda platform hosting only** from Railway to the dedicated `koda-platf
 | `RAILWAY_*` | Railway tokens | Not needed on AWS (`RAILWAY_MOCK=1` or omit) |
 
 Add any optional vars from [`.env.example`](../.env.example) to the app secret JSON.
+
+## Populate Secrets Manager from Railway
+
+Export Railway production vars (Railway dashboard or CLI), then map into `koda-app-secrets.json`:
+
+```bash
+cd infra/aws/terraform
+APP_SECRET_ARN=$(terraform output -raw app_secrets_arn)
+
+# Example: build JSON from Railway (adjust service names)
+railway variables --service web --json > /tmp/railway-web.json
+# Manually merge into koda-app-secrets.json — keys must match secrets.tf placeholders.
+# Set NEXT_PUBLIC_APP_URL=https://koda.advancedautomations.net
+# Set OPEN_ACCESS=0, NEXT_PUBLIC_OPEN_ACCESS=0, RAILWAY_MOCK=1
+
+aws secretsmanager put-secret-value \
+  --secret-id "$APP_SECRET_ARN" \
+  --secret-string file://koda-app-secrets.json
+```
+
+`DATABASE_URL` and `REDIS_URL` are written automatically by Terraform after RDS/ElastiCache are created.
+
+Force ECS to pick up new secrets:
+
+```bash
+aws ecs update-service --cluster koda-platform-production-cluster \
+  --service koda-platform-production-web --force-new-deployment
+aws ecs update-service --cluster koda-platform-production-cluster \
+  --service koda-platform-production-worker --force-new-deployment
+```
+
+## Push Docker images to ECR
+
+After `terraform apply`:
+
+```bash
+cd infra/aws/terraform
+AWS_ACCOUNT=$(terraform output -raw aws_account_id)
+AWS_REGION=us-east-1
+ECR_WEB=$(terraform output -raw ecr_web_repository_url)
+ECR_WORKER=$(terraform output -raw ecr_worker_repository_url)
+IMAGE_TAG=latest  # or git SHA
+
+aws ecr get-login-password --region "$AWS_REGION" | \
+  docker login --username AWS --password-stdin "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com"
+
+# Web — bake NEXT_PUBLIC_* at build time
+docker build -f Dockerfile.web \
+  --build-arg NEXT_PUBLIC_OPEN_ACCESS=0 \
+  --build-arg NEXT_PUBLIC_ALLOW_DEMO_AUTH=0 \
+  --build-arg NEXT_PUBLIC_APP_URL=https://koda.advancedautomations.net \
+  --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY="pk_live_..." \
+  -t "$ECR_WEB:$IMAGE_TAG" .
+docker push "$ECR_WEB:$IMAGE_TAG"
+
+docker build -f Dockerfile.worker -t "$ECR_WORKER:$IMAGE_TAG" .
+docker push "$ECR_WORKER:$IMAGE_TAG"
+
+terraform apply -var="image_tag=$IMAGE_TAG"
+```
+
+Or enable GitHub Actions deploy (`AWS_DEPLOY_ENABLED=true`) — see [infra/aws/README.md](../infra/aws/README.md).
 
 ## Optional: export Railway Postgres
 

@@ -101,3 +101,9 @@ variable "enable_github_oidc" {
   type        = bool
   default     = true
 }
+
+variable "create_github_oidc_provider" {
+  description = "Create the GitHub OIDC provider in this account. Set false when sharing the Whiteglove AWS account (provider already exists)."
+  type        = bool
+  default     = false
+}

@@ -47,16 +47,29 @@ resource "aws_iam_role" "ecs_task" {
   tags = local.common_tags
 }
 
-# GitHub Actions OIDC — one provider per AWS account; import if it already exists.
+# GitHub Actions OIDC — one provider per AWS account.
+# In the shared Whiteglove account the provider usually already exists; leave
+# create_github_oidc_provider=false (default) and Terraform will reference it.
+data "aws_iam_openid_connect_provider" "github" {
+  count = var.enable_github_oidc && !var.create_github_oidc_provider ? 1 : 0
+  url   = "https://token.actions.githubusercontent.com"
+}
+
 resource "aws_iam_openid_connect_provider" "github" {
-  count = var.enable_github_oidc ? 1 : 0
+  count = var.enable_github_oidc && var.create_github_oidc_provider ? 1 : 0
   url   = "https://token.actions.githubusercontent.com"
 
   client_id_list = ["sts.amazonaws.com"]
   thumbprint_list = [
     "6938fd4d98bab03faadb97b34396831e3780aea1",
-    "1c58a3a8518e8759bf075b76b750d4f2dfcdfce",
+    "1c58a3a8518e8759bf075b76b750d4f29dfcdfce",
   ]
+}
+
+locals {
+  github_oidc_provider_arn = var.enable_github_oidc ? (
+    var.create_github_oidc_provider ? aws_iam_openid_connect_provider.github[0].arn : data.aws_iam_openid_connect_provider.github[0].arn
+  ) : null
 }
 
 data "aws_iam_policy_document" "github_oidc_assume" {
@@ -66,7 +79,7 @@ data "aws_iam_policy_document" "github_oidc_assume" {
     actions = ["sts:AssumeRoleWithWebIdentity"]
     principals {
       type        = "Federated"
-      identifiers = [aws_iam_openid_connect_provider.github[0].arn]
+      identifiers = [local.github_oidc_provider_arn]
     }
     condition {
       test     = "StringEquals"

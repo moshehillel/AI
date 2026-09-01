@@ -12,7 +12,8 @@ terraform {
     }
   }
 
-  # Uncomment after creating the S3 bucket + DynamoDB table for state locking.
+  # Remote state — REQUIRED for production. Use a dedicated bucket/key, NOT Whiteglove's.
+  # See infra/aws/README.md "Terraform state bootstrap".
   # backend "s3" {
   #   bucket         = "koda-platform-tfstate"
   #   key            = "koda-platform/terraform.tfstate"

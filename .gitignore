@@ -24,4 +24,3 @@ infra/aws/terraform/*.tfstate
 infra/aws/terraform/*.tfstate.*
 infra/aws/terraform/terraform.tfvars
 infra/aws/terraform/*.auto.tfvars
-infra/aws/terraform/.terraform.lock.hcl

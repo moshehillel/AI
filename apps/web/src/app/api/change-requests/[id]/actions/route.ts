@@ -27,6 +27,7 @@ import {
 import { getAppBaseUrl } from "@/lib/app-url";
 import { queueAndMaybeSendEmail } from "@/lib/notify";
 import { getStaffPassword } from "@/lib/staff-access";
+import { requireRateLimit } from "@/lib/rate-limit";
 
 const bodySchema = z.object({
   action: z.enum([
@@ -173,6 +174,17 @@ export async function POST(
     const cr = await requireChangeRequestAccess(ctx, id);
     const body = bodySchema.parse(await request.json());
     const { action } = body;
+
+    if (
+      action === "submit_to_dev" ||
+      action === "submit_final_review" ||
+      action === "submit_review"
+    ) {
+      await requireRateLimit({
+        preset: "submit",
+        scope: `${ctx.company.id}:${ctx.user.id}`,
+      });
+    }
 
     switch (action) {
       case "submit_to_dev": {

@@ -44,7 +44,7 @@ export async function POST(
     }
     let value: string;
     try {
-      value = decryptSecret(row.ciphertext);
+      value = decryptSecret(row.ciphertext, ctx.company.id);
     } catch {
       return NextResponse.json(
         { error: "Could not decrypt secret — check ENCRYPTION_KEY" },

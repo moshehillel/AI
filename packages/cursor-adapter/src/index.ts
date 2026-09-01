@@ -1,3 +1,5 @@
+import { cursorFetchWithRetry } from "./retry.js";
+
 export type AgentMode = "plan" | "agent";
 
 /** Cursor Cloud Agents / SDK only accept raster images on send (not PDF/xlsx). */
@@ -315,7 +317,8 @@ export async function cancelAgentRun(input: {
     return { cancelled: false, reason: "No run id available to cancel" };
   }
 
-  const response = await fetch(
+  const response = await cursorFetchWithRetry(
+    "cancel",
     `https://api.cursor.com/v1/agents/${input.agentId}/runs/${input.runId}/cancel`,
     {
       method: "POST",

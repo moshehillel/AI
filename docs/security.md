@@ -20,10 +20,11 @@ Roles:
 
 ## Secrets
 
-`secret_refs` stores encrypted CHAT credentials (AES-GCM via `ENCRYPTION_KEY`)
-and env/vault pointers for preview/platform. Plaintext values are never returned
-to customers after save, never written to plan markdown or SSE, and never
-committed to git. Staff with `program:reveal_secrets` can decrypt on the Build
+`secret_refs` stores encrypted CHAT credentials (AES-GCM via `ENCRYPTION_KEY`,
+optionally scoped per company with `ENCRYPTION_KEY_PER_ORG=1`) and env/vault
+pointers for preview/platform. All secret queries include `companyId` from the
+authenticated context. Plaintext values are never returned to customers after
+save, never written to plan markdown or SSE, and never committed to git. Staff with `program:reveal_secrets` can decrypt on the Build
 desk (copy-once). Attachment payloads use `planning-file-*` keys and are not
 customer credentials.
 
@@ -38,6 +39,12 @@ Important actions write `audit_events` (create, classify, branch, plan, preview,
 
 - Clerk: Svix signature verification
 - GitHub: HMAC `x-hub-signature-256`
+
+## Rate limiting
+
+Public write APIs (messages, submit, secrets, uploads, staff unlock) use
+Redis-backed fixed-window limits (`RATE_LIMIT_*` env vars). Limits apply per
+company/user or per IP for staff unlock.
 
 ## Known MVP tradeoffs
 

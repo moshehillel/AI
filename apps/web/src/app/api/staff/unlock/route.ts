@@ -6,7 +6,10 @@ import {
   getStaffPassword,
   safeNextPath,
   staffRoleFromCookieValue,
+  staffSessionMaxAgeSec,
 } from "@/lib/staff-session";
+import { requireRateLimit } from "@/lib/rate-limit";
+import { AuthError } from "@automation-studio/auth";
 
 const bodySchema = z.object({
   /** Preferred field name for the staff password form. */
@@ -35,6 +38,20 @@ export async function POST(request: Request) {
     );
   }
 
+  const clientIp =
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    request.headers.get("x-real-ip") ??
+    "unknown";
+
+  try {
+    await requireRateLimit({ preset: "staff_unlock", scope: clientIp });
+  } catch (error) {
+    if (error instanceof AuthError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    throw error;
+  }
+
   const body = bodySchema.parse(await request.json());
   const provided = (body.password ?? body.token ?? "").trim();
   if (!provided || !timingSafeEqualString(provided, expected)) {
@@ -58,7 +75,7 @@ export async function POST(request: Request) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: staffSessionMaxAgeSec(),
   });
   return response;
 }

@@ -16,6 +16,7 @@ import {
   synthesizePlanMarkdown,
   type PlanningMeta,
 } from "@automation-studio/domain";
+import { requireRateLimit } from "@/lib/rate-limit";
 
 const secretItemSchema = z.object({
   keyName: z.string().min(1).max(80),
@@ -37,7 +38,12 @@ export async function GET(
     await requirePermission(ctx, "change_request:chat");
     const cr = await requireChangeRequestAccess(ctx, id);
     const rows = await db.secretRef.findMany({
-      where: { changeRequestId: cr.id, purpose: "CHAT", ciphertext: { not: null } },
+      where: {
+        companyId: ctx.company.id,
+        changeRequestId: cr.id,
+        purpose: "CHAT",
+        ciphertext: { not: null },
+      },
       select: { keyName: true, createdAt: true },
       orderBy: { createdAt: "asc" },
     });
@@ -60,6 +66,10 @@ export async function POST(
   try {
     const { id } = await context.params;
     const ctx = await getRequestAuth();
+    await requireRateLimit({
+      preset: "secrets",
+      scope: `${ctx.company.id}:${ctx.user.id}`,
+    });
     await requirePermission(ctx, "change_request:chat");
     const cr = await requireChangeRequestAccess(ctx, id);
     const body = postBodySchema.parse(await request.json());
@@ -67,7 +77,7 @@ export async function POST(
     for (const item of body.secrets) {
       const keyName = normalizeSecretKeyName(item.keyName);
       if (!isCredentialSecretKey(keyName)) continue;
-      const ciphertext = encryptSecret(item.value);
+      const ciphertext = encryptSecret(item.value, ctx.company.id);
       await db.secretRef.upsert({
         where: {
           companyId_projectId_keyName_purpose: {

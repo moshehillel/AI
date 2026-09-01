@@ -30,6 +30,7 @@ async function getClerkHandler() {
     "/api/webhooks(.*)",
     "/api/github/app-manifest(.*)",
     "/api/health",
+    "/api/ready",
     "/icon(.*)",
     "/favicon.ico",
     "/apple-icon(.*)",

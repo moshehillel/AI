@@ -221,3 +221,81 @@ Do **not** enable demo auth on production while using open access.
 11. Set company usage soft caps in Admin settings
 12. Confirm `ENCRYPTION_KEY` is set (same value on web + worker)
 13. After first sign-in, open `/select-org` if prompted — Koda JIT-links the org to `demo-co` when `clerkOrgId` was unset
+
+## Scaling for production
+
+Koda runs on Railway as **web** (Next.js) + **worker** (BullMQ) + **Postgres** + **Redis**. Use this section when moving from single-customer open access to many users.
+
+### Multi-tenant readiness
+
+| Layer | Today (OPEN_ACCESS=1) | Many customers (OPEN_ACCESS=0) |
+| --- | --- | --- |
+| Identity | Seeded `seed_employee` on `demo-co` | Clerk org → `Company.clerkOrgId` |
+| Data scope | All queries filter `companyId` via `requireChangeRequestAccess` | Same — each org is isolated |
+| Staff routes | `/staff` password → signed cookie for `/admin`, `/review`, `/usage` | Clerk `DEVELOPER` / `ADMIN` roles |
+| Secrets | AES-GCM in `secret_refs`, scoped by `companyId` | Optional `ENCRYPTION_KEY_PER_ORG=1` for per-org key derivation |
+
+**Before launch:** set `OPEN_ACCESS=0`, verify Clerk webhook sync, confirm each customer has their own Clerk org (not shared `demo-co`). The seed company remains for local dev only.
+
+### Recommended Railway scaling
+
+Start conservative; scale horizontally before raising per-process concurrency.
+
+| Component | Starter (≤10 active users) | Growth (10–100 users) | High load (100+) |
+| --- | --- | --- | --- |
+| **web** | 1 replica, 1 vCPU / 1 GB | 2–3 replicas | 3–5 replicas + CDN for static |
+| **worker** | 1 replica, `WORKER_CONCURRENCY=5` | 2 replicas, `WORKER_CONCURRENCY=5` each | 3+ replicas; tune `MAX_CONCURRENT_CURSOR_AGENTS` |
+| **Postgres** | Railway Postgres (shared) | Upgrade plan; add `?connection_limit=10` per service | Dedicated Postgres; read replicas later |
+| **Redis** | Railway Redis | Same; monitor memory | Dedicated Redis; increase `maxmemory` |
+
+```bash
+# Example production tuning (adjust to your plan):
+railway variable set --service worker WORKER_CONCURRENCY=5 MAX_CONCURRENT_CURSOR_AGENTS=8
+railway variable set --service web SSE_MAX_CONNECTIONS_PER_PROGRAM=8 SSE_MAX_CONNECTIONS_TOTAL=500
+railway variable set --service web RATE_LIMIT_MESSAGES_PER_MIN=30 RATE_LIMIT_SUBMIT_PER_MIN=10
+# Postgres pool — append to DATABASE_URL on both services:
+# ?connection_limit=10&pool_timeout=20
+railway up --service worker -d -y -m "Scale worker concurrency"
+railway up --service web -d -y -m "Scale web SSE + rate limits"
+```
+
+### Environment flags (reference)
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WORKER_CONCURRENCY` | 5 | BullMQ jobs per worker replica |
+| `MAX_CONCURRENT_CURSOR_AGENTS` | 8 | Global Redis semaphore — prevents Cursor API stampede |
+| `QUEUE_MAX_WAITING` | 0 (unlimited) | Set e.g. 500 to reject enqueue when backlog is huge |
+| `SSE_MAX_CONNECTIONS_PER_PROGRAM` | 8 | Live chat SSE tabs per program per web replica |
+| `SSE_MAX_CONNECTION_AGE_MS` | 7200000 | Auto-close stale SSE (2h) |
+| `RATE_LIMIT_*` | see `.env.example` | Per-user API throttles (Redis-backed) |
+| `ENCRYPTION_KEY_PER_ORG` | 0 | Set `1` for per-company secret keys (re-save secrets after) |
+| `STAFF_SESSION_MAX_AGE_SEC` | 28800 | Staff cookie lifetime (8h) |
+
+Planning jobs get **higher BullMQ priority** than build jobs automatically.
+
+### Health checks
+
+| Endpoint | Service | Use |
+| --- | --- | --- |
+| `GET /api/health` | web | Liveness |
+| `GET /api/ready` | web | Readiness (Postgres + Redis) |
+| `GET :8081/health` | worker | Liveness (`WORKER_HEALTH_PORT`) |
+| `GET :8081/ready` | worker | Queue + cursor slot stats |
+
+Point Railway health checks at `/api/ready` once stable (stricter than `/api/health`).
+
+### What to do before many users
+
+1. **Turn off open access** — `OPEN_ACCESS=0`, Clerk production keys, webhook wired.
+2. **Run migrations** — `pnpm db:migrate:deploy` (includes scale indexes on messages, agent_runs, programs).
+3. **Set scaling env vars** on web + worker (see table above).
+4. **Cap Cursor concurrency** — `MAX_CONCURRENT_CURSOR_AGENTS` ≤ your Cursor plan limits.
+5. **Enable rate limits** — tune `RATE_LIMIT_*` for your expected traffic.
+6. **Staff hardening** — strong `ADMIN_PASSWORD`, shorter `STAFF_SESSION_MAX_AGE_SEC`, never share password in URLs.
+7. **Monitor** — worker `/ready` queue depth, Railway Postgres connections, Redis memory, failed BullMQ jobs (`removeOnFail` keeps last 5000).
+8. **Optional per-org encryption** — `ENCRYPTION_KEY_PER_ORG=1` only after planning a secret re-save window.
+
+### Graceful degradation under load
+
+When Cursor slots are full or the queue is deep, customers see plain-English status in chat: *“Koda is in high demand…”* with queue position when available. Jobs dedupe per program (`jobId: cursor-start-{id}`, `cursor-follow-up-{id}`) to prevent duplicate agents.

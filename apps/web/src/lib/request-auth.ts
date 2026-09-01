@@ -32,8 +32,9 @@ async function seededAuthContext(clerkUserId: string) {
 
 /**
  * Auth context:
- * - OPEN_ACCESS / demo → seeded employee on demo-co (single customer)
- * - Clerk org + synced DB → real multi-tenant context
+ * - OPEN_ACCESS / demo → seeded employee on demo-co (single customer).
+ *   All tenant filters still use companyId; only identity is fixed until Clerk.
+ * - Clerk org + synced DB → real multi-tenant context (one Company per org).
  * - Clerk org present but DB lag → JIT sync from Clerk API
  */
 export async function getRequestAuth() {

@@ -39,7 +39,7 @@ export async function loadPlanningAttachmentPayload(opts: {
   }
 
   try {
-    return JSON.parse(decryptSecret(row.ciphertext)) as PlanningAgentFilePayload;
+    return JSON.parse(decryptSecret(row.ciphertext, opts.companyId)) as PlanningAgentFilePayload;
   } catch (error) {
     console.error(
       `[planning-attachment] decrypt/parse failed ref=${opts.attachmentRef}`,

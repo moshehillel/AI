@@ -58,6 +58,8 @@ export default defineRailway(() => {
       HOSTNAME: "0.0.0.0",
       DATABASE_URL: db.env.DATABASE_URL,
       REDIS_URL: cache.env.REDIS_URL,
+      SSE_MAX_CONNECTIONS_PER_PROGRAM: "8",
+      RATE_LIMIT_MESSAGES_PER_MIN: "30",
       // Set once via bootstrap / dashboard (openssl rand -hex 32). Not committed.
       // ENCRYPTION_KEY is applied by scripts/railway-bootstrap.sh
       NEXT_PUBLIC_APP_URL: "https://placeholder.up.railway.app",
@@ -71,6 +73,9 @@ export default defineRailway(() => {
       ...demoEnv,
       DATABASE_URL: db.env.DATABASE_URL,
       REDIS_URL: cache.env.REDIS_URL,
+      WORKER_CONCURRENCY: "5",
+      MAX_CONCURRENT_CURSOR_AGENTS: "8",
+      WORKER_HEALTH_PORT: "8081",
     },
   });
 

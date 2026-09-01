@@ -2,8 +2,19 @@ import { getRequestAuth } from "@/lib/request-auth";
 import { requireChangeRequestAccess, AuthError } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
 import { isCredentialSecretKey } from "@automation-studio/domain";
+import {
+  getQueueVisibility,
+  highDemandMessage,
+} from "@automation-studio/jobs";
+import {
+  admitSseConnection,
+  releaseSseConnection,
+} from "@/lib/sse-limits";
 
 export const dynamic = "force-dynamic";
+
+const SSE_POLL_MS =
+  Number.parseInt(process.env.SSE_POLL_INTERVAL_MS ?? "1000", 10) || 1000;
 
 export async function GET(
   _request: Request,
@@ -13,6 +24,18 @@ export async function GET(
     const { id } = await context.params;
     const ctx = await getRequestAuth();
     await requireChangeRequestAccess(ctx, id);
+
+    const admission = admitSseConnection(id);
+    if (!admission.ok) {
+      return Response.json(
+        {
+          error:
+            "Too many live connections for this program. Close other tabs and try again.",
+        },
+        { status: 429 },
+      );
+    }
+    const connectionId = admission.connectionId;
 
     const encoder = new TextEncoder();
     let closed = false;
@@ -61,6 +84,8 @@ export async function GET(
           };
 
           const latestAgentRun = cr.agentRuns[0] ?? null;
+          const queueStats = await getQueueVisibility({ changeRequestId: id });
+          const demandMessage = highDemandMessage(queueStats);
 
           const fingerprint = JSON.stringify({
             status: cr.status,
@@ -79,6 +104,9 @@ export async function GET(
             inFlightTurnAt: meta.inFlightTurnAt ?? null,
             serverQueued: Boolean(meta.queuedFollowUp?.prompt),
             workerHeartbeatAt: meta.workerHeartbeatAt ?? null,
+            queueWaiting: queueStats.waiting,
+            queuePosition: queueStats.programQueuePosition ?? null,
+            highDemand: demandMessage,
             updatedAt: cr.updatedAt.toISOString(),
           });
 
@@ -114,6 +142,13 @@ export async function GET(
               inFlightTurnAt: meta.inFlightTurnAt ?? null,
               serverQueued: Boolean(meta.queuedFollowUp?.prompt),
               workerHeartbeatAt: meta.workerHeartbeatAt ?? null,
+              queue: {
+                waiting: queueStats.waiting,
+                position: queueStats.programQueuePosition ?? null,
+                cursorActive: queueStats.cursorSlots.active,
+                cursorLimit: queueStats.cursorSlots.limit,
+              },
+              highDemandMessage: demandMessage,
               secretKeys: credentialSecrets.map((s) => ({
                 keyName: s.keyName,
                 createdAt: s.createdAt.toISOString(),
@@ -127,17 +162,30 @@ export async function GET(
           void tick().catch((error) => {
             send({ type: "error", message: String(error) });
           });
-        }, 1000);
+        }, SSE_POLL_MS);
 
         const heartbeat = setInterval(() => {
           send({ type: "heartbeat", at: new Date().toISOString() });
         }, 15000);
+
+        const maxAgeMs =
+          Number.parseInt(process.env.SSE_MAX_CONNECTION_AGE_MS ?? "", 10) ||
+          2 * 60 * 60 * 1000;
+        const maxAgeTimer = setTimeout(() => {
+          send({
+            type: "error",
+            message: "Live connection expired — refresh the page to reconnect.",
+          });
+          close();
+        }, maxAgeMs);
 
         const close = () => {
           if (closed) return;
           closed = true;
           clearInterval(interval);
           clearInterval(heartbeat);
+          clearTimeout(maxAgeTimer);
+          releaseSseConnection(connectionId);
           try {
             controller.close();
           } catch {
@@ -149,6 +197,7 @@ export async function GET(
       },
       cancel() {
         closed = true;
+        releaseSseConnection(connectionId);
       },
     });
 

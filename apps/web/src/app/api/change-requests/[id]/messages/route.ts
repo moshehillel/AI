@@ -24,6 +24,7 @@ import {
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { enqueueJob } from "@automation-studio/jobs";
+import { requireRateLimit } from "@/lib/rate-limit";
 
 const attachmentItemSchema = z.object({
   kind: z.enum(["api_docs_url", "docs_text", "examples", "file"]),
@@ -282,6 +283,10 @@ export async function POST(
   try {
     const { id } = await context.params;
     const ctx = await getRequestAuth();
+    await requireRateLimit({
+      preset: "messages",
+      scope: `${ctx.company.id}:${ctx.user.id}`,
+    });
     await requirePermission(ctx, "change_request:chat");
     const cr = await requireChangeRequestAccess(ctx, id);
     const body = bodySchema.parse(await request.json());

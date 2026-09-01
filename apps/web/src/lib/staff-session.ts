@@ -107,3 +107,11 @@ export function safeNextPath(raw: string | null | undefined): string {
   if (raw?.startsWith("/") && !raw.startsWith("//")) return raw;
   return "/review";
 }
+
+/** Staff cookie lifetime (seconds). Default 8h; max 30d. */
+export function staffSessionMaxAgeSec(): number {
+  const raw = process.env.STAFF_SESSION_MAX_AGE_SEC?.trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : 60 * 60 * 8;
+  if (!Number.isFinite(parsed)) return 60 * 60 * 8;
+  return Math.min(60 * 60 * 24 * 30, Math.max(900, parsed));
+}

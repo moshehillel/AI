@@ -9,6 +9,7 @@ import {
 import { db } from "@automation-studio/db";
 import { encryptSecret } from "@automation-studio/domain";
 import { preparePlanningAttachment } from "@/lib/planning-attach";
+import { requireRateLimit } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -24,6 +25,10 @@ export async function POST(
   try {
     const { id } = await context.params;
     const ctx = await getRequestAuth();
+    await requireRateLimit({
+      preset: "upload",
+      scope: `${ctx.company.id}:${ctx.user.id}`,
+    });
     await requirePermission(ctx, "change_request:chat");
     const cr = await requireChangeRequestAccess(ctx, id);
 
@@ -39,7 +44,10 @@ export async function POST(
     }
 
     const attachmentKey = `planning-file-${randomBytes(8).toString("hex")}`;
-    const ciphertext = encryptSecret(JSON.stringify(prepared.prepared.payload));
+    const ciphertext = encryptSecret(
+      JSON.stringify(prepared.prepared.payload),
+      ctx.company.id,
+    );
 
     await db.secretRef.upsert({
       where: {

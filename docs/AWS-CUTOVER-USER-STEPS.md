@@ -1,6 +1,6 @@
 # Koda AWS cutover — operator steps
 
-**Status (2026-09-01):** AWS infra is up; ECS has **0 running tasks** (ECR empty); ACM is **PENDING_VALIDATION**; DNS still points to Railway.
+**Status (2026-09-02):** ACM **ISSUED**; ALB has HTTPS (443) and HTTP→HTTPS redirect (Step 5 applied); DNS `koda` → ALB; ECS web targets **healthy** (verify app/secrets and Railway decommission separately).
 
 | Resource | Value |
 | --- | --- |
@@ -488,5 +488,5 @@ aws elbv2 describe-target-health \
 | `gh` not logged in / GitHub vars not set | You | 2 |
 | No ECR images (local Docker blocked by NetFree) | GitHub Actions | 3 |
 | App secrets still `REPLACE_ME` | You (from Railway dashboard) | 4 |
-| ALB HTTP-only (no HTTPS listener) | You (terraform apply after ACM issued) | 5 |
-| DNS still on Railway | You | 6 |
+| ~~ALB HTTP-only~~ HTTPS listener applied | Done | 5 |
+| ~~DNS still on Railway~~ `koda` → ALB | Done | 6 |

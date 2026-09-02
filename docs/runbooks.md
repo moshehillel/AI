@@ -32,6 +32,8 @@ Then open https://koda.advancedautomations.net — Sign in → select organizati
 
 **No public sign-up:** the app redirects `/sign-up` to `/sign-in` and hides registration CTAs. Also turn off **Allow sign-ups** in Clerk Dashboard → User & Authentication → Restrictions so invites/admin-created users are the only path.
 
+**Add a user to a project (planning chat):** Admin → **Projects & repositories** → for that project, enter their Clerk email (**Assign by email**) or pick an existing company member. They must already have a Clerk login. After assign, they sign in, select the org, open the project, and continue planning chat. Requires an active Clerk organization on the company (`clerkOrgId`).
+
 Staff developer tools: sign in with Clerk `org:developer` / `org:admin`, or use `/staff` password fallback (`ADMIN_PASSWORD`).
 
 ## Local open access (no login)

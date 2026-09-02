@@ -141,6 +141,9 @@ describe("permissions", () => {
     assert.equal(roleHasPermission("DEVELOPER", "program:open_in_cursor"), true);
     assert.equal(roleHasPermission("EMPLOYEE", "program:grant_test_improve"), false);
     assert.equal(roleHasPermission("ADMIN", "program:grant_test_improve"), true);
+    assert.equal(roleHasPermission("EMPLOYEE", "members:manage"), false);
+    assert.equal(roleHasPermission("DEVELOPER", "members:manage"), true);
+    assert.equal(roleHasPermission("ADMIN", "members:manage"), true);
     assert.equal(roleHasPermission("EMPLOYEE", "program:reveal_secrets"), false);
     assert.equal(roleHasPermission("DEVELOPER", "program:reveal_secrets"), true);
     assert.equal(roleHasPermission("ADMIN", "program:reveal_secrets"), true);

@@ -219,7 +219,7 @@ export default async function AdminPage({
                     />
                   </div>
                 ) : null}
-                {ctx.role === "ADMIN" ? (
+                {ctx.role === "ADMIN" || ctx.role === "DEVELOPER" ? (
                   <div className="mt-4">
                     <ProjectMembersForm
                       projectId={project.id}

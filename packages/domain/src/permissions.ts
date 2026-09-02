@@ -46,6 +46,7 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
     "program:grant_test_improve",
     "program:final_approve",
     "program:reveal_secrets",
+    "members:manage",
     "inbox:read",
   ],
   ADMIN: [

@@ -138,13 +138,12 @@ async function ClerkHome() {
           <span className="onboard-top-name">Advanced Automations</span>
         </div>
         <div className="onboard-top-nav">
-          <Link href="/sign-in">Sign in</Link>
-          <Link className="onboard-btn onboard-btn-compact" href="/sign-up">
-            Get started
+          <Link className="onboard-btn onboard-btn-compact" href="/sign-in">
+            Sign in
           </Link>
         </div>
       </header>
-      <Hero ctaHref="/sign-up" ctaLabel="Start with Koda" />
+      <Hero ctaHref="/sign-in" ctaLabel="Sign in to Koda" />
     </main>
   );
 }

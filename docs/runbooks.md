@@ -30,6 +30,8 @@ aws ecs update-service --cluster koda-platform-production-cluster \
 
 Then open https://koda.advancedautomations.net — Sign in → select organization → Programs.
 
+**No public sign-up:** the app redirects `/sign-up` to `/sign-in` and hides registration CTAs. Also turn off **Allow sign-ups** in Clerk Dashboard → User & Authentication → Restrictions so invites/admin-created users are the only path.
+
 Staff developer tools: sign in with Clerk `org:developer` / `org:admin`, or use `/staff` password fallback (`ADMIN_PASSWORD`).
 
 ## Local open access (no login)

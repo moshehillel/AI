@@ -27,7 +27,14 @@ export default function SignInPage() {
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-6">
-      <SignIn />
+      {/* Public sign-up disabled; accounts via Clerk admin/invites only. */}
+      <SignIn
+        appearance={{
+          elements: {
+            footerAction: { display: "none" },
+          },
+        }}
+      />
     </main>
   );
 }

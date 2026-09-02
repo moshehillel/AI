@@ -1,33 +1,9 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
-import { SignUp } from "@clerk/nextjs";
-import { isDemoAuthEnabled } from "@/lib/access-mode";
 
-const clerkEnabled = Boolean(
-  process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
-);
-
+/**
+ * Public sign-up is disabled — accounts are created via Clerk admin / invites.
+ * Also turn off "Allow sign-ups" in Clerk Dashboard → User & Authentication → Restrictions.
+ */
 export default function SignUpPage() {
-  if (isDemoAuthEnabled()) {
-    redirect("/projects");
-  }
-
-  if (!clerkEnabled) {
-    return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-6">
-        <p className="muted text-center">
-          Sign-up is unavailable until Clerk is configured.
-        </p>
-        <Link className="btn btn-primary" href="/projects">
-          Continue
-        </Link>
-      </main>
-    );
-  }
-
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-6">
-      <SignUp />
-    </main>
-  );
+  redirect("/sign-in");
 }

@@ -35,11 +35,14 @@ export default async function ProjectsPage() {
 
   const projects = await db.project.findMany({
     where: projectFilter,
+    include: { repository: true },
     orderBy: { name: "asc" },
   });
 
   const onboardingProject =
     projects.find((p) => p.slug === ONBOARDING_SLUG) ?? projects[0] ?? null;
+
+  const assignedWorkspaces = isEmployee ? projects : [];
 
   const activePrograms = onboardingProject
     ? await db.changeRequest.findMany({
@@ -160,6 +163,32 @@ export default async function ProjectsPage() {
             ) : null}
           </ul>
 
+          {isEmployee && assignedWorkspaces.length > 0 ? (
+            <div className="onboard-staff">
+              <h2 className="onboard-below-title">Your workspaces</h2>
+              <p className="onboard-empty" style={{ marginBottom: "0.75rem" }}>
+                Projects an admin linked for you — open one to chat against its
+                GitHub repository.
+              </p>
+              <div className="onboard-staff-list">
+                {assignedWorkspaces.map((project) => (
+                  <Link
+                    key={project.id}
+                    href={`/projects/${project.id}`}
+                    className="onboard-program-link"
+                  >
+                    <span>{project.name}</span>
+                    <span className="onboard-program-status">
+                      {project.repository
+                        ? `${project.repository.githubOwner}/${project.repository.githubRepo}`
+                        : "No repo"}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {isStaff ? (
             <div className="onboard-staff">
               <h2 className="onboard-below-title">Staff · workspaces</h2>
@@ -171,6 +200,11 @@ export default async function ProjectsPage() {
                     className="onboard-program-link"
                   >
                     <span>{project.name}</span>
+                    <span className="onboard-program-status">
+                      {project.repository
+                        ? `${project.repository.githubOwner}/${project.repository.githubRepo}`
+                        : "No repo"}
+                    </span>
                   </Link>
                 ))}
               </div>

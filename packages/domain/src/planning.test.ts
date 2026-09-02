@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildOpeningPlanningMessage,
+  buildOpeningIterateMessage,
   buildPlanningFollowUp,
   buildPlanningStartPrompt,
   chatAlreadyCoversOpenItems,
@@ -27,6 +28,18 @@ describe("planning Q&A", () => {
     });
     assert.match(msg, /Invoice sync/);
     assert.match(msg, /living plan|Plan panel|numbered questions/i);
+  });
+
+  it("opens iterate chat against a linked repo label", () => {
+    const msg = buildOpeningIterateMessage({
+      title: "Billing portal",
+      repoLabel: "acme/billing",
+      hasInitialPrompt: false,
+    });
+    assert.match(msg, /Koda/i);
+    assert.match(msg, /acme\/billing/);
+    assert.match(msg, /existing codebase/i);
+    assert.match(msg, /not starting from an empty planning repo/i);
   });
 
   it("answers identity questions directly instead of ignoring them", () => {

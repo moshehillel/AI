@@ -34,6 +34,8 @@ Then open https://koda.advancedautomations.net — Sign in → select organizati
 
 **Add a user to a project (planning chat):** Admin → **Projects & repositories** → for that project, enter their Clerk email (**Assign by email**) or pick an existing company member. They must already have a Clerk login. After assign, they sign in, select the org, open the project, and continue planning chat. Requires an active Clerk organization on the company (`clerkOrgId`).
 
+**Link an existing GitHub repo as a Koda project:** Prerequisites — GitHub App installed on the org that owns the repo (Admin → Install / manage GitHub App), and the App granted access to that repository. Then Admin → **Projects & repositories** → **Add existing GitHub repo** (owner + repo + installation id) → **Create project from repo** → **Assign by email** with the Clerk user's email. The user signs in → **Your workspaces** (or `/projects/<id>`) → **Start chat on this repo**. Chat uses the linked codebase, not the empty shared planning repo. To attach a repo to an existing empty project, use **Connect** under that project instead.
+
 Staff developer tools: sign in with Clerk `org:developer` / `org:admin`, or use `/staff` password fallback (`ADMIN_PASSWORD`).
 
 ## Local open access (no login)

@@ -60,8 +60,9 @@ export function ProjectMembersForm({
     <div className="space-y-3">
       <p className="muted text-sm">Project members</p>
       <p className="muted text-xs">
-        Assign an existing Clerk login so they can open this project and continue
-        planning chat. Create the account in Clerk first (no public sign-up).
+        Assign an existing Clerk login so they can open this project and chat
+        (planning or against a linked GitHub repo). Create the account in Clerk
+        first (no public sign-up).
       </p>
       <ul className="space-y-2 text-sm">
         {members.map((member) => (

@@ -94,14 +94,36 @@ export default async function ProjectDetailPage({
             ) : null}
 
             <div className="mt-6">
-              <h2 className="text-[13px] font-medium">New program</h2>
-              <p className="muted mt-1 text-[12px] leading-relaxed">
-                Start a back-and-forth with Koda. Attach docs in chat when
-                ready, then submit to a developer for building.
-              </p>
-              <div className="mt-3">
-                <NewProgramForm projectId={project.id} />
-              </div>
+              {project.repository ? (
+                <>
+                  <h2 className="text-[13px] font-medium">
+                    Chat on this codebase
+                  </h2>
+                  <p className="muted mt-1 text-[12px] leading-relaxed">
+                    Linked repository: {project.repository.githubOwner}/
+                    {project.repository.githubRepo}. Describe what to improve;
+                    Koda plans against that existing code (not an empty planning
+                    repo).
+                  </p>
+                  <div className="mt-3">
+                    <NewProgramForm
+                      projectId={project.id}
+                      intent="iterate"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-[13px] font-medium">New program</h2>
+                  <p className="muted mt-1 text-[12px] leading-relaxed">
+                    Start a back-and-forth with Koda. Attach docs in chat when
+                    ready, then submit to a developer for building.
+                  </p>
+                  <div className="mt-3">
+                    <NewProgramForm projectId={project.id} />
+                  </div>
+                </>
+              )}
             </div>
 
             {isStaff ? (
@@ -167,18 +189,11 @@ export default async function ProjectDetailPage({
                 </ul>
               </details>
             ) : null}
-            {isStaff ? (
-              !project.repository ? (
-                <p className="mt-4 text-[12px]" style={{ color: "var(--ide-warn)" }}>
-                  Repository not connected. Link one under Admin before live
-                  builds.
-                </p>
-              ) : (
-                <p className="muted mt-4 text-[12px]">
-                  Connected repository: {project.repository.githubOwner}/
-                  {project.repository.githubRepo}
-                </p>
-              )
+            {isStaff && !project.repository ? (
+              <p className="mt-4 text-[12px]" style={{ color: "var(--ide-warn)" }}>
+                Repository not connected. Link one under Admin before live
+                builds or iterate chat.
+              </p>
             ) : null}
           </section>
         </div>

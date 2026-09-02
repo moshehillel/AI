@@ -12,6 +12,7 @@ import {
   shortTitleFromPrompt,
   slugify,
   buildOpeningPlanningMessage,
+  buildOpeningIterateMessage,
   getDefaultGithubRepoConfig,
   isLiveCursorConfigured,
   type PlanningMeta,
@@ -24,6 +25,8 @@ const bodySchema = z
     title: z.string().min(3).max(200).optional(),
     prompt: z.string().max(8000).optional(),
     kind: z.enum(["CHANGE", "PROGRAM"]).default("CHANGE"),
+    /** Chat against an already-linked GitHub repo (not greenfield planning). */
+    intent: z.enum(["plan", "iterate"]).optional(),
     apiDocsUrl: z.string().url().optional().or(z.literal("")),
     docsText: z.string().max(20000).optional(),
     examples: z.string().max(20000).optional(),
@@ -73,6 +76,29 @@ export async function POST(request: Request) {
       body.title?.trim() ||
       (prompt ? shortTitleFromPrompt(prompt) : `Program ${number}`);
 
+    const project = await db.project.findFirst({
+      where: { id: body.projectId },
+      include: { repository: true },
+    });
+
+    const linkedRepoLabel = project?.repository
+      ? `${project.repository.githubOwner}/${project.repository.githubRepo}`
+      : null;
+    const iterateExisting =
+      isProgram &&
+      (body.intent === "iterate" ||
+        (body.intent !== "plan" && Boolean(project?.repository)));
+
+    if (body.intent === "iterate" && !project?.repository) {
+      return NextResponse.json(
+        {
+          error:
+            "No repository linked — connect the GitHub repo in Admin first, then start chat.",
+        },
+        { status: 400 },
+      );
+    }
+
     const planningMeta: PlanningMeta = isProgram
       ? {
           apiDocsUrl: body.apiDocsUrl || null,
@@ -80,20 +106,27 @@ export async function POST(request: Request) {
           examples: body.examples || null,
           coveredTopics: prompt ? ["goals"] : [],
           lastQuestionTopic: null,
+          ...(iterateExisting
+            ? {
+                iterateExisting: true,
+                linkedRepoLabel,
+              }
+            : {}),
         }
       : {};
 
     const opening = isProgram
-      ? buildOpeningPlanningMessage({
-          title,
-          hasInitialPrompt: prompt.length >= 3,
-        })
+      ? iterateExisting
+        ? buildOpeningIterateMessage({
+            title,
+            repoLabel: linkedRepoLabel,
+            hasInitialPrompt: prompt.length >= 3,
+          })
+        : buildOpeningPlanningMessage({
+            title,
+            hasInitialPrompt: prompt.length >= 3,
+          })
       : null;
-
-    const project = await db.project.findFirst({
-      where: { id: body.projectId },
-      include: { repository: true },
-    });
 
     const changeRequest = await db.changeRequest.create({
       data: {
@@ -165,9 +198,10 @@ export async function POST(request: Request) {
         { jobId: `classify-${changeRequest.id}` },
       );
     } else {
-      // Auto-link planning repo so live Cursor plan mode can start immediately.
+      // Prefer the project's linked GitHub repo (existing code). Only fall back
+      // to a shared planning repo for greenfield programs without a connection.
       let repository = project?.repository ?? null;
-      if (!repository) {
+      if (!repository && !iterateExisting) {
         repository = await ensurePlanningRepository(db, {
           projectId: body.projectId,
           companyId: ctx.company.id,

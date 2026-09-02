@@ -40,6 +40,10 @@ export type PlanningMeta = {
   workerHeartbeatAt?: string | null;
   /** Debug: which path recovered reply text on the last turn (no secrets). */
   lastReplyRecovery?: string | null;
+  /** True when the program targets an already-linked GitHub codebase (not greenfield). */
+  iterateExisting?: boolean | null;
+  /** owner/repo label when iterateExisting is set. */
+  linkedRepoLabel?: string | null;
 };
 
 export const PLANNING_TOPICS: PlanningTopic[] = [
@@ -76,6 +80,44 @@ export function buildOpeningPlanningMessage(opts: {
     "Tell me what you want to automate in your own words. I'll draft a plan in the Plan panel, answer in plain English here, and ask questions when I still need details from you.",
     "",
     "Use **+** to attach docs or files. For passwords and API keys, choose **Add secrets / credentials** so values stay private and never appear in chat.",
+  ].join("\n");
+}
+
+/** Opening message when chatting against an already-linked GitHub repository. */
+export function buildOpeningIterateMessage(opts: {
+  title?: string;
+  repoLabel?: string | null;
+  hasInitialPrompt: boolean;
+}): string {
+  const repo = opts.repoLabel?.trim();
+  const brand = opts.title
+    ? `Hi — I'm **Koda**, Advanced Automations' AI Builder. Let's improve **${opts.title}** together.`
+    : "Hi — I'm **Koda**, Advanced Automations' AI Builder. Let's improve this existing project together.";
+
+  const repoLine = repo
+    ? `I'm connected to the existing codebase **${repo}** — not starting from an empty planning repo.`
+    : "I'm connected to the project's existing GitHub repository — not starting from an empty planning repo.";
+
+  if (opts.hasInitialPrompt) {
+    return [
+      brand,
+      "",
+      repoLine,
+      "",
+      "I've got your starting notes. Tell me what to change or add; I'll keep a living plan in the Plan panel and ask when I need details.",
+      "",
+      "Use **+** to attach docs or files. For passwords and API keys, choose **Add secrets / credentials** so values stay private.",
+    ].join("\n");
+  }
+
+  return [
+    brand,
+    "",
+    repoLine,
+    "",
+    "Tell me what you want to improve or add in your own words. I'll draft a plan against the linked code, answer in plain English, and ask questions when I need details.",
+    "",
+    "Use **+** to attach docs or files. For passwords and API keys, choose **Add secrets / credentials** so values stay private.",
   ].join("\n");
 }
 

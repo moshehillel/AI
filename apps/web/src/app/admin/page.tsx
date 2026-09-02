@@ -5,6 +5,7 @@ import { isOpenAccess } from "@/lib/access-mode";
 import { db } from "@automation-studio/db";
 import { parseCompanySettings } from "@automation-studio/domain";
 import { ConnectRepoForm } from "./connect-repo-form";
+import { CreateProjectFromRepoForm } from "./create-project-from-repo-form";
 import { InviteNote } from "./invite-note";
 import { ProjectMembersForm } from "./project-members-form";
 import { VerifyProtectionButton } from "./verify-protection-button";
@@ -192,6 +193,15 @@ export default async function AdminPage({
 
         <div className="panel p-5">
           <h2 className="text-xl">Projects & repositories</h2>
+          <p className="muted mt-2 text-sm">
+            Link an existing GitHub repository as a Koda project, then assign a
+            Clerk user so they can open it and chat against that codebase.
+          </p>
+          <div className="mt-4 rounded-xl border border-[var(--line)] p-4">
+            <CreateProjectFromRepoForm
+              defaultInstallationId={installations[0]?.installationId}
+            />
+          </div>
           <div className="mt-4 space-y-4">
             {projects.map((project) => (
               <div
@@ -205,6 +215,9 @@ export default async function AdminPage({
                       {project.repository
                         ? `${project.repository.githubOwner}/${project.repository.githubRepo}`
                         : "No repository connected"}
+                    </p>
+                    <p className="muted mt-1 text-xs">
+                      <Link href={`/projects/${project.id}`}>Open workspace</Link>
                     </p>
                   </div>
                   {project.repository ? (

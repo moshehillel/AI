@@ -1,0 +1,7 @@
+node_modules
+.git
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+.terraform.lock.hcl
+infra/aws/terraform/terraform.tfvars

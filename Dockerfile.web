@@ -39,6 +39,8 @@ ENV NEXT_PUBLIC_ALLOW_DEMO_AUTH=${NEXT_PUBLIC_ALLOW_DEMO_AUTH}
 ENV NEXT_PUBLIC_OPEN_ACCESS=${NEXT_PUBLIC_OPEN_ACCESS}
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# NetFree/corporate TLS inspection breaks Prisma engine downloads inside Docker.
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
 RUN pnpm db:generate
 RUN pnpm --filter @automation-studio/db build \
  && pnpm --filter @automation-studio/domain build \

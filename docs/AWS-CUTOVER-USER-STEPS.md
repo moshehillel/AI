@@ -1,280 +1,397 @@
 # Koda AWS cutover — operator steps
 
-**Status (2026-09-01):** AWS infrastructure is provisioned (VPC, RDS, Redis, ECS, ALB, ECR, Secrets Manager shells). The public app is **still on Railway** until you complete the steps below. **Do not delete Railway** until every verification step passes.
+**Status (2026-09-01):** AWS infra is up; ECS has **0 running tasks** (ECR empty); ACM is **PENDING_VALIDATION**; DNS still points to Railway.
 
-**Domain:** `koda.advancedautomations.net`  
-**ALB target:** `koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com`  
-**Railway project:** `bountiful-fascination` (production still live at `j8333zn7.up.railway.app`)
-
----
-
-## 1. Validate the ACM certificate (Netlify DNS)
-
-AWS Certificate Manager needs a DNS validation record before HTTPS can attach to the ALB.
-
-1. Open **Netlify DNS** for `advancedautomations.net`.
-2. Add a **CNAME** record:
-
-   | Field | Value |
-   | --- | --- |
-   | **Host / name** | `_f4d69fe3488c23263a3dd02306fb074e.koda` |
-   | **Type** | `CNAME` |
-   | **Value / target** | `_6969413c5df1bf87d4002a0f948f9553.jkddzztszm.acm-validations.aws.` |
-   | **TTL** | `300` (or lowest available) |
-
-   Full record names (if your DNS UI expects FQDN):
-
-   - **Name:** `_f4d69fe3488c23263a3dd02306fb074e.koda.advancedautomations.net`
-   - **Value:** `_6969413c5df1bf87d4002a0f948f9553.jkddzztszm.acm-validations.aws.`
-
-3. Wait 5–30 minutes, then confirm in **AWS Console → Certificate Manager (us-east-1)** that the certificate status is **Issued**.
-4. Copy the certificate ARN (format: `arn:aws:acm:us-east-1:065194293782:certificate/…`).
-
----
-
-## 2. Configure GitHub repository settings
-
-In **GitHub → Repository → Settings**:
-
-### Variables (Settings → Secrets and variables → Actions → Variables)
-
-| Name | Value |
+| Resource | Value |
 | --- | --- |
-| `AWS_DEPLOY_ENABLED` | `true` |
+| AWS account | `065194293782` |
+| ALB DNS | `koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com` |
+| ECS cluster | `koda-platform-production-cluster` |
+| GitHub repo | `moshehillel/AI` |
+| GitHub deploy role ARN | `arn:aws:iam::065194293782:role/koda-platform-production-github-deploy` |
+| ACM cert ARN | `arn:aws:acm:us-east-1:065194293782:certificate/53467e0d-25e7-4b28-a06e-32cece4be5c7` |
+| Railway project | `bountiful-fascination` (still live) |
 
-### Secrets (Settings → Secrets and variables → Actions → Secrets)
-
-| Name | Where to get it |
-| --- | --- |
-| `AWS_DEPLOY_ROLE_ARN` | `arn:aws:iam::065194293782:role/koda-platform-production-github-deploy` (or `terraform output -raw github_deploy_role_arn` from `infra/aws/terraform`) |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk Dashboard → Production → API Keys → Publishable key (`pk_live_…`) |
-| `RAILWAY_API_TOKEN` | Railway Dashboard → Account → Tokens (only needed if you export vars via Railway CLI; not used by the deploy workflow itself) |
-
-**Never commit secret values to git.**
+**Order matters.** Complete steps 1–4 before DNS cutover (step 6). Do **not** delete Railway until step 8.
 
 ---
 
-## 3. Populate Secrets Manager from Railway
+## Step 1 — ACM DNS validation (Netlify)
 
-Terraform created three secrets in **AWS Secrets Manager (us-east-1)**:
+ACM must be **ISSUED** before HTTPS works. Add the validation CNAME in Netlify DNS (same zone as `koda.advancedautomations.net`).
 
-| Secret name | Contents | Action |
-| --- | --- | --- |
-| `koda-platform-production/database-url` | Postgres URL | **Auto** — Terraform wrote this after RDS was created |
-| `koda-platform-production/redis-url` | Redis URL | **Auto** — Terraform wrote this after ElastiCache was created |
-| `koda-platform-production/app-env` | JSON blob of app env vars | **You must populate** from Railway production |
-
-### Export from Railway
+### 1a. Confirm the validation record (re-run anytime)
 
 ```bash
-railway link -p bountiful-fascination -e production
-railway variables --service web --json > /tmp/railway-web.json
+aws acm describe-certificate \
+  --certificate-arn "arn:aws:acm:us-east-1:065194293782:certificate/53467e0d-25e7-4b28-a06e-32cece4be5c7" \
+  --region us-east-1 \
+  --query "Certificate.DomainValidationOptions[0].ResourceRecord" \
+  --output table
 ```
 
-Or copy values manually from **Railway → bountiful-fascination → production → web → Variables**.
+**Current record (as of 2026-09-01):**
 
-### Keys to copy into `koda-platform-production/app-env`
-
-Build a JSON file locally (e.g. `/tmp/koda-app-secrets.json`). **Do not commit this file.**
-
-| Key | Source (Railway web service) | Notes |
-| --- | --- | --- |
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Railway var | Also set as GitHub secret (build-time bake) |
-| `CLERK_SECRET_KEY` | Railway var | `sk_live_…` |
-| `CLERK_WEBHOOK_SECRET` | Railway var | Update Clerk webhook URL in step 8 |
-| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | Railway var or `/sign-in` | |
-| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Railway var or `/sign-up` | |
-| `OPEN_ACCESS` | Set to `0` | Production auth required |
-| `NEXT_PUBLIC_OPEN_ACCESS` | Set to `0` | Baked into web Docker image at build |
-| `ALLOW_DEMO_AUTH` | Set to `0` | |
-| `NEXT_PUBLIC_ALLOW_DEMO_AUTH` | Set to `0` | Baked into web Docker image at build |
-| `NEXT_PUBLIC_APP_URL` | Set to `https://koda.advancedautomations.net` | |
-| `ENCRYPTION_KEY` | Railway var | **Must match Railway** if you migrate DB data |
-| `ADMIN_PASSWORD` | Railway var (`ADMIN_PASSWORD` or `STAFF_ACCESS_TOKEN`) | Staff `/staff` fallback |
-| `CURSOR_API_KEY` | Railway var | |
-| `CURSOR_MOCK` | Set to `0` | |
-| `GITHUB_MOCK` | Set to `0` | |
-| `RAILWAY_MOCK` | Set to `1` | Railway integration not used on AWS |
-
-**Optional** (copy from Railway if present — add to the same JSON):
-
-| Key | Purpose |
+| Netlify field | Value |
 | --- | --- |
-| `GITHUB_APP_ID` | GitHub App integration |
-| `GITHUB_APP_PRIVATE_KEY` | PEM (escape newlines as `\n` in JSON) |
-| `GITHUB_APP_WEBHOOK_SECRET` | GitHub webhook verification |
-| `GITHUB_APP_CLIENT_ID` | OAuth |
-| `GITHUB_APP_CLIENT_SECRET` | OAuth |
-| `GITHUB_APP_SLUG` | App slug |
-| `RESEND_API_KEY` | Email notifications |
-| `EMAIL_FROM` | Sender address |
-| `NOTIFY_EMAIL` / `DEVELOPER_NOTIFY_EMAIL` | Program submit alerts |
-| `CURSOR_MODEL_ID` | Optional model override |
-| `DEFAULT_GITHUB_OWNER` / `DEFAULT_GITHUB_REPO` / `DEFAULT_GITHUB_INSTALLATION_ID` | Default repo for planning |
+| **Type** | `CNAME` |
+| **Name / Host** | `_f4d69fe3488c23263a3dd02306fb074e.koda` |
+| **Value / Target** | `_6969413c5df1bf87d4002a0f948f9553.jkddzztszm.acm-validations.aws` |
+| **TTL** | `300` (or Netlify default) |
 
-**Not needed on AWS** (omit or ignore): `RAILWAY_API_TOKEN`, `RAILWAY_PROJECT_ID`, `RAILWAY_SERVICE_ID`, `RAILWAY_WORKER_SERVICE_ID`, `RAILWAY_ENVIRONMENT_ID`, `DATABASE_URL`, `REDIS_URL` (those last two come from separate Secrets Manager entries).
+> Netlify usually wants the host **without** the apex domain suffix. If validation fails, try the full name `_f4d69fe3488c23263a3dd02306fb074e.koda.advancedautomations.net`.
 
-### Upload to Secrets Manager
+### 1b. Wait for ACM to issue
 
 ```bash
-cd infra/aws/terraform
-APP_SECRET_ARN=$(terraform output -raw app_secrets_arn)
-
-aws secretsmanager put-secret-value \
-  --secret-id "$APP_SECRET_ARN" \
-  --secret-string file:///tmp/koda-app-secrets.json \
+aws acm wait certificate-validated \
+  --certificate-arn "arn:aws:acm:us-east-1:065194293782:certificate/53467e0d-25e7-4b28-a06e-32cece4be5c7" \
   --region us-east-1
+
+aws acm describe-certificate \
+  --certificate-arn "arn:aws:acm:us-east-1:065194293782:certificate/53467e0d-25e7-4b28-a06e-32cece4be5c7" \
+  --region us-east-1 \
+  --query "Certificate.Status" \
+  --output text
 ```
+
+Expected: `ISSUED` (can take 5–30 minutes after DNS propagates).
 
 ---
 
-## 4. Attach ACM certificate to the ALB (Terraform)
+## Step 2 — GitHub repo secrets and variables
 
-After ACM shows **Issued**:
+The deploy workflow (`.github/workflows/aws-deploy.yml`) is **skipped** until `AWS_DEPLOY_ENABLED=true`.
 
-```bash
-cd infra/aws/terraform
-```
-
-Edit `terraform.tfvars` (gitignored) and set:
-
-```hcl
-acm_certificate_arn = "arn:aws:acm:us-east-1:065194293782:certificate/YOUR_CERT_ID"
-```
-
-Then apply:
+### 2a. Sign in to GitHub CLI (one-time)
 
 ```bash
-terraform init
-terraform apply
+gh auth login
 ```
 
-This enables HTTPS on the ALB (HTTP → HTTPS redirect). Confirm in the AWS Console that the ALB listener on port 443 is active.
+### 2b. Set repository variable
+
+```bash
+gh variable set AWS_DEPLOY_ENABLED --body "true" --repo moshehillel/AI
+```
+
+### 2c. Set repository secrets
+
+Get your Clerk **publishable** key from [Clerk Dashboard → API Keys](https://dashboard.clerk.com) (Production instance, `pk_live_…`).
+
+```bash
+gh secret set AWS_DEPLOY_ROLE_ARN \
+  --body "arn:aws:iam::065194293782:role/koda-platform-production-github-deploy" \
+  --repo moshehillel/AI
+
+gh secret set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY \
+  --body "pk_live_YOUR_KEY_HERE" \
+  --repo moshehillel/AI
+```
+
+### 2d. Verify settings
+
+```bash
+gh variable list --repo moshehillel/AI | findstr AWS_DEPLOY
+gh secret list --repo moshehillel/AI
+```
+
+| Setting | Type | Value |
+| --- | --- | --- |
+| `AWS_DEPLOY_ENABLED` | **Variable** | `true` |
+| `AWS_DEPLOY_ROLE_ARN` | **Secret** | `arn:aws:iam::065194293782:role/koda-platform-production-github-deploy` |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | **Secret** | `pk_live_…` |
+
+Or set the same values in GitHub UI: **Settings → Secrets and variables → Actions**.
 
 ---
 
-## 5. Deploy application images to ECS
+## Step 3 — Run GitHub Actions deploy (ECR + ECS)
 
-### Option A — GitHub Actions (recommended)
+This builds Docker images on GitHub runners (bypasses NetFree blocking local Docker) and pushes to ECR.
 
-1. Confirm step 2 is complete (`AWS_DEPLOY_ENABLED=true` and secrets set).
-2. Go to **Actions → Deploy Koda to AWS → Run workflow**.
-3. Branch: `main` or `cursor/koda-program-lifecycle-8b33`
-4. `image_tag`: `latest` or a git SHA
-5. `environment`: `production`
-6. Wait for the workflow to finish (build ECR images → Terraform task defs → ECS rolling deploy).
-
-CLI equivalent (requires `gh auth login`):
+### 3a. Trigger workflow
 
 ```bash
-gh workflow run aws-deploy.yml \
+gh workflow run "Deploy Koda to AWS" \
+  --repo moshehillel/AI \
   --ref cursor/koda-program-lifecycle-8b33 \
   -f image_tag=latest \
   -f environment=production
 ```
 
-### Option B — Manual Docker push
+Or: **Actions → Deploy Koda to AWS → Run workflow** (branch `cursor/koda-program-lifecycle-8b33` or `main`).
 
-See [infra/aws/README.md](../infra/aws/README.md#push-images-to-ecr).
-
-### Verify before DNS cutover
+### 3b. Watch the run
 
 ```bash
-# HTTP health via ALB directly (before custom domain)
-curl -fsS http://koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com/api/ready
-
-# After ACM attached:
-curl -fsS https://koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com/api/ready
+gh run list --workflow="Deploy Koda to AWS" --repo moshehillel/AI --limit 3
+gh run watch --repo moshehillel/AI
 ```
 
-Check ECS: both `koda-platform-production-web` and `koda-platform-production-worker` should be **RUNNING** with healthy tasks.
+### 3c. Verify ECR images exist
+
+```bash
+aws ecr describe-images --repository-name koda-platform/web --region us-east-1
+aws ecr describe-images --repository-name koda-platform/worker --region us-east-1
+```
+
+### 3d. Verify ECS tasks are running
 
 ```bash
 aws ecs describe-services \
   --cluster koda-platform-production-cluster \
   --services koda-platform-production-web koda-platform-production-worker \
+  --region us-east-1 \
+  --query "services[*].{name:serviceName,running:runningCount,desired:desiredCount,status:status}" \
+  --output table
+```
+
+Expected: `runningCount` matches `desiredCount` (web=2, worker=1).
+
+### 3e. Smoke test via ALB (HTTP only until step 5)
+
+```bash
+curl -fsS "http://koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com/api/ready"
+```
+
+If this fails, check logs:
+
+```bash
+aws logs tail /ecs/koda-platform-production/web --since 30m --region us-east-1
+aws logs tail /ecs/koda-platform-production/worker --since 30m --region us-east-1
+```
+
+> **Note:** Tasks will crash-loop until Step 4 secrets are populated (Clerk keys, `ENCRYPTION_KEY`, etc.).
+
+---
+
+## Step 4 — Populate Secrets Manager
+
+`DATABASE_URL` and `REDIS_URL` are already auto-written by Terraform. The **app-env** secret still has `REPLACE_ME` placeholders.
+
+### 4a. Export Railway production vars
+
+From a machine with Railway access:
+
+```bash
+railway link -p bountiful-fascination -e production
+railway variables --service web --json > railway-web.json
+railway variables --service worker --json > railway-worker.json
+```
+
+### 4b. Build `koda-app-secrets.json` locally (never commit)
+
+Create a JSON file with these keys (copy values from Railway dashboard → **web** service → Variables):
+
+| Key | Source (Railway web vars) | Notes |
+| --- | --- | --- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Railway `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | `pk_live_…` |
+| `CLERK_SECRET_KEY` | Railway `CLERK_SECRET_KEY` | `sk_live_…` |
+| `CLERK_WEBHOOK_SECRET` | Railway `CLERK_WEBHOOK_SECRET` | `whsec_…` |
+| `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | `/sign-in` | |
+| `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | `/sign-up` | |
+| `OPEN_ACCESS` | `0` | |
+| `NEXT_PUBLIC_OPEN_ACCESS` | `0` | |
+| `ALLOW_DEMO_AUTH` | `0` | |
+| `NEXT_PUBLIC_ALLOW_DEMO_AUTH` | `0` | |
+| `NEXT_PUBLIC_APP_URL` | `https://koda.advancedautomations.net` | |
+| `ENCRYPTION_KEY` | Railway `ENCRYPTION_KEY` | **Must match Railway** if migrating DB data |
+| `ADMIN_PASSWORD` | Railway `ADMIN_PASSWORD` | Staff fallback |
+| `CURSOR_API_KEY` | Railway `CURSOR_API_KEY` | |
+| `CURSOR_MOCK` | `0` | |
+| `GITHUB_MOCK` | `0` | |
+| `RAILWAY_MOCK` | `1` | |
+
+Optional (add if used on Railway): `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_APP_WEBHOOK_SECRET`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`, `RESEND_API_KEY`, `NOTIFY_EMAIL`.
+
+**Example template** (replace values, do not commit):
+
+```json
+{
+  "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_...",
+  "CLERK_SECRET_KEY": "sk_live_...",
+  "CLERK_WEBHOOK_SECRET": "whsec_...",
+  "NEXT_PUBLIC_CLERK_SIGN_IN_URL": "/sign-in",
+  "NEXT_PUBLIC_CLERK_SIGN_UP_URL": "/sign-up",
+  "OPEN_ACCESS": "0",
+  "NEXT_PUBLIC_OPEN_ACCESS": "0",
+  "ALLOW_DEMO_AUTH": "0",
+  "NEXT_PUBLIC_ALLOW_DEMO_AUTH": "0",
+  "NEXT_PUBLIC_APP_URL": "https://koda.advancedautomations.net",
+  "ENCRYPTION_KEY": "your-64-char-hex-from-railway",
+  "ADMIN_PASSWORD": "your-staff-password",
+  "CURSOR_API_KEY": "your-cursor-key",
+  "CURSOR_MOCK": "0",
+  "GITHUB_MOCK": "0",
+  "RAILWAY_MOCK": "1"
+}
+```
+
+### 4c. Upload to Secrets Manager
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id "koda-platform-production/app-env" \
+  --secret-string file://koda-app-secrets.json \
   --region us-east-1
+```
+
+### 4d. Force ECS to pick up new secrets
+
+```bash
+aws ecs update-service --cluster koda-platform-production-cluster \
+  --service koda-platform-production-web --force-new-deployment --region us-east-1
+
+aws ecs update-service --cluster koda-platform-production-cluster \
+  --service koda-platform-production-worker --force-new-deployment --region us-east-1
+
+aws ecs wait services-stable \
+  --cluster koda-platform-production-cluster \
+  --services koda-platform-production-web \
+  --region us-east-1
+```
+
+### 4e. (Optional) Migrate Postgres data from Railway
+
+Only if you need existing programs/users. **Same `ENCRYPTION_KEY` is required.**
+
+```bash
+# On Railway (railway ssh --service web):
+pg_dump "$DATABASE_URL" --no-owner --format=custom -f koda-railway.dump
+
+# Restore to AWS RDS (from a host that can reach RDS):
+aws secretsmanager get-secret-value \
+  --secret-id koda-platform-production/database-url \
+  --region us-east-1 \
+  --query SecretString --output text > aws-database-url.txt
+
+pg_restore -d "$(cat aws-database-url.txt)" --no-owner --clean koda-railway.dump
+rm aws-database-url.txt
+```
+
+Skip this for a greenfield cutover — users re-sign in via Clerk.
+
+---
+
+## Step 5 — Terraform re-apply for HTTPS
+
+Once ACM status is **ISSUED**, attach the certificate to the ALB.
+
+### 5a. Edit `infra/aws/terraform/terraform.tfvars` (local only, gitignored)
+
+```hcl
+acm_certificate_arn = "arn:aws:acm:us-east-1:065194293782:certificate/53467e0d-25e7-4b28-a06e-32cece4be5c7"
+```
+
+### 5b. Apply
+
+```bash
+cd infra/aws/terraform
+terraform init
+terraform apply -var="image_tag=latest"
+```
+
+This adds the HTTPS listener (443) and HTTP→HTTPS redirect.
+
+### 5c. Verify HTTPS on ALB
+
+```bash
+curl -fsSI "https://koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com/api/ready" \
+  --resolve "koda.advancedautomations.net:443:koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com"
 ```
 
 ---
 
-## 6. DNS cutover (Netlify)
+## Step 6 — DNS cutover (Netlify)
 
-**Prerequisite:** Step 5 passes — ALB `/api/ready` returns `{"ok":true}`.
+**Prerequisites:** Steps 1–5 complete; ALB `/api/ready` returns 200 over HTTPS (using `--resolve` test above).
 
-1. **24 hours before cutover:** Lower TTL on `koda.advancedautomations.net` to `300` seconds.
-2. In **Netlify DNS**, update the existing `koda` record:
+### 6a. Lower TTL (24h before cutover)
 
-   | Field | Value |
-   | --- | --- |
-   | **Type** | `CNAME` |
-   | **Host** | `koda` |
-   | **Value** | `koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com` |
-   | **TTL** | `300` |
+In Netlify DNS for `advancedautomations.net`, set TTL on the `koda` record to **300** seconds.
 
-   **Previous value (Railway):** `j8333zn7.up.railway.app` — keep this noted for rollback.
+### 6b. Update CNAME
 
-3. Wait for propagation (5–30 min). Verify:
-
-   ```bash
-   dig +short koda.advancedautomations.net CNAME
-   # Expected: koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com.
-
-   curl -fsS https://koda.advancedautomations.net/api/ready
-   curl -fsS https://koda.advancedautomations.net/api/health
-   ```
-
----
-
-## 7. Update Clerk
-
-In **Clerk Dashboard → Production** (custom domain `clerk.advancedautomations.net`):
-
-1. **Allowed origins:** ensure `https://koda.advancedautomations.net` is listed.
-2. **Webhooks:** set endpoint to `https://koda.advancedautomations.net/api/webhooks/clerk`
-3. Copy the webhook signing secret into Secrets Manager `CLERK_WEBHOOK_SECRET` if it changed.
-4. Force ECS redeploy after secret update:
-
-   ```bash
-   aws ecs update-service --cluster koda-platform-production-cluster \
-     --service koda-platform-production-web --force-new-deployment --region us-east-1
-   aws ecs update-service --cluster koda-platform-production-cluster \
-     --service koda-platform-production-worker --force-new-deployment --region us-east-1
-   ```
-
----
-
-## 8. Smoke test (before deleting Railway)
-
-| # | Check | Expected |
+| Field | Old (Railway) | New (AWS) |
 | --- | --- | --- |
-| 1 | `curl https://koda.advancedautomations.net/api/ready` | `{"ok":true}` |
-| 2 | Homepage logged out | Marketing + Sign in |
-| 3 | `/projects` logged out | Redirect to `/sign-in` |
-| 4 | Clerk sign-in | UI on `clerk.advancedautomations.net` |
-| 5 | After sign-in, no org | `/select-org` |
-| 6 | Customer program | Submit planning message |
-| 7 | Worker | CloudWatch `/ecs/koda-platform-production/worker` shows job processed |
-| 8 | Developer | `/review` queue loads (`org:developer` or `/staff` password) |
-| 9 | DNS | `dig +short koda.advancedautomations.net CNAME` → `*.elb.amazonaws.com` (not `*.up.railway.app`) |
+| **Type** | `CNAME` | `CNAME` |
+| **Name** | `koda` | `koda` |
+| **Value** | `j8333zn7.up.railway.app` | `koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com` |
+| **TTL** | `300` | `300` |
 
-**Wait at least 24 hours** of stable AWS traffic before decommissioning Railway.
+### 6c. Wait for propagation
+
+```bash
+nslookup -type=CNAME koda.advancedautomations.net
+```
+
+Expected: CNAME points to `*.elb.amazonaws.com` (not `*.up.railway.app`).
+
+### 6d. Verify public HTTPS
+
+```bash
+curl -fsSI https://koda.advancedautomations.net/api/ready
+```
 
 ---
 
-## 9. Decommission Railway
+## Step 7 — Verify sign-in, planning, worker
 
-Only after **every** row in step 8 passes.
+### 7a. Clerk dashboard
+
+In [Clerk Dashboard](https://dashboard.clerk.com) (Production):
+
+1. **Allowed origins:** add `https://koda.advancedautomations.net`
+2. **Webhooks:** endpoint `https://koda.advancedautomations.net/api/webhooks/clerk`  
+   Events: `user.*`, `organization.created`, `organizationMembership.*`
+3. Confirm `CLERK_WEBHOOK_SECRET` in Secrets Manager matches the webhook signing secret
+
+### 7b. Smoke test checklist
+
+| Check | How |
+| --- | --- |
+| Health | `curl -fsS https://koda.advancedautomations.net/api/ready` |
+| Sign in | Open `https://koda.advancedautomations.net/sign-in` → Clerk UI on `clerk.advancedautomations.net` |
+| Org select | After sign-in without org → `/select-org` |
+| Projects | `/projects` loads for org member |
+| Planning | Submit a test message in a non-production program |
+| Worker | `aws logs tail /ecs/koda-platform-production/worker --since 10m --region us-east-1` shows job processed |
+| Review desk | Developer role or `/staff` password unlock |
+
+---
+
+## Step 8 — Delete Railway (only after stable)
+
+**Wait at least 24h** after DNS cutover with no 5xx errors.
+
+### Prerequisites (all must pass)
+
+```bash
+# ECS healthy
+aws ecs describe-services --cluster koda-platform-production-cluster \
+  --services koda-platform-production-web koda-platform-production-worker \
+  --region us-east-1 \
+  --query "services[*].{name:serviceName,running:runningCount}" --output table
+
+# DNS on AWS
+nslookup -type=CNAME koda.advancedautomations.net
+
+# Public health
+curl -fsS https://koda.advancedautomations.net/api/ready
+```
+
+### Decommission commands
 
 ```bash
 railway link -p bountiful-fascination -e production
 
-# 1. Remove custom domain from Railway web service (dashboard)
+# 1. Remove custom domain from Railway web (dashboard)
 # 2. Scale down app services
 railway down --service worker -y
 railway down --service web -y
 
-# 3. Snapshot Postgres if you need a backup (dashboard → Postgres → backup)
+# 3. Snapshot Postgres if data was not migrated (dashboard → Postgres → backup)
 # 4. Delete data services
 railway down --service Postgres -y
 railway down --service Redis -y
@@ -286,35 +403,65 @@ railway down --service Redis -y
 
 ### Rollback (if needed)
 
-1. Repoint Netlify `koda` CNAME back to `j8333zn7.up.railway.app`
-2. `railway up --service web -d -y` and `railway up --service worker -d -y` if scaled down
-3. AWS stack can remain for a retry
+Repoint Netlify `koda` CNAME back to `j8333zn7.up.railway.app` and redeploy Railway services.
 
 ---
 
-## 10. Rotate the AWS access key (security)
+## Step 9 — Rotate AWS access key
 
-If you shared an IAM access key file (e.g. `1.txt`) with an agent or operator for the initial deploy:
+The `WGDeploy` IAM user key was shared in chat. **Rotate immediately** after cutover is stable.
 
-1. **AWS Console → IAM → Users** → select the user that owns the key.
-2. **Security credentials → Create access key** (or use a new dedicated deploy user).
-3. Update your local `aws configure` / env vars with the new key.
-4. **Deactivate then delete** the old access key.
-5. Confirm GitHub Actions still deploys (it uses OIDC role `koda-platform-production-github-deploy`, not the access key — no GitHub change needed for deploy).
-6. Confirm Terraform state access still works (`terraform plan` from `infra/aws/terraform`).
+### 9a. Create new key (AWS Console)
+
+1. IAM → Users → `WGDeploy` → Security credentials
+2. **Create access key** → save the new key securely
+3. Update wherever the old key is stored (local `aws configure`, CI, `1.txt`, etc.)
+4. **Deactivate** then **delete** the old key
+
+### 9b. Verify new key works
+
+```bash
+aws sts get-caller-identity
+```
+
+### 9c. Delete the old key
+
+Only after confirming all tools and scripts use the new key.
 
 ---
 
-## Quick reference
+## Quick status commands
 
-| Item | Value |
-| --- | --- |
-| AWS account | `065194293782` |
-| Region | `us-east-1` |
-| ECS cluster | `koda-platform-production-cluster` |
-| GitHub deploy role | `arn:aws:iam::065194293782:role/koda-platform-production-github-deploy` |
-| ALB DNS | `koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com` |
-| App secret | `koda-platform-production/app-env` |
-| Workflow | `.github/workflows/aws-deploy.yml` |
+```bash
+# ACM
+aws acm describe-certificate \
+  --certificate-arn "arn:aws:acm:us-east-1:065194293782:certificate/53467e0d-25e7-4b28-a06e-32cece4be5c7" \
+  --region us-east-1 --query "Certificate.Status" --output text
 
-Further detail: [aws-migration.md](./aws-migration.md), [infra/aws/README.md](../infra/aws/README.md), [deploy.md](./deploy.md).
+# ECR images
+aws ecr describe-images --repository-name koda-platform/web --region us-east-1 --query "imageDetails[*].imageTags"
+
+# ECS
+aws ecs describe-services --cluster koda-platform-production-cluster \
+  --services koda-platform-production-web koda-platform-production-worker \
+  --region us-east-1 --query "services[*].{name:serviceName,running:runningCount,failed:deployments[0].failedTasks}"
+
+# ALB target health
+aws elbv2 describe-target-health \
+  --target-group-arn $(aws elbv2 describe-target-groups --region us-east-1 \
+    --query "TargetGroups[?contains(TargetGroupName,'koda-platform-production-web')].TargetGroupArn" --output text) \
+  --region us-east-1
+```
+
+---
+
+## Blockers summary
+
+| Blocker | Who fixes | Step |
+| --- | --- | --- |
+| ACM validation CNAME not in Netlify | You | 1 |
+| `gh` not logged in / GitHub vars not set | You | 2 |
+| No ECR images (local Docker blocked by NetFree) | GitHub Actions | 3 |
+| App secrets still `REPLACE_ME` | You (from Railway dashboard) | 4 |
+| ALB HTTP-only (no HTTPS listener) | You (terraform apply after ACM issued) | 5 |
+| DNS still on Railway | You | 6 |

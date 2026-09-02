@@ -1,9 +1,20 @@
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
-import { promisify } from "node:util";
 import { db } from "@automation-studio/db";
 import { getStaffPassword } from "@/lib/staff-session";
 
-const scryptAsync = promisify(scrypt);
+function scryptAsync(
+  password: string,
+  salt: Buffer,
+  keylen: number,
+  options: { N: number; r: number; p: number }
+): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, keylen, options, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey);
+    });
+  });
+}
 
 const SCRYPT_N = 16384;
 const SCRYPT_R = 8;
@@ -21,11 +32,11 @@ export function timingSafeEqualString(a: string, b: string): boolean {
 
 export async function hashStaffPassword(plain: string): Promise<string> {
   const salt = randomBytes(16);
-  const derived = (await scryptAsync(plain, salt, SCRYPT_KEY_LEN, {
+  const derived = await scryptAsync(plain, salt, SCRYPT_KEY_LEN, {
     N: SCRYPT_N,
     r: SCRYPT_R,
     p: SCRYPT_P,
-  })) as Buffer;
+  });
   return `scrypt$${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${salt.toString("hex")}$${derived.toString("hex")}`;
 }
 
@@ -42,11 +53,11 @@ async function verifyScryptHash(plain: string, encoded: string): Promise<boolean
   }
   const salt = Buffer.from(saltHex, "hex");
   const expected = Buffer.from(hashHex, "hex");
-  const derived = (await scryptAsync(plain, salt, expected.length, {
+  const derived = await scryptAsync(plain, salt, expected.length, {
     N: n,
     r,
     p,
-  })) as Buffer;
+  });
   if (derived.length !== expected.length) return false;
   return timingSafeEqual(derived, expected);
 }

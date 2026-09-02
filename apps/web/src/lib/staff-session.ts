@@ -58,13 +58,19 @@ async function hmacHex(secret: string, message: string): Promise<string> {
   return toHex(sig);
 }
 
+/** Stable signing material for staff cookies (not the login password). */
+function staffSessionSigningSecret(): string | null {
+  const key = process.env.ENCRYPTION_KEY?.trim();
+  return key || null;
+}
+
 /** Cookie value: `role.<hmac>` so a forged role cookie cannot unlock staff. */
 export async function createStaffSessionValue(
   role: StaffRole,
 ): Promise<string | null> {
-  const password = getStaffPassword();
-  if (!password) return null;
-  const mac = await hmacHex(password, `koda-staff-v1:${role}`);
+  const secret = staffSessionSigningSecret();
+  if (!secret) return null;
+  const mac = await hmacHex(secret, `koda-staff-v1:${role}`);
   return `${role}.${mac}`;
 }
 
@@ -80,9 +86,9 @@ export async function parseStaffSessionValue(
   const role = staffRoleFromCookieValue(value.slice(0, dot));
   const mac = value.slice(dot + 1);
   if (!role || !mac) return null;
-  const password = getStaffPassword();
-  if (!password) return null;
-  const expected = await hmacHex(password, `koda-staff-v1:${role}`);
+  const secret = staffSessionSigningSecret();
+  if (!secret) return null;
+  const expected = await hmacHex(secret, `koda-staff-v1:${role}`);
   if (!timingSafeEqualHex(mac, expected)) return null;
   return role;
 }

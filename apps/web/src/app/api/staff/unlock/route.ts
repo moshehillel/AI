@@ -3,11 +3,14 @@ import { z } from "zod";
 import {
   STAFF_COOKIE,
   createStaffSessionValue,
-  getStaffPassword,
   safeNextPath,
   staffRoleFromCookieValue,
   staffSessionMaxAgeSec,
 } from "@/lib/staff-session";
+import {
+  staffPasswordConfigured,
+  verifyStaffPassword,
+} from "@/lib/staff-password";
 import { requireRateLimit } from "@/lib/rate-limit";
 import { AuthError } from "@automation-studio/auth";
 
@@ -20,18 +23,8 @@ const bodySchema = z.object({
   next: z.string().optional(),
 });
 
-function timingSafeEqualString(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return mismatch === 0;
-}
-
 export async function POST(request: Request) {
-  const expected = getStaffPassword();
-  if (!expected) {
+  if (!(await staffPasswordConfigured())) {
     return NextResponse.json(
       { error: "Staff unlock is not configured" },
       { status: 503 },
@@ -54,7 +47,7 @@ export async function POST(request: Request) {
 
   const body = bodySchema.parse(await request.json());
   const provided = (body.password ?? body.token ?? "").trim();
-  if (!provided || !timingSafeEqualString(provided, expected)) {
+  if (!provided || !(await verifyStaffPassword(provided))) {
     return NextResponse.json({ error: "Invalid password" }, { status: 403 });
   }
 

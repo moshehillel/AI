@@ -484,3 +484,11 @@ model OutboundEmail {
   @@index([companyId, createdAt])
   @@index([status])
 }
+
+/// Singleton platform settings (id = "default").
+model PlatformConfig {
+  id                String   @id @default("default")
+  /// scrypt hash: `scrypt$N$r$p$salt$hash` (hex)
+  staffPasswordHash String?
+  updatedAt         DateTime @updatedAt
+}

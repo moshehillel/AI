@@ -11,12 +11,15 @@ import {
 describe("staff session", () => {
   const prevAdmin = process.env.ADMIN_PASSWORD;
   const prevStaff = process.env.STAFF_ACCESS_TOKEN;
+  const prevEncryption = process.env.ENCRYPTION_KEY;
 
   afterEach(() => {
     if (prevAdmin === undefined) delete process.env.ADMIN_PASSWORD;
     else process.env.ADMIN_PASSWORD = prevAdmin;
     if (prevStaff === undefined) delete process.env.STAFF_ACCESS_TOKEN;
     else process.env.STAFF_ACCESS_TOKEN = prevStaff;
+    if (prevEncryption === undefined) delete process.env.ENCRYPTION_KEY;
+    else process.env.ENCRYPTION_KEY = prevEncryption;
   });
 
   it("prefers ADMIN_PASSWORD over STAFF_ACCESS_TOKEN", () => {
@@ -32,6 +35,7 @@ describe("staff session", () => {
   });
 
   it("signs and verifies staff cookies", async () => {
+    process.env.ENCRYPTION_KEY = "test-encryption-key-for-staff-session";
     delete process.env.ADMIN_PASSWORD;
     process.env.STAFF_ACCESS_TOKEN = "test-password-abc";
     const value = await createStaffSessionValue("developer");
@@ -41,11 +45,10 @@ describe("staff session", () => {
     assert.equal(await parseStaffSessionValue("developer.forged"), null);
   });
 
-  it("rejects cookies when password changes", async () => {
-    process.env.STAFF_ACCESS_TOKEN = "one";
-    delete process.env.ADMIN_PASSWORD;
+  it("rejects cookies when signing key changes", async () => {
+    process.env.ENCRYPTION_KEY = "one";
     const value = await createStaffSessionValue("admin");
-    process.env.STAFF_ACCESS_TOKEN = "two";
+    process.env.ENCRYPTION_KEY = "two";
     assert.equal(await parseStaffSessionValue(value), null);
   });
 

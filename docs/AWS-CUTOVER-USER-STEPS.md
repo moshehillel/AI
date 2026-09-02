@@ -30,7 +30,7 @@ aws acm describe-certificate \
   --output table
 ```
 
-**Current record (as of 2026-09-01):**
+**Current record (as of 2026-09-02):**
 
 | Netlify field | Value |
 | --- | --- |
@@ -39,7 +39,32 @@ aws acm describe-certificate \
 | **Value / Target** | `_6969413c5df1bf87d4002a0f948f9553.jkddzztszm.acm-validations.aws` |
 | **TTL** | `300` (or Netlify default) |
 
-> Netlify usually wants the host **without** the apex domain suffix. If validation fails, try the full name `_f4d69fe3488c23263a3dd02306fb074e.koda.advancedautomations.net`.
+### Netlify Name field (do not use the full FQDN)
+
+In Netlify DNS for zone `advancedautomations.net`, put **only** this in **Name**:
+
+`_f4d69fe3488c23263a3dd02306fb074e.koda`
+
+**Do not** paste ACM's full hostname (`_f4d69fe3488c23263a3dd02306fb074e.koda.advancedautomations.net`) into Name. Netlify appends the zone automatically; using the FQDN creates a **wrong** record such as:
+
+`_f4d69fe3488c23263a3dd02306fb074e.koda.advancedautomations.net.advancedautomations.net`
+
+If that doubled-zone record exists, **delete it** and add the CNAME again with Name `_f4d69fe3488c23263a3dd02306fb074e.koda` only.
+
+### Keep this separate from the app CNAME
+
+The ACM validation CNAME is **not** the same as the `koda` → ALB record (Step 6). You need **both**:
+
+- Validation: `_f4d69fe3488c23263a3dd02306fb074e.koda` → `_6969413c5df1bf87d4002a0f948f9553.jkddzztszm.acm-validations.aws`
+- App traffic (after cutover): `koda` → `koda-platform-production-alb-128154713.us-east-1.elb.amazonaws.com`
+
+### Verify DNS before waiting on ACM
+
+```bash
+nslookup -type=CNAME _f4d69fe3488c23263a3dd02306fb074e.koda.advancedautomations.net
+```
+
+Expected: CNAME to `_6969413c5df1bf87d4002a0f948f9553.jkddzztszm.acm-validations.aws` (not NXDOMAIN).
 
 ### 1b. Wait for ACM to issue
 

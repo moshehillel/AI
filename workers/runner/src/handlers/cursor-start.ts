@@ -5,6 +5,8 @@ import { writeAuditEvent } from "@automation-studio/auth";
 import {
   assertUnderUsageSoftCap,
   getDefaultGithubRepoConfig,
+  isProgramVerifyPhase,
+  nextStatusAfterProgramAgentTurn,
   planningAgentInstructions,
   type PlanningMeta,
 } from "@automation-studio/domain";
@@ -122,17 +124,22 @@ export async function handleCursorStart(data: CursorStartJobData) {
     return { agentId: cr.cursorAgentId, mode: data.mode, resumed: true };
   }
 
+  const statusBeforeAgent = cr.status;
   const toStatus =
     data.mode === "plan"
       ? "PLANNING"
-      : cr.kind === "PROGRAM"
-        ? "BUILDING"
-        : "IMPLEMENTING";
-  await transitionChangeRequest({
-    changeRequestId: cr.id,
-    companyId: data.companyId,
-    toStatus,
-  });
+      : isProgramVerifyPhase(cr.status)
+        ? null
+        : cr.kind === "PROGRAM"
+          ? "BUILDING"
+          : "IMPLEMENTING";
+  if (toStatus) {
+    await transitionChangeRequest({
+      changeRequestId: cr.id,
+      companyId: data.companyId,
+      toStatus,
+    });
+  }
 
   const repoUrl = `https://github.com/${repo.githubOwner}/${repo.githubRepo}`;
   let prompt =
@@ -381,7 +388,13 @@ export async function handleCursorStart(data: CursorStartJobData) {
     await transitionChangeRequest({
       changeRequestId: cr.id,
       companyId: data.companyId,
-      toStatus: "TESTING",
+      toStatus:
+        cr.kind === "PROGRAM"
+          ? nextStatusAfterProgramAgentTurn(statusBeforeAgent)
+          : "TESTING",
+      reason: isProgramVerifyPhase(statusBeforeAgent)
+        ? "Verify chat edit applied — preview will refresh on push"
+        : "Agent turn complete — syncing preview",
     });
     await enqueueJob("github.ensure-pr", {
       changeRequestId: cr.id,

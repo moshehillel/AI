@@ -68,6 +68,20 @@ describe("status machine", () => {
     assert.equal(canProgramCustomerChat("CLIENT_VERIFY"), true);
     assert.equal(canProgramCustomerChat("AWAITING_FINAL_REVIEW"), false);
   });
+
+  it("keeps verify chat open after agent edits", async () => {
+    const { nextStatusAfterProgramAgentTurn } = await import("./status.js");
+    assert.equal(
+      nextStatusAfterProgramAgentTurn("CLIENT_VERIFY"),
+      "CLIENT_VERIFY",
+    );
+    assert.equal(
+      nextStatusAfterProgramAgentTurn("CHANGES_REQUESTED"),
+      "CHANGES_REQUESTED",
+    );
+    assert.equal(nextStatusAfterProgramAgentTurn("BUILDING"), "TESTING");
+    assert.equal(nextStatusAfterProgramAgentTurn("PREVIEW_READY"), "CLIENT_VERIFY");
+  });
 });
 
 describe("secret redaction", () => {

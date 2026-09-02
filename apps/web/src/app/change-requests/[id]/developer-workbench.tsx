@@ -311,8 +311,9 @@ export function DeveloperWorkbench({
         <div className="space-y-3 rounded-xl border border-[var(--line)] bg-black/15 p-3">
           <p className="text-sm muted">3. Client testing</p>
           <p className="text-sm">
-            Opens the customer Test &amp; request changes chat. Planning stays
-            closed — they can try the preview and ask for edits.
+            Opens the customer Ask about your app chat (repo access). Planning
+            stays closed — they can try the preview, ask how things work, and
+            request edits. Pushes auto-redeploy when enabled.
           </p>
           <button
             type="button"

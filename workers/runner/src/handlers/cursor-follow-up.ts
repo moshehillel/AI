@@ -3,6 +3,8 @@ import { resumeAndSend } from "@automation-studio/cursor-adapter";
 import { enqueueJob, type CursorFollowUpJobData } from "@automation-studio/jobs";
 import {
   isProgramPlanOnly,
+  isProgramVerifyPhase,
+  nextStatusAfterProgramAgentTurn,
   planningAgentInstructions,
   type PlanningMeta,
 } from "@automation-studio/domain";
@@ -135,22 +137,21 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     `[cursor-follow-up] mode=${mode} cr=${cr.id} agentId=${cr.cursorAgentId} attachmentRefs=${attachmentRefs.join(",") || "none"} images=${images?.length ?? 0}`,
   );
 
-  if (mode === "agent" && cr.status !== "BUILDING" && cr.status !== "IMPLEMENTING") {
-    const next =
-      cr.kind === "PROGRAM"
-        ? cr.status === "CLIENT_VERIFY" ||
-          cr.status === "PREVIEW_READY" ||
-          cr.status === "CHANGES_REQUESTED"
-          ? ("BUILDING" as const)
-          : null
-        : ("IMPLEMENTING" as const);
-    if (next) {
-      await transitionChangeRequest({
-        changeRequestId: cr.id,
-        companyId: data.companyId,
-        toStatus: next,
-      });
-    }
+  // Keep verify-phase chat open while the agent edits. Only leave planning-like
+  // or non-build statuses for classic change-request implement turns.
+  const statusBeforeAgent = cr.status;
+  if (
+    mode === "agent" &&
+    cr.status !== "BUILDING" &&
+    cr.status !== "IMPLEMENTING" &&
+    cr.status !== "TESTING" &&
+    !isProgramVerifyPhase(cr.status)
+  ) {
+    await transitionChangeRequest({
+      changeRequestId: cr.id,
+      companyId: data.companyId,
+      toStatus: "IMPLEMENTING",
+    });
   }
 
   // After Interrupt, a prior wait may still be winding down. Wait for RUNNING
@@ -330,10 +331,18 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
           { cursorRunId: result.runId, model: result.model },
         );
       }
+      const afterStatus =
+        cr.kind === "PROGRAM"
+          ? nextStatusAfterProgramAgentTurn(statusBeforeAgent)
+          : ("TESTING" as const);
       await transitionChangeRequest({
         changeRequestId: cr.id,
         companyId: data.companyId,
-        toStatus: "TESTING",
+        toStatus: afterStatus,
+        reason:
+          isProgramVerifyPhase(statusBeforeAgent)
+            ? "Verify chat edit applied — preview will refresh on push"
+            : "Agent turn complete — syncing preview",
       });
       await enqueueJob("github.ensure-pr", {
         changeRequestId: cr.id,

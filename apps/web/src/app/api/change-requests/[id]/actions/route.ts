@@ -495,7 +495,7 @@ export async function POST(
               changeRequestId: cr.id,
               role: "SYSTEM",
               content:
-                "— Test & request changes —\n\nPreview is ready. Planning is closed. Ask how things work, request test scripts, or describe changes in plain English — then submit for final review when satisfied.",
+                "— Ask about your app —\n\nPreview is ready. Planning is closed. Ask how things work, request test scripts, or describe changes in plain English — then submit for final review when satisfied.",
             },
           });
         }
@@ -551,7 +551,7 @@ export async function POST(
             role: "SYSTEM",
             authorId: ctx.user.id,
             content:
-              "— Test & request changes —\n\nYour developer marked this build ready to try. Planning is closed. Ask how it works, request test steps, or describe changes in plain English. When you are satisfied, submit for final review.",
+              "— Ask about your app —\n\nYour developer marked this build ready to try. Planning is closed. Ask how it works, request test steps, or describe changes in plain English — Koda can edit the code. When you are satisfied, submit for final review.",
             metadata: { verifyPhaseBreak: true },
           },
         });
@@ -577,13 +577,24 @@ export async function POST(
           });
         }
 
+        // Open PR + preview sync so customer pushes/edits auto-redeploy when enabled.
+        if (prior.autoDeploy !== false && full.branchName) {
+          await enqueueJob("github.ensure-pr", {
+            changeRequestId: cr.id,
+            companyId: ctx.company.id,
+          });
+        }
+
         await writeAuditEvent({
           companyId: ctx.company.id,
           actorId: ctx.user.id,
           action: "program.ready_for_client_testing",
           entityType: "change_request",
           entityId: cr.id,
-          metadata: { previewUrl: preview?.url ?? null },
+          metadata: {
+            previewUrl: preview?.url ?? null,
+            autoDeploy: prior.autoDeploy !== false,
+          },
         });
         break;
       }

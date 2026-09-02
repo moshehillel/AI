@@ -147,7 +147,7 @@ export const STATUS_LABELS: Record<ChangeRequestStatus, string> = {
   IMPLEMENTING: "Making the change…",
   TESTING: "Test & improve in progress…",
   PREVIEW_READY: "Preview ready",
-  CLIENT_VERIFY: "Ready for you to verify",
+  CLIENT_VERIFY: "Ask about your app — test & request changes",
   CHANGES_REQUESTED: "Changes requested",
   READY_FOR_REVIEW: "Submitted for review",
   AWAITING_FINAL_REVIEW: "Waiting for final review",
@@ -203,6 +203,22 @@ export const PROGRAM_VERIFY_STATUSES: ChangeRequestStatus[] = [
 
 export function isProgramVerifyPhase(status: ChangeRequestStatus): boolean {
   return PROGRAM_VERIFY_STATUSES.includes(status);
+}
+
+/**
+ * After a code-edit agent turn, programs in verify stay chat-open.
+ * Developer build turns (BUILDING) still move to TESTING for preview sync.
+ */
+export function nextStatusAfterProgramAgentTurn(
+  status: ChangeRequestStatus,
+): ChangeRequestStatus {
+  if (isProgramVerifyPhase(status)) {
+    return status === "CHANGES_REQUESTED" ? "CHANGES_REQUESTED" : "CLIENT_VERIFY";
+  }
+  if (status === "BUILDING" || status === "TESTING" || status === "IMPLEMENTING") {
+    return "TESTING";
+  }
+  return status;
 }
 
 export function canProgramCustomerChat(status: ChangeRequestStatus): boolean {

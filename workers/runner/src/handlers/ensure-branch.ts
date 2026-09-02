@@ -3,6 +3,7 @@ import {
   buildBranchName,
   buildPlanningStartPrompt,
   getDefaultGithubRepoConfig,
+  isProgramVerifyPhase,
   slugify,
   type PlanningMeta,
 } from "@automation-studio/domain";
@@ -75,12 +76,21 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     cr.classification === "COMPLEX" ||
     cr.classification === "HIGH_RISK";
 
-  // Programs only leave plan mode after developer starts a build (BUILDING).
-  const mode =
-    cr.kind === "PROGRAM" && cr.status !== "BUILDING" ? "plan" : needsPlan ? "plan" : "agent";
+  // Explicit job mode wins (verify-phase agent). Otherwise programs stay in plan
+  // until the developer starts a build (BUILDING), except verify which needs agent.
+  const mode: "plan" | "agent" =
+    data.mode ??
+    (isProgramVerifyPhase(cr.status)
+      ? "agent"
+      : cr.kind === "PROGRAM" && cr.status !== "BUILDING"
+        ? "plan"
+        : needsPlan
+          ? "plan"
+          : "agent");
 
   const prompt =
-    mode === "plan"
+    data.prompt?.trim() ||
+    (mode === "plan"
       ? buildPlanningStartPrompt({
           title: cr.title,
           description: cr.description,
@@ -90,19 +100,21 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
           })),
           planningMeta: (cr.planningMeta ?? {}) as PlanningMeta,
         })
-      : `${cr.title}\n\n${cr.description}`.trim();
+      : `${cr.title}\n\n${cr.description}`.trim());
 
   await enqueueJob(
     "cursor.start-agent",
     {
       changeRequestId: cr.id,
       companyId: data.companyId,
-      mode: mode as "plan" | "agent",
+      mode,
       prompt,
       attachmentRef:
+        data.attachmentRef ??
         ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRef ??
         undefined,
       attachmentRefs:
+        data.attachmentRefs ??
         ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRefs ??
         undefined,
     },

@@ -79,7 +79,13 @@ export async function handleSyncPreview(data: SyncPreviewJobData & { attempt?: n
         data: {
           changeRequestId: cr.id,
           role: "SYSTEM",
-          content: `Test version is ready. Open it here: ${preview.url}`,
+          content:
+            cr.kind === "PROGRAM" &&
+            (cr.status === "CLIENT_VERIFY" ||
+              cr.status === "PREVIEW_READY" ||
+              cr.status === "CHANGES_REQUESTED")
+              ? `Updated preview is ready — open it here: ${preview.url}`
+              : `Test version is ready. Open it here: ${preview.url}`,
         },
       });
     }

@@ -296,7 +296,7 @@ export async function POST(
         cr.status === "AWAITING_DEV_BUILD" ||
         cr.status === "BUILDING" ||
         cr.status === "TESTING"
-          ? "Planning is closed while your developer builds. You will get a Test & request changes chat when the preview is ready."
+          ? "Planning is closed while your developer builds. You will get an Ask about your app chat when the preview is ready."
           : "Chat is not available in this phase. Submit for final review or wait for your developer.",
         400,
       );
@@ -508,6 +508,12 @@ export async function POST(
         await enqueueJob("github.ensure-branch", {
           changeRequestId: cr.id,
           companyId: ctx.company.id,
+          mode: "agent",
+          prompt: verifyStartPrompt,
+          attachmentRef: fileAttachmentRefs[0],
+          attachmentRefs: fileAttachmentRefs.length
+            ? fileAttachmentRefs
+            : undefined,
         });
       }
       const created = await db.changeRequestMessage.create({

@@ -81,7 +81,7 @@ stateDiagram-v2
 | --- | --- | --- |
 | Planning | `PLANNING` | Living plan chat, attach docs/secrets, submit modal with lock warning |
 | Submitted / building | `AWAITING_DEV_BUILD`, `BUILDING`, `TESTING` | “Submitted — your developer is building. Planning is closed.” Chat composer disabled |
-| Test & request changes | `CLIENT_VERIFY`, `PREVIEW_READY`, `CHANGES_REQUESTED` | New chat phase (not planning). Ask how to test, request edits. Agent edits live repo branch |
+| Ask about your app | `CLIENT_VERIFY`, `PREVIEW_READY`, `CHANGES_REQUESTED` | Post-build chat with **repo access**. Ask how things work; request edits. Agent implements on the live branch. Auto-deploy on push refreshes preview when enabled |
 | Final review | `AWAITING_FINAL_REVIEW` | Chat closed; developer reviews in queue |
 | Complete | `DONE` / `DEPLOYED` | Program complete |
 
@@ -91,11 +91,32 @@ Customers cannot reopen planning — only staff (`DEVELOPER` / `ADMIN`) via Acti
 Developer flow:
 
 1. **Open in Cursor** — review plan (plan mode)
-2. **Build** — agent/build mode on branch
+2. **Build** — agent/build mode on branch (auto-deploy on push default on)
 3. **Grant Test & Improve** (optional) — developer workspace
-4. **Ready for client testing** — opens `CLIENT_VERIFY`, posts phase-break message, starts verify chat for customer
+4. **Ready for client testing** — opens `CLIENT_VERIFY`, posts phase-break message, starts **Ask about your app** chat for customer
 5. Customer **Submit for final review** → notify email (`NOTIFY_EMAIL`)
 6. **Approve & deploy** from review queue / Build desk
+
+### Post-build chat + auto-deploy (customer apps)
+
+When the developer marks **Ready for client testing**:
+
+1. Status → `CLIENT_VERIFY`; chat unlocks as **Ask about your app** (not planning)
+2. Cursor agent switches to **agent** mode with the program branch (code access)
+3. Customer questions and change requests run as agent turns; status stays in verify (chat stays open)
+4. Each agent turn / push triggers `github.ensure-pr` + `railway.sync-preview` when **Auto-deploy preview on push** is on (default)
+5. GitHub `push` and `pull_request` webhooks also refresh the preview for that branch
+
+**Manual setup still required per customer repo:**
+
+| Requirement | Where |
+| --- | --- |
+| GitHub App installed on the customer repo | Admin → repositories |
+| `railwayProjectId` on the repository row | Admin → repositories (Railway preview target) |
+| Railway (or other) preview env for PRs | Customer Railway/GitHub project |
+| Optional: GitHub Actions deploy secrets in the *customer* repo | Only if you want production deploy-on-push beyond Railway previews |
+
+Koda’s own AWS deploy (ECS) is separate — see [deploy.md](./deploy.md). Customer program apps use the Railway preview path above unless you wire a custom workflow per repo.
 
 ### Accidental program submit / staff reopen planning
 
@@ -158,9 +179,11 @@ Then for each submitted program:
 4. Confirm **Grant Test & Improve workspace** → status `TESTING`, workspace
    panel with Continue in Cursor + Deploy
 5. Click **Ready for client testing** → status `CLIENT_VERIFY`, customer
-   Test & request changes chat opens (planning stays closed)
+   **Ask about your app** chat opens (planning stays closed; agent has repo access)
 6. Customer verifies in Koda chat only — they never see Cursor / Git / Railway
 7. Customer **Submit for final review** → developer notify email
+8. With auto-deploy on, each push / agent edit refreshes the Railway preview
+   (requires `railwayProjectId` on the repo)
 
 ### Developer email on submit
 

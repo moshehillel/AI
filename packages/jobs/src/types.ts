@@ -22,6 +22,12 @@ export type ClassifyJobData = {
 export type EnsureBranchJobData = {
   changeRequestId: string;
   companyId: string;
+  /** Override default plan/agent mode (e.g. verify-phase agent turn). */
+  mode?: "plan" | "agent";
+  /** Prompt for the agent started after the branch exists. */
+  prompt?: string;
+  attachmentRef?: string;
+  attachmentRefs?: string[];
 };
 
 export type CursorStartJobData = {

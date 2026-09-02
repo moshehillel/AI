@@ -545,12 +545,17 @@ export function ChatPanel({
     for (let i = 0; i < messages.length; i += 1) {
       const message = messages[i]!;
       if (message.role === "SYSTEM") {
-        if (message.content.startsWith("— Test & request changes —")) {
+        if (
+          message.content.startsWith("— Test & request changes —") ||
+          message.content.startsWith("— Ask about your app —")
+        ) {
           items.push({
             type: "thought",
             id: `verify-break-${message.id}`,
-            title: "Test & request changes",
-            summary: message.content.replace(/^— Test & request changes —\n\n/, ""),
+            title: "Ask about your app",
+            summary: message.content
+              .replace(/^— Test & request changes —\n\n/, "")
+              .replace(/^— Ask about your app —\n\n/, ""),
           });
           continue;
         }
@@ -590,8 +595,8 @@ export function ChatPanel({
   const placeholder = isProgram
     ? isPlanning
       ? "Plan, search, build anything"
-      : status === "CLIENT_VERIFY" || status === "PREVIEW_READY"
-        ? "Ask how it works, request a test script, or describe a change…"
+      : isVerifyPhase
+        ? "Ask how your app works, or describe a change…"
         : "Send a message…"
     : "Ask for another change or clarification…";
 
@@ -967,11 +972,11 @@ export function ChatPanel({
     : isBuildLocked
       ? "Submitted — building"
       : isVerifyPhase
-        ? "Test & request changes"
+        ? "Ask about your app"
         : status.replaceAll("_", " ");
 
   const chatTitle = isVerifyPhase
-    ? "Test & request changes"
+    ? "Ask about your app"
     : isPlanning
       ? "Planning"
       : (title ?? "Chat");
@@ -1136,8 +1141,9 @@ export function ChatPanel({
             <p className="agent-msg-body" style={{ margin: 0 }}>
               <strong>Submitted — your developer is building.</strong> Planning
               is closed. You cannot change the plan or chat here until they mark
-              the build ready for testing. A new Test & request changes chat
-              will open when the preview is ready.
+              the build ready for testing. A new Ask about your app chat
+              will open when the preview is ready — you can ask how things work
+              and request code changes.
             </p>
           </div>
         ) : null}
@@ -1438,9 +1444,9 @@ export function ChatPanel({
           ) : isVerifyPhase ? (
             <span
               className="pill-mode"
-              title="Ask for tests and changes — planning stays closed"
+              title="Ask how the app works or request edits — planning stays closed"
             >
-              Verify
+              App
             </span>
           ) : null}
           <textarea
@@ -1528,7 +1534,7 @@ export function ChatPanel({
             {isPlanning
               ? " · Planning with Koda"
               : isVerifyPhase
-                ? " · Test & request changes"
+                ? " · Ask about your app"
                 : isBuildLocked
                   ? " · Planning closed"
                   : ""}
@@ -1547,8 +1553,8 @@ export function ChatPanel({
               Submit for final review
             </button>
             <p className="text-xs muted text-center">
-              When you are satisfied with testing, submit for your developer to
-              approve and deploy.
+              Edits you request here update the live preview when auto-deploy is
+              on. When you are satisfied, submit for your developer to approve.
             </p>
           </div>
         ) : null}

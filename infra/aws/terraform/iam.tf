@@ -89,7 +89,7 @@ data "aws_iam_policy_document" "github_oidc_assume" {
     condition {
       test     = "StringLike"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:${var.github_repository}:ref:refs/heads/*"]
+      values   = ["repo:${local.github_oidc_repo_prefix}:ref:refs/heads/*"]
     }
   }
 }

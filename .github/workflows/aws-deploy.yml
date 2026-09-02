@@ -84,37 +84,15 @@ jobs:
             -t "$ECR_REGISTRY/${{ env.PROJECT_NAME }}/worker:$IMAGE_TAG" .
           docker push "$ECR_REGISTRY/${{ env.PROJECT_NAME }}/worker:$IMAGE_TAG"
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.8
-
-      - name: Terraform init
-        working-directory: ${{ env.TF_DIR }}
-        run: terraform init -input=false
-
-      - name: Register new ECS task definitions
-        working-directory: ${{ env.TF_DIR }}
+      - name: Register new ECS task definitions and deploy
         env:
+          PROJECT_NAME: ${{ env.PROJECT_NAME }}
+          ENVIRONMENT: ${{ github.event.inputs.environment || 'production' }}
           IMAGE_TAG: ${{ steps.meta.outputs.tag }}
+          ECR_REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
-          terraform apply -input=false -auto-approve \
-            -var="image_tag=$IMAGE_TAG" \
-            -var="environment=${{ github.event.inputs.environment || 'production' }}" \
-            -target=aws_ecs_task_definition.web \
-            -target=aws_ecs_task_definition.worker
-
-      - name: Force ECS rolling deploy
-        env:
-          CLUSTER: ${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment || 'production' }}-cluster
-          IMAGE_TAG: ${{ steps.meta.outputs.tag }}
-        run: |
-          for SERVICE in web worker; do
-            aws ecs update-service \
-              --cluster "$CLUSTER" \
-              --service "${{ env.PROJECT_NAME }}-${{ github.event.inputs.environment || 'production' }}-$SERVICE" \
-              --force-new-deployment
-          done
+          chmod +x scripts/github-aws-register-ecs-tasks.sh
+          ./scripts/github-aws-register-ecs-tasks.sh
 
       - name: Wait for web service stability
         env:

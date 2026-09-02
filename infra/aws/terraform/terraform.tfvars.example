@@ -18,7 +18,10 @@ acm_certificate_arn = ""
 web_desired_count    = 2
 worker_desired_count = 1
 
-github_repository  = "moshehillel/AI"
-enable_github_oidc = true
+github_repository             = "moshehillel/AI"
+github_repository_owner_id    = "225308645"   # gh api repos/moshehillel/AI --jq .owner.id
+github_repository_id          = "1346831201"  # gh api repos/moshehillel/AI --jq .id
+github_oidc_immutable_subject = true          # required for repos created after 2026-07-15
+enable_github_oidc            = true
 # false when sharing the Whiteglove account (GitHub OIDC provider already exists there).
 create_github_oidc_provider = false

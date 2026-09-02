@@ -96,6 +96,24 @@ variable "github_repository" {
   default     = "moshehillel/AI"
 }
 
+variable "github_repository_owner_id" {
+  description = "GitHub owner ID for immutable OIDC sub claim (repos created after 2026-07-15)."
+  type        = string
+  default     = "225308645"
+}
+
+variable "github_repository_id" {
+  description = "GitHub repository ID for immutable OIDC sub claim."
+  type        = string
+  default     = "1346831201"
+}
+
+variable "github_oidc_immutable_subject" {
+  description = "Use immutable OIDC subject (repo:owner@ID/repo@ID:...). Required for repos created after 2026-07-15."
+  type        = bool
+  default     = true
+}
+
 variable "enable_github_oidc" {
   description = "Create IAM role for GitHub Actions OIDC deploy."
   type        = bool

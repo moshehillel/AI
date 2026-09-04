@@ -150,8 +150,26 @@ export function IdeSidebar({
                   hidePersonal
                   afterCreateOrganizationUrl="/projects"
                   afterSelectOrganizationUrl="/projects"
+                  appearance={{
+                    elements: {
+                      rootBox: { flexShrink: 0, maxWidth: "7.5rem" },
+                      organizationSwitcherTrigger: { maxWidth: "7.5rem" },
+                    },
+                  }}
                 />
-                <UserButton afterSignOutUrl="/" />
+                <UserButton
+                  afterSignOutUrl="/"
+                  appearance={{
+                    elements: {
+                      rootBox: { flexShrink: 0 },
+                      avatarBox: {
+                        width: "1.75rem",
+                        height: "1.75rem",
+                        outline: "1px solid var(--ide-chrome-line)",
+                      },
+                    },
+                  }}
+                />
               </SignedIn>
               <SignedOut>
                 <Link className="btn btn-ghost" href="/sign-in">

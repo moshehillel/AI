@@ -284,6 +284,22 @@ select {
   gap: 8px;
   padding: 10px 12px;
   border-top: 1px solid var(--ide-chrome-line);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 5;
+  overflow: visible;
+  /* Stay clear of the fixed AI disclaimer bar */
+  margin-bottom: 0.15rem;
+}
+
+.ide-sidebar-foot .cl-rootBox,
+.ide-sidebar-foot .cl-userButtonTrigger {
+  flex-shrink: 0;
+}
+
+.ide-sidebar-foot .cl-organizationSwitcherTrigger {
+  max-width: 7.5rem;
+  overflow: hidden;
 }
 
 .ide-brand {
@@ -1650,11 +1666,14 @@ select {
   --aa-line: rgba(232, 238, 247, 0.14);
   --aa-panel: rgba(10, 22, 38, 0.72);
   position: relative;
+  isolation: isolate;
   min-height: 100dvh;
   color: var(--aa-ink);
   background: var(--aa-navy);
   font-family: var(--font-onboard-body), "Manrope", system-ui, sans-serif;
-  overflow-x: hidden;
+  /* Atmosphere handles decorative clipping; page overflow must stay visible so
+     the Clerk UserButton / Sign out cluster is never cropped off-screen. */
+  overflow: visible;
 }
 
 html:has(.onboard),
@@ -1757,19 +1776,27 @@ html:has(.onboard) body {
 }
 
 .onboard-top {
-  position: relative;
-  z-index: 2;
+  position: sticky;
+  top: 0;
+  z-index: 50;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1.5rem;
+  padding: 0.85rem 1.5rem;
+  background: color-mix(in oklab, var(--aa-navy) 88%, transparent);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--aa-line);
+  /* Keep Clerk menus from being clipped by page/atmosphere layers */
+  overflow: visible;
 }
 
 .onboard-top-brand {
   display: flex;
   align-items: center;
   gap: 0.7rem;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .onboard-top-logo {
@@ -1792,6 +1819,9 @@ html:has(.onboard) body {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 0.75rem 1rem;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--aa-muted);
@@ -1801,10 +1831,46 @@ html:has(.onboard) body {
   color: var(--aa-ink);
 }
 
-/* Clerk chrome sits in the same top nav as staff links */
-.onboard-top-nav .cl-organizationSwitcherTrigger,
-.onboard-top-nav .cl-userButtonTrigger {
+/* Auth cluster: always above hero/atmosphere; never clipped off-screen */
+.onboard-auth {
   display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.55rem 0.75rem;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
+  isolation: isolate;
+}
+
+.onboard-auth .cl-organizationSwitcherTrigger,
+.onboard-auth .cl-userButtonTrigger,
+.onboard-auth .cl-rootBox {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.onboard-signout {
+  appearance: none;
+  border: 1px solid rgba(232, 238, 247, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #e8eef7;
+  padding: 0.45rem 0.8rem;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.onboard-signout:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(158, 197, 255, 0.45);
+  color: #fff;
 }
 
 .onboard-hero {
@@ -2052,6 +2118,14 @@ html:has(.onboard) body {
 
   .onboard-top-name {
     display: none;
+  }
+
+  .onboard-top {
+    padding-inline: 1rem;
+  }
+
+  .onboard-auth .cl-organizationSwitcherTrigger {
+    max-width: 8.5rem;
   }
 }
 

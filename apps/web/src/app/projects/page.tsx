@@ -4,6 +4,7 @@ import { db, ensureCustomerOnboardingProject } from "@automation-studio/db";
 import { CUSTOMER_ONBOARDING_SLUG, STATUS_LABELS } from "@automation-studio/domain";
 import Link from "next/link";
 import { Space_Grotesk, Manrope } from "next/font/google";
+import { OnboardAuth } from "@/components/onboard-auth";
 import { NewProgramForm } from "./[projectId]/new-program-form";
 
 const display = Space_Grotesk({
@@ -86,12 +87,15 @@ export default async function ProjectsPage() {
           </picture>
           <span className="onboard-top-name">Advanced Automations</span>
         </div>
-        {isStaff ? (
-          <nav className="onboard-top-nav">
-            <Link href="/admin">Admin</Link>
-            <Link href="/staff">Staff</Link>
-          </nav>
-        ) : null}
+        <nav className="onboard-top-nav">
+          {isStaff ? (
+            <>
+              <Link href="/admin">Admin</Link>
+              <Link href="/staff">Staff</Link>
+            </>
+          ) : null}
+          <OnboardAuth />
+        </nav>
       </header>
 
       <section className="onboard-hero">

@@ -1789,7 +1789,9 @@ html:has(.onboard) body {
 .onboard-top-nav {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.75rem 1rem;
   font-size: 0.9rem;
   font-weight: 600;
   color: var(--aa-muted);
@@ -1797,6 +1799,12 @@ html:has(.onboard) body {
 
 .onboard-top-nav a:hover {
   color: var(--aa-ink);
+}
+
+/* Clerk chrome sits in the same top nav as staff links */
+.onboard-top-nav .cl-organizationSwitcherTrigger,
+.onboard-top-nav .cl-userButtonTrigger {
+  display: inline-flex;
 }
 
 .onboard-hero {

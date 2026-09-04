@@ -24,3 +24,4 @@ export {
   ensurePlanningRepository,
   type PlanningRepoDefaults,
 } from "./planning-repo.js";
+export { ensureCustomerOnboardingProject } from "./onboarding-project.js";

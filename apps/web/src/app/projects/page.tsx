@@ -1,12 +1,10 @@
 export const dynamic = "force-dynamic";
 import { requirePageAuth } from "@/lib/page-auth";
-import { db } from "@automation-studio/db";
-import { STATUS_LABELS } from "@automation-studio/domain";
+import { db, ensureCustomerOnboardingProject } from "@automation-studio/db";
+import { CUSTOMER_ONBOARDING_SLUG, STATUS_LABELS } from "@automation-studio/domain";
 import Link from "next/link";
 import { Space_Grotesk, Manrope } from "next/font/google";
 import { NewProgramForm } from "./[projectId]/new-program-form";
-
-const ONBOARDING_SLUG = "customer-onboarding";
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -25,38 +23,45 @@ export default async function ProjectsPage() {
   const isStaff = ctx.role === "DEVELOPER" || ctx.role === "ADMIN";
   const isEmployee = ctx.role === "EMPLOYEE";
 
-  const projectFilter = {
-    companyId: ctx.company.id,
-    status: "ACTIVE" as const,
-    ...(isEmployee
-      ? { members: { some: { userId: ctx.user.id } } }
-      : {}),
-  };
+  // Shared planning workspace — always available to company members (no assignment needed).
+  const onboardingProject = await ensureCustomerOnboardingProject(
+    db,
+    ctx.company.id,
+  );
 
-  const projects = await db.project.findMany({
-    where: projectFilter,
+  // Assigned workspaces (iterate on linked repos) — employees only see projects they're on.
+  const assignedProjects = await db.project.findMany({
+    where: {
+      companyId: ctx.company.id,
+      status: "ACTIVE",
+      slug: { not: CUSTOMER_ONBOARDING_SLUG },
+      ...(isEmployee
+        ? { members: { some: { userId: ctx.user.id } } }
+        : {}),
+    },
     include: { repository: true },
     orderBy: { name: "asc" },
   });
 
-  const onboardingProject =
-    projects.find((p) => p.slug === ONBOARDING_SLUG) ?? projects[0] ?? null;
-
-  const assignedWorkspaces = isEmployee ? projects : [];
-
-  const activePrograms = onboardingProject
-    ? await db.changeRequest.findMany({
-        where: {
-          companyId: ctx.company.id,
-          projectId: onboardingProject.id,
-          kind: "PROGRAM",
-          status: { not: "CANCELLED" },
-          ...(isEmployee ? { createdById: ctx.user.id } : {}),
-        },
-        orderBy: { updatedAt: "desc" },
-        take: 20,
+  const staffProjects = isStaff
+    ? await db.project.findMany({
+        where: { companyId: ctx.company.id, status: "ACTIVE" },
+        include: { repository: true },
+        orderBy: { name: "asc" },
       })
     : [];
+
+  const activePrograms = await db.changeRequest.findMany({
+    where: {
+      companyId: ctx.company.id,
+      projectId: onboardingProject.id,
+      kind: "PROGRAM",
+      status: { not: "CANCELLED" },
+      ...(isEmployee ? { createdById: ctx.user.id } : {}),
+    },
+    orderBy: { updatedAt: "desc" },
+    take: 20,
+  });
 
   return (
     <div className={`onboard ${display.variable} ${body.variable}`}>
@@ -120,14 +125,7 @@ export default async function ProjectsPage() {
           </p>
 
           <div className="onboard-cta rise" style={{ animationDelay: "280ms" }}>
-            {onboardingProject ? (
-              <NewProgramForm projectId={onboardingProject.id} variant="hero" />
-            ) : (
-              <p className="onboard-empty">
-                No workspace is available yet. Ask an admin to grant access to
-                customer onboarding.
-              </p>
-            )}
+            <NewProgramForm projectId={onboardingProject.id} variant="hero" />
           </div>
           <p className="onboard-teaser rise" style={{ animationDelay: "320ms" }}>
             <span className="onboard-teaser-label">Coming soon</span>
@@ -163,7 +161,7 @@ export default async function ProjectsPage() {
             ) : null}
           </ul>
 
-          {isEmployee && assignedWorkspaces.length > 0 ? (
+          {isEmployee && assignedProjects.length > 0 ? (
             <div className="onboard-staff">
               <h2 className="onboard-below-title">Your workspaces</h2>
               <p className="onboard-empty" style={{ marginBottom: "0.75rem" }}>
@@ -171,7 +169,7 @@ export default async function ProjectsPage() {
                 GitHub repository.
               </p>
               <div className="onboard-staff-list">
-                {assignedWorkspaces.map((project) => (
+                {assignedProjects.map((project) => (
                   <Link
                     key={project.id}
                     href={`/projects/${project.id}`}
@@ -189,11 +187,18 @@ export default async function ProjectsPage() {
             </div>
           ) : null}
 
+          {isEmployee && assignedProjects.length === 0 ? (
+            <p className="onboard-empty" style={{ marginTop: "1.5rem" }}>
+              Need to improve an existing automation? Ask an admin to assign you
+              to that workspace. You can always start a new program above.
+            </p>
+          ) : null}
+
           {isStaff ? (
             <div className="onboard-staff">
               <h2 className="onboard-below-title">Staff · workspaces</h2>
               <div className="onboard-staff-list">
-                {projects.map((project) => (
+                {staffProjects.map((project) => (
                   <Link
                     key={project.id}
                     href={`/projects/${project.id}`}

@@ -43,16 +43,26 @@ export function NewProgramForm({
           });
           const json = (await response.json()) as {
             id?: string;
-            error?: string | { formErrors?: string[] };
+            error?:
+              | string
+              | { formErrors?: string[]; fieldErrors?: Record<string, string[]> };
           };
           if (!response.ok || !json.id) {
             const err = json.error;
+            let message: string | null = null;
+            if (typeof err === "string") {
+              message = err;
+            } else if (err?.formErrors?.[0]) {
+              message = err.formErrors[0];
+            } else if (err?.fieldErrors) {
+              message =
+                Object.values(err.fieldErrors).flat().find(Boolean) ?? null;
+            }
             setError(
-              typeof err === "string"
-                ? err
-                : iterate
-                  ? "Add a name or a short note about what to improve"
-                  : "Add a program name or a short note to start",
+              message ??
+                (iterate
+                  ? "Could not start chat. Check access or add a short note."
+                  : "Could not start program. Add a name or a short note, or ask an admin if access is missing."),
             );
             return;
           }

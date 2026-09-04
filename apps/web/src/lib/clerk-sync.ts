@@ -1,4 +1,4 @@
-import { db, MembershipRole } from "@automation-studio/db";
+import { db, MembershipRole, ensureCustomerOnboardingProject } from "@automation-studio/db";
 import { slugify } from "@automation-studio/domain";
 
 function mapClerkRole(role: string | null | undefined): MembershipRole {
@@ -94,20 +94,15 @@ export async function syncClerkOrgMembership(input: {
     create: { companyId: company.id, userId: user.id, role },
   });
 
-  // Ensure seeded projects stay reachable for newly linked members.
-  const projects = await db.project.findMany({
-    where: { companyId: company.id, status: "ACTIVE" },
-    select: { id: true },
+  // Shared planning workspace only — admin assigns other projects for iterate flows.
+  const onboarding = await ensureCustomerOnboardingProject(db, company.id);
+  await db.projectMember.upsert({
+    where: {
+      projectId_userId: { projectId: onboarding.id, userId: user.id },
+    },
+    update: {},
+    create: { projectId: onboarding.id, userId: user.id },
   });
-  for (const project of projects) {
-    await db.projectMember.upsert({
-      where: {
-        projectId_userId: { projectId: project.id, userId: user.id },
-      },
-      update: {},
-      create: { projectId: project.id, userId: user.id },
-    });
-  }
 
   return { user, company, role };
 }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { Webhook } from "svix";
-import { db, MembershipRole } from "@automation-studio/db";
+import { db, MembershipRole, ensureCustomerOnboardingProject } from "@automation-studio/db";
 import { slugify } from "@automation-studio/domain";
 
 function mapClerkRole(role: string | undefined): MembershipRole {
@@ -42,7 +42,7 @@ export async function POST(request: Request) {
     case "organization.created": {
       const orgId = String(event.data.id);
       const name = String(event.data.name ?? "Company");
-      await db.company.upsert({
+      const company = await db.company.upsert({
         where: { clerkOrgId: orgId },
         update: { name },
         create: {
@@ -51,6 +51,7 @@ export async function POST(request: Request) {
           slug: slugify(name),
         },
       });
+      await ensureCustomerOnboardingProject(db, company.id);
       break;
     }
     case "user.created":
@@ -96,6 +97,16 @@ export async function POST(request: Request) {
         },
         update: { role },
         create: { companyId: company.id, userId: user.id, role },
+      });
+
+      // Members can always plan — grant shared onboarding workspace (not iterate projects).
+      const onboarding = await ensureCustomerOnboardingProject(db, company.id);
+      await db.projectMember.upsert({
+        where: {
+          projectId_userId: { projectId: onboarding.id, userId: user.id },
+        },
+        update: {},
+        create: { projectId: onboarding.id, userId: user.id },
       });
       break;
     }

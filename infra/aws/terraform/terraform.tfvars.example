@@ -1,0 +1,27 @@
+# Copy to terraform.tfvars and customize before apply.
+# Do not commit terraform.tfvars with secrets.
+
+aws_region   = "us-east-1"
+project_name = "koda-platform"
+environment  = "production"
+domain_name  = "koda.advancedautomations.net"
+
+# Same AWS account as Whiteglove is OK — use a non-overlapping VPC CIDR (check Whiteglove VPCs first).
+# vpc_cidr = "10.20.0.0/16"
+
+# Leave empty when DNS is managed at Netlify (manual CNAME to alb_dns_name output).
+hosted_zone_id = ""
+
+# Request ACM cert in us-east-1 for domain_name, validate via DNS, then paste ARN.
+acm_certificate_arn = ""
+
+web_desired_count    = 2
+worker_desired_count = 1
+
+github_repository             = "moshehillel/AI"
+github_repository_owner_id    = "225308645"   # gh api repos/moshehillel/AI --jq .owner.id
+github_repository_id          = "1346831201"  # gh api repos/moshehillel/AI --jq .id
+github_oidc_immutable_subject = true          # required for repos created after 2026-07-15
+enable_github_oidc            = true
+# false when sharing the Whiteglove account (GitHub OIDC provider already exists there).
+create_github_oidc_provider = false

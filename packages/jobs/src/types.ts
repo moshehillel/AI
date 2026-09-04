@@ -22,6 +22,12 @@ export type ClassifyJobData = {
 export type EnsureBranchJobData = {
   changeRequestId: string;
   companyId: string;
+  /** Override default plan/agent mode (e.g. verify-phase agent turn). */
+  mode?: "plan" | "agent";
+  /** Prompt for the agent started after the branch exists. */
+  prompt?: string;
+  attachmentRef?: string;
+  attachmentRefs?: string[];
 };
 
 export type CursorStartJobData = {
@@ -29,6 +35,16 @@ export type CursorStartJobData = {
   companyId: string;
   mode: "plan" | "agent";
   prompt: string;
+  /** SecretRef.keyName for an encrypted PlanningAgentFilePayload */
+  attachmentRef?: string;
+  /** Multiple SecretRef.keyNames for encrypted PlanningAgentFilePayloads */
+  attachmentRefs?: string[];
+  /** Internal: one automatic retry after an empty agent reply. */
+  isEmptyReplyRetry?: boolean;
+  /** User message id tied to this turn (retry UI). */
+  userMessageId?: string;
+  /** Original user paste exceeded agent prompt limit. */
+  wasLongMessage?: boolean;
 };
 
 export type CursorFollowUpJobData = {
@@ -36,6 +52,16 @@ export type CursorFollowUpJobData = {
   companyId: string;
   prompt: string;
   mode?: "plan" | "agent";
+  /** SecretRef.keyName for an encrypted PlanningAgentFilePayload */
+  attachmentRef?: string;
+  /** Multiple SecretRef.keyNames for encrypted PlanningAgentFilePayloads */
+  attachmentRefs?: string[];
+  /** Internal: one automatic retry after an empty agent reply. */
+  isEmptyReplyRetry?: boolean;
+  /** User message id tied to this turn (retry UI). */
+  userMessageId?: string;
+  /** Original user paste exceeded agent prompt limit. */
+  wasLongMessage?: boolean;
 };
 
 export type CursorCancelJobData = {

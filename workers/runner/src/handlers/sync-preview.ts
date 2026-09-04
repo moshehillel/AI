@@ -52,11 +52,17 @@ export async function handleSyncPreview(data: SyncPreviewJobData & { attempt?: n
   }
 
   if (preview.url) {
-    if (cr.status === "TESTING" || cr.status === "IMPLEMENTING") {
+    if (
+      cr.status === "TESTING" ||
+      cr.status === "IMPLEMENTING" ||
+      cr.status === "BUILDING"
+    ) {
+      const nextStatus =
+        cr.kind === "PROGRAM" ? "CLIENT_VERIFY" : "PREVIEW_READY";
       await transitionChangeRequest({
         changeRequestId: cr.id,
         companyId: data.companyId,
-        toStatus: "PREVIEW_READY",
+        toStatus: nextStatus,
         reason: "Preview environment ready",
       });
     }
@@ -73,7 +79,13 @@ export async function handleSyncPreview(data: SyncPreviewJobData & { attempt?: n
         data: {
           changeRequestId: cr.id,
           role: "SYSTEM",
-          content: `Test version is ready. Open it here: ${preview.url}`,
+          content:
+            cr.kind === "PROGRAM" &&
+            (cr.status === "CLIENT_VERIFY" ||
+              cr.status === "PREVIEW_READY" ||
+              cr.status === "CHANGES_REQUESTED")
+              ? `Updated preview is ready — open it here: ${preview.url}`
+              : `Test version is ready. Open it here: ${preview.url}`,
         },
       });
     }

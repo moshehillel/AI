@@ -18,7 +18,9 @@
     "@automation-studio/github": "workspace:*",
     "@automation-studio/jobs": "workspace:*",
     "@automation-studio/railway": "workspace:*",
-    "bullmq": "^5.41.0"
+    "bullmq": "^5.41.0",
+    "dotenv": "^17.4.2",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.13.10",

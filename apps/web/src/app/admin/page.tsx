@@ -1,26 +1,32 @@
 export const dynamic = 'force-dynamic';
 import { AppHeader } from "@/components/app-header";
-import { getRequestAuth } from "@/lib/request-auth";
+import { requirePageAuth } from "@/lib/page-auth";
+import { isOpenAccess } from "@/lib/access-mode";
 import { db } from "@automation-studio/db";
 import { parseCompanySettings } from "@automation-studio/domain";
 import { ConnectRepoForm } from "./connect-repo-form";
+import { CreateProjectFromRepoForm } from "./create-project-from-repo-form";
 import { InviteNote } from "./invite-note";
 import { ProjectMembersForm } from "./project-members-form";
 import { VerifyProtectionButton } from "./verify-protection-button";
 import { CompanySettingsForm } from "./company-settings-form";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 export default async function AdminPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const ctx = await getRequestAuth();
+  const ctx = await requirePageAuth();
   const params = await searchParams;
 
   if (ctx.role !== "ADMIN" && ctx.role !== "DEVELOPER") {
+    if (isOpenAccess()) {
+      redirect("/staff?next=/admin");
+    }
     return (
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="app-frame">
         <AppHeader role={ctx.role} />
         <div className="panel p-6">Admin access required.</div>
       </main>
@@ -47,6 +53,11 @@ export default async function AdminPage({
     where: { id: ctx.company.id },
   });
   const settings = parseCompanySettings(company.settings);
+  const inbox = await db.outboundEmail.findMany({
+    where: { companyId: ctx.company.id },
+    orderBy: { createdAt: "desc" },
+    take: 25,
+  });
   const githubNotice = typeof params.github === "string" ? params.github : null;
   const installationId =
     typeof params.installation_id === "string" ? params.installation_id : null;
@@ -66,14 +77,13 @@ export default async function AdminPage({
       : githubNotice;
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="app-frame">
       <AppHeader role={ctx.role} />
       <section className="rise space-y-6">
         <div>
-          <h1 className="brand-mark text-4xl">Company admin</h1>
+          <h1 className="brand-mark text-4xl">Admin</h1>
           <p className="muted mt-2">
-            Manage members, project access, and repository connections. Production
-            deploy access is not granted here by default.
+            Manage members, workspace access, and infrastructure connections.
           </p>
           {githubNoticeMessage ? (
             <p className="mt-3 text-sm text-[var(--accent-soft)]">
@@ -84,16 +94,65 @@ export default async function AdminPage({
         </div>
 
         <div className="panel p-5">
-          <h2 className="text-xl">GitHub App</h2>
+          <h2 className="text-xl">Notification inbox</h2>
           <p className="muted mt-2 text-sm">
-            Install the Automation Studio GitHub App into your organization, then
-            connect individual repositories to projects.
+            Emails queued for developers (sent when an email API key is
+            configured; otherwise stored here for review).
+          </p>
+          <ul className="mt-4 space-y-3">
+            {inbox.map((mail) => (
+              <li
+                key={mail.id}
+                className="rounded-xl border border-[var(--line)] p-3 text-sm"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">{mail.subject}</span>
+                  <span className="status-pill">{mail.status}</span>
+                </div>
+                <p className="muted mt-1">
+                  To {mail.toEmail} · {mail.createdAt.toLocaleString()}
+                </p>
+                <pre className="muted mt-2 max-h-28 overflow-auto whitespace-pre-wrap text-xs">
+                  {mail.body}
+                </pre>
+              </li>
+            ))}
+            {inbox.length === 0 ? (
+              <li className="muted text-sm">No notifications yet.</li>
+            ) : null}
+          </ul>
+        </div>
+
+        <div className="panel p-5">
+          <h2 className="text-xl">Source control (Admin)</h2>
+          <p className="muted mt-2 text-sm">
+            Install the Koda GitHub App into your organization, then connect
+            repositories to workspaces. Infrastructure details are only shown
+            here for developers and admins.
           </p>
           <div className="mt-4 flex flex-wrap gap-3">
+            {!process.env.GITHUB_APP_ID ? (
+              <Link
+                className="btn btn-primary"
+                href="/api/github/app-manifest/start"
+              >
+                Register GitHub App (one-time)
+              </Link>
+            ) : null}
             <Link className="btn btn-primary" href="/api/github/install">
               Install / manage GitHub App
             </Link>
           </div>
+          {!process.env.GITHUB_APP_ID ? (
+            <p className="muted mt-3 text-sm">
+              First-time setup: click Register to create the GitHub App on your
+              account (requires GitHub login). Credentials are saved to Railway
+              automatically when <code>RAILWAY_API_TOKEN</code> is configured.
+              If Railway is blocked (NetFree), run{" "}
+              <code>pnpm register:github-app</code> locally — see{" "}
+              <code>docs/github-app-setup.md</code> (Option A).
+            </p>
+          ) : null}
           <ul className="mt-4 space-y-2 text-sm">
             {installations.map((install) => (
               <li key={install.id} className="status-pill">
@@ -134,6 +193,15 @@ export default async function AdminPage({
 
         <div className="panel p-5">
           <h2 className="text-xl">Projects & repositories</h2>
+          <p className="muted mt-2 text-sm">
+            Link an existing GitHub repository as a Koda project, then assign a
+            Clerk user so they can open it and chat against that codebase.
+          </p>
+          <div className="mt-4 rounded-xl border border-[var(--line)] p-4">
+            <CreateProjectFromRepoForm
+              defaultInstallationId={installations[0]?.installationId}
+            />
+          </div>
           <div className="mt-4 space-y-4">
             {projects.map((project) => (
               <div
@@ -148,6 +216,9 @@ export default async function AdminPage({
                         ? `${project.repository.githubOwner}/${project.repository.githubRepo}`
                         : "No repository connected"}
                     </p>
+                    <p className="muted mt-1 text-xs">
+                      <Link href={`/projects/${project.id}`}>Open workspace</Link>
+                    </p>
                   </div>
                   {project.repository ? (
                     <VerifyProtectionButton projectId={project.id} />
@@ -161,7 +232,7 @@ export default async function AdminPage({
                     />
                   </div>
                 ) : null}
-                {ctx.role === "ADMIN" ? (
+                {ctx.role === "ADMIN" || ctx.role === "DEVELOPER" ? (
                   <div className="mt-4">
                     <ProjectMembersForm
                       projectId={project.id}

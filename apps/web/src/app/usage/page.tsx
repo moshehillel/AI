@@ -1,17 +1,22 @@
 export const dynamic = "force-dynamic";
 import { AppHeader } from "@/components/app-header";
-import { getRequestAuth } from "@/lib/request-auth";
+import { requirePageAuth } from "@/lib/page-auth";
+import { isOpenAccess } from "@/lib/access-mode";
 import { db } from "@automation-studio/db";
 import {
   getCompanyUsageTotals,
   parseCompanySettings,
 } from "@automation-studio/domain";
+import { redirect } from "next/navigation";
 
 export default async function UsagePage() {
-  const ctx = await getRequestAuth();
+  const ctx = await requirePageAuth();
   if (ctx.role === "EMPLOYEE") {
+    if (isOpenAccess()) {
+      redirect("/staff?next=/usage");
+    }
     return (
-      <main className="mx-auto max-w-6xl px-6 py-8">
+      <main className="app-frame">
         <AppHeader role={ctx.role} />
         <div className="panel p-6">
           Usage reporting is available to developers and admins.
@@ -64,13 +69,13 @@ export default async function UsagePage() {
   );
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-8">
+    <main className="app-frame">
       <AppHeader role={ctx.role} />
       <section className="rise space-y-6">
         <div>
           <h1 className="brand-mark text-4xl">Usage</h1>
           <p className="muted mt-2">
-            Cursor and preview usage by company, project, and person for this
+            Koda AI and preview usage by company, workspace, and person for this
             month.
           </p>
         </div>
@@ -150,7 +155,7 @@ export default async function UsagePage() {
         </div>
 
         <div className="panel p-5">
-          <h2 className="text-lg">Recent agent runs</h2>
+          <h2 className="text-lg">Recent AI runs</h2>
           <ul className="mt-3 space-y-2 text-sm">
             {recent.map((row) => (
               <li

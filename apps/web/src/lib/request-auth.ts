@@ -1,63 +1,64 @@
-import { cookies, headers } from "next/headers";
-import {
-  resolveAuthContext,
-  AuthError,
-} from "@automation-studio/auth";
+import { AuthError, resolveAuthContext } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
+import { isDemoAuthEnabled, isOpenAccess } from "@/lib/access-mode";
+import { syncClerkOrgMembership } from "@/lib/clerk-sync";
+import {
+  clerkUserIdForStaffRole,
+  readStaffRoleCookie,
+} from "@/lib/staff-access";
 
 const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 
-function demoUserIdFromHint(hint: string | null | undefined) {
-  const normalized = (hint ?? "").toLowerCase();
-  if (normalized === "developer" || normalized === "dev") return "seed_developer";
-  if (normalized === "admin") return "seed_admin";
-  return "seed_employee";
+async function seededAuthContext(clerkUserId: string) {
+  const company =
+    (await db.company.findFirst({ where: { slug: "demo-co" } })) ??
+    (await db.company.findFirst({ orderBy: { createdAt: "asc" } }));
+  const user = await db.user.findFirst({
+    where: { clerkUserId },
+  });
+  if (!company || !user) return null;
+  const membership = await db.companyMembership.findUniqueOrThrow({
+    where: {
+      companyId_userId: { companyId: company.id, userId: user.id },
+    },
+  });
+  return {
+    user,
+    company,
+    membership,
+    role: membership.role,
+  };
 }
 
 /**
- * Dev-friendly auth context:
- * - With Clerk org + synced DB rows → real multi-tenant context
- * - Without Clerk configured / unsynced → fall back to seeded demo company
+ * Auth context:
+ * - OPEN_ACCESS / demo → seeded employee on demo-co (single customer).
+ *   All tenant filters still use companyId; only identity is fixed until Clerk.
+ * - Clerk org + synced DB → real multi-tenant context (one Company per org).
+ * - Clerk org present but DB lag → JIT sync from Clerk API
  */
 export async function getRequestAuth() {
-  if (!clerkEnabled || process.env.ALLOW_DEMO_AUTH === "1") {
-    let hint = process.env.DEMO_ROLE ?? "employee";
-    if (process.env.ALLOW_DEMO_AUTH === "1") {
-      try {
-        const h = await headers();
-        const cookieStore = await cookies();
-        hint =
-          h.get("x-demo-user") ??
-          cookieStore.get("demo_user")?.value ??
-          hint;
-      } catch {
-        // headers/cookies unavailable outside request scope
-      }
+  if (isOpenAccess() || isDemoAuthEnabled()) {
+    const staffRole = isOpenAccess() ? await readStaffRoleCookie() : null;
+    let clerkUserId = "seed_employee";
+    if (staffRole) {
+      clerkUserId = clerkUserIdForStaffRole(staffRole);
+    } else if (!isOpenAccess() && process.env.DEMO_ROLE) {
+      clerkUserId =
+        process.env.DEMO_ROLE === "developer" ||
+        process.env.DEMO_ROLE === "dev"
+          ? "seed_developer"
+          : process.env.DEMO_ROLE === "admin"
+            ? "seed_admin"
+            : "seed_employee";
     }
 
-    const company = await db.company.findFirst({
-      where: { slug: "demo-co" },
-    });
-    const user = await db.user.findFirst({
-      where: { clerkUserId: demoUserIdFromHint(hint) },
-    });
-    if (company && user) {
-      const membership = await db.companyMembership.findUniqueOrThrow({
-        where: {
-          companyId_userId: { companyId: company.id, userId: user.id },
-        },
-      });
-      return {
-        user,
-        company,
-        membership,
-        role: membership.role,
-      };
-    }
+    const ctx = await seededAuthContext(clerkUserId);
+    if (ctx) return ctx;
 
-    if (!clerkEnabled) {
+    if (isOpenAccess() || !clerkEnabled) {
       throw new AuthError(
-        "Clerk is not configured and demo auth data is missing. Run pnpm db:seed.",
+        "Open access is on but seed data is missing. Run pnpm db:seed.",
         500,
       );
     }
@@ -69,19 +70,44 @@ export async function getRequestAuth() {
     throw new AuthError("Unauthorized", 401);
   }
 
+  if (!session.orgId) {
+    throw new AuthError(
+      "No active organization. Create or select an organization to continue.",
+      400,
+    );
+  }
+
   try {
-    if (session.orgId) {
+    return await resolveAuthContext({
+      clerkUserId: session.userId,
+      clerkOrgId: session.orgId,
+    });
+  } catch (error) {
+    if (!(error instanceof AuthError)) {
+      throw error;
+    }
+
+    try {
+      await syncClerkOrgMembership({
+        clerkUserId: session.userId,
+        clerkOrgId: session.orgId,
+        orgRole: session.orgRole,
+      });
       return await resolveAuthContext({
         clerkUserId: session.userId,
         clerkOrgId: session.orgId,
       });
+    } catch (syncError) {
+      console.error(
+        "[auth] clerk org sync failed",
+        syncError instanceof Error ? syncError.message : syncError,
+      );
+      throw error instanceof AuthError
+        ? error
+        : new AuthError(
+            "Organization is not ready yet. Open Select organization and try again.",
+            400,
+          );
     }
-  } catch {
-    // fall through
   }
-
-  throw new AuthError(
-    "No active organization. Invite users via Clerk Organizations.",
-    400,
-  );
 }

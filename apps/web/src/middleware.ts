@@ -1,7 +1,18 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getAppBaseUrl } from "@/lib/app-url";
+import {
+  STAFF_COOKIE,
+  isStaffProtectedPath,
+  parseStaffSessionValue,
+} from "@/lib/staff-session";
 
 const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+/** Single-customer no-login mode (local dev only in production). */
+const openAccess =
+  process.env.OPEN_ACCESS === "1" || process.env.NEXT_PUBLIC_OPEN_ACCESS === "1";
+const skipClerkProtect =
+  openAccess || process.env.ALLOW_DEMO_AUTH === "1";
 
 let clerkHandler:
   | ((request: NextRequest) => Promise<NextResponse | Response>)
@@ -12,24 +23,67 @@ async function getClerkHandler() {
   const { clerkMiddleware, createRouteMatcher } = await import(
     "@clerk/nextjs/server"
   );
-  const isPublicRoute = createRouteMatcher([
+  const publicRoutes = [
     "/",
     "/sign-in(.*)",
     "/sign-up(.*)",
+    "/staff(.*)",
     "/api/webhooks(.*)",
+    "/api/github/app-manifest(.*)",
+    "/api/staff(.*)",
     "/api/health",
-  ]);
+    "/api/ready",
+    "/icon(.*)",
+    "/favicon.ico",
+    "/apple-icon(.*)",
+  ];
+  // Open access only: customer routes without Clerk session.
+  if (openAccess) {
+    publicRoutes.push("/projects(.*)", "/select-org(.*)");
+  }
+  const isPublicRoute = createRouteMatcher(publicRoutes);
   const mw = clerkMiddleware(async (auth, request) => {
-    if (!isPublicRoute(request)) {
-      await auth.protect();
+    if (isPublicRoute(request)) return;
+    if (skipClerkProtect) return;
+    const session = await auth();
+    if (!session.userId) {
+      const returnBackUrl = new URL(
+        `${request.nextUrl.pathname}${request.nextUrl.search}`,
+        getAppBaseUrl(),
+      ).toString();
+      return session.redirectToSignIn({ returnBackUrl });
     }
   });
   clerkHandler = mw as unknown as typeof clerkHandler;
   return clerkHandler!;
 }
 
+/** While open access is on, admin/staff UI requires a signed staff cookie. */
+async function enforceStaffPasswordGate(request: NextRequest) {
+  if (!openAccess) return null;
+  const { pathname, search } = request.nextUrl;
+  if (pathname === "/staff" || pathname.startsWith("/staff/")) return null;
+  if (pathname.startsWith("/api/staff/")) return null;
+  if (!isStaffProtectedPath(pathname)) return null;
+
+  const role = await parseStaffSessionValue(
+    request.cookies.get(STAFF_COOKIE)?.value,
+  );
+  if (role) return null;
+
+  const next = `${pathname}${search}`;
+  const login = request.nextUrl.clone();
+  login.pathname = "/staff";
+  login.search = `?next=${encodeURIComponent(next)}`;
+  return NextResponse.redirect(login);
+}
+
 export default async function middleware(request: NextRequest) {
-  if (!clerkEnabled) {
+  const staffGate = await enforceStaffPasswordGate(request);
+  if (staffGate) return staffGate;
+
+  // No Clerk keys, open access, or demo auth → skip Clerk protect.
+  if (!clerkEnabled || skipClerkProtect) {
     return NextResponse.next();
   }
   const handler = await getClerkHandler();

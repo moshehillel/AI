@@ -1,18 +1,60 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
+import { Space_Grotesk, Manrope } from "next/font/google";
+import { isOpenAccess } from "@/lib/access-mode";
 
-const clerkEnabled = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+export const dynamic = "force-dynamic";
+
+const display = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["500", "600", "700"],
+  variable: "--font-onboard-display",
+});
+
+const body = Manrope({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-onboard-body",
+});
 
 export default function HomePage() {
+  const clerkEnabled = Boolean(
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
+  );
+
+  // Single-customer open access: go straight to onboarding (no Clerk).
+  if (isOpenAccess()) {
+    redirect("/projects");
+  }
+
   if (!clerkEnabled) {
     return (
-      <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">
-        <header className="flex items-center justify-between rise">
-          <div className="brand-mark text-3xl">Automation Studio</div>
-          <Link className="btn btn-primary" href="/projects">
-            Enter demo
+      <main className={`onboard ${display.variable} ${body.variable}`}>
+        <div className="onboard-atmosphere" aria-hidden>
+          <div className="onboard-glow onboard-glow-a" />
+          <div className="onboard-glow onboard-glow-b" />
+          <div className="onboard-grid" />
+          <div className="onboard-cubes" />
+        </div>
+        <header className="onboard-top">
+          <div className="onboard-top-brand">
+            <picture>
+              <source srcSet="/brand/AA-Logo.webp" type="image/webp" />
+              <img
+                src="/brand/AA-Logo.png"
+                alt="Advanced Automations"
+                className="onboard-top-logo"
+                width={48}
+                height={48}
+              />
+            </picture>
+            <span className="onboard-top-name">Advanced Automations</span>
+          </div>
+          <Link className="onboard-btn onboard-btn-compact" href="/projects">
+            Continue
           </Link>
         </header>
-        <Hero />
+        <Hero ctaHref="/projects" ctaLabel="Continue" />
       </main>
     );
   }
@@ -20,48 +62,46 @@ export default function HomePage() {
   return <ClerkHome />;
 }
 
-function Hero() {
+function Hero({
+  ctaHref,
+  ctaLabel,
+}: {
+  ctaHref: string;
+  ctaLabel: string;
+}) {
   return (
-    <section className="relative mt-24 grid gap-10 lg:grid-cols-[1.2fr_0.8fr]">
-      <div className="rise" style={{ animationDelay: "80ms" }}>
-        <p className="muted mb-4 text-sm uppercase tracking-[0.2em]">
-          Isolated AI changes · Developer gatekeepers
-        </p>
-        <h1 className="brand-mark max-w-3xl text-5xl leading-tight md:text-6xl">
-          Ask for software changes in plain English.
-        </h1>
-        <p className="muted mt-6 max-w-xl text-lg leading-relaxed">
-          Employees describe what they need. Automation Studio uses AI to prepare
-          changes on isolated branches and temporary previews. Developers review
-          and merge to production.
-        </p>
-        <div className="mt-8 flex flex-wrap gap-3">
-          <Link className="btn btn-primary" href="/projects">
-            Open the studio
-          </Link>
-        </div>
+    <section className="onboard-hero">
+      <div className="onboard-hero-visual rise" style={{ animationDelay: "40ms" }}>
+        <picture>
+          <source srcSet="/brand/AA-Logo.webp" type="image/webp" />
+          <img
+            src="/brand/AA-Logo.png"
+            alt="Advanced Automations"
+            className="onboard-hero-logo"
+            width={720}
+            height={720}
+            fetchPriority="high"
+          />
+        </picture>
       </div>
-
-      <div
-        className="panel rise relative overflow-hidden p-6"
-        style={{ animationDelay: "160ms" }}
-      >
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(125,206,160,0.18),transparent_45%)]" />
-        <div className="relative space-y-4">
-          <div className="status-pill pulse-soft">Analyzing project…</div>
-          <div className="rounded-xl border border-[var(--line)] bg-black/20 p-4">
-            <p className="text-sm muted">Sarah · Invoice Automation</p>
-            <p className="mt-2">
-              Add a way to retry invoices that failed because the customer’s
-              account was temporarily unavailable.
-            </p>
-          </div>
-          <ul className="space-y-2 text-sm">
-            <li>✓ Found invoice processing logic</li>
-            <li>✓ Found dashboard</li>
-            <li>✓ Found existing tests</li>
-            <li className="muted">Making the change…</li>
-          </ul>
+      <div className="onboard-hero-copy">
+        <p className="onboard-koda rise" style={{ animationDelay: "100ms" }}>
+          Koda
+        </p>
+        <h1
+          className="onboard-headline rise"
+          style={{ animationDelay: "160ms" }}
+        >
+          Advanced Automations AI Builder
+        </h1>
+        <p className="onboard-lead rise" style={{ animationDelay: "220ms" }}>
+          Tell Koda what you need automated. Answer a few questions, review the
+          plan, then ship with developer approval.
+        </p>
+        <div className="onboard-cta rise" style={{ animationDelay: "280ms" }}>
+          <Link className="onboard-btn" href={ctaHref}>
+            {ctaLabel}
+          </Link>
         </div>
       </div>
     </section>
@@ -70,26 +110,40 @@ function Hero() {
 
 async function ClerkHome() {
   const { auth } = await import("@clerk/nextjs/server");
-  const { redirect } = await import("next/navigation");
   const session = await auth();
   if (session.userId) {
-    redirect("/projects");
+    redirect(session.orgId ? "/projects" : "/select-org");
   }
 
   return (
-    <main className="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-10">
-      <header className="flex items-center justify-between rise">
-        <div className="brand-mark text-3xl">Automation Studio</div>
-        <div className="flex gap-3">
-          <Link className="btn btn-ghost" href="/sign-in">
+    <main className={`onboard ${display.variable} ${body.variable}`}>
+      <div className="onboard-atmosphere" aria-hidden>
+        <div className="onboard-glow onboard-glow-a" />
+        <div className="onboard-glow onboard-glow-b" />
+        <div className="onboard-grid" />
+        <div className="onboard-cubes" />
+      </div>
+      <header className="onboard-top">
+        <div className="onboard-top-brand">
+          <picture>
+            <source srcSet="/brand/AA-Logo.webp" type="image/webp" />
+            <img
+              src="/brand/AA-Logo.png"
+              alt="Advanced Automations"
+              className="onboard-top-logo"
+              width={48}
+              height={48}
+            />
+          </picture>
+          <span className="onboard-top-name">Advanced Automations</span>
+        </div>
+        <div className="onboard-top-nav">
+          <Link className="onboard-btn onboard-btn-compact" href="/sign-in">
             Sign in
-          </Link>
-          <Link className="btn btn-primary" href="/sign-up">
-            Get started
           </Link>
         </div>
       </header>
-      <Hero />
+      <Hero ctaHref="/sign-in" ctaLabel="Sign in to Koda" />
     </main>
   );
 }

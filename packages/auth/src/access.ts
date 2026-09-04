@@ -7,6 +7,7 @@ import {
   type Prisma,
 } from "@automation-studio/db";
 import {
+  CUSTOMER_ONBOARDING_SLUG,
   roleHasPermission,
   type Permission,
 } from "@automation-studio/domain";
@@ -86,13 +87,22 @@ export async function requireProjectAccess(
     return;
   }
 
+  // Shared planning workspace: any company member may start / continue programs.
+  // Admin assignment is only required for other projects (iterate on existing repos).
+  if (project.slug === CUSTOMER_ONBOARDING_SLUG) {
+    return;
+  }
+
   const membership = await db.projectMember.findUnique({
     where: {
       projectId_userId: { projectId, userId: ctx.user.id },
     },
   });
   if (!membership) {
-    throw new AuthError("Not authorized for this project", 403);
+    throw new AuthError(
+      "You don't have access to this workspace. Ask an admin to assign you, or start a new program from the home page.",
+      403,
+    );
   }
 }
 

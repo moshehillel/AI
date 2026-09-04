@@ -40,8 +40,14 @@ export function AppHeader({ role }: { role?: string | null }) {
             <SignedIn>
               <OrganizationSwitcher
                 hidePersonal
-                afterCreateOrganizationUrl="/projects"
                 afterSelectOrganizationUrl="/projects"
+                appearance={{
+                  elements: {
+                    organizationSwitcherPopoverActionButton__createOrganization: {
+                      display: "none",
+                    },
+                  },
+                }}
               />
               <UserButton afterSignOutUrl="/" />
             </SignedIn>

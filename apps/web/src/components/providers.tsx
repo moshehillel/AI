@@ -1,6 +1,7 @@
 "use client";
 
 import { ClerkProvider } from "@clerk/nextjs";
+import { hideCreateOrganizationAppearance } from "@/lib/clerk-org-ui";
 
 type ProvidersProps = {
   children: React.ReactNode;
@@ -18,5 +19,12 @@ export function Providers({ children, publishableKey }: ProvidersProps) {
     return <>{children}</>;
   }
 
-  return <ClerkProvider publishableKey={key}>{children}</ClerkProvider>;
+  return (
+    <ClerkProvider
+      publishableKey={key}
+      appearance={hideCreateOrganizationAppearance}
+    >
+      {children}
+    </ClerkProvider>
+  );
 }

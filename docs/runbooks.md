@@ -32,6 +32,8 @@ Then open https://koda.advancedautomations.net — Sign in → select organizati
 
 **No public sign-up:** the app redirects `/sign-up` to `/sign-in` and hides registration CTAs. Also turn off **Allow sign-ups** in Clerk Dashboard → User & Authentication → Restrictions so invites/admin-created users are the only path.
 
+**No user-created organizations:** the app hides Create organization in `OrganizationSwitcher` / `OrganizationList`. Also turn off **Allow users to create organizations** in Clerk Dashboard → Organizations → Settings so only an admin (Moshe) can create orgs from the Clerk Dashboard.
+
 **Add a user to a project (planning chat):** Admin → **Projects & repositories** → for that project, enter their Clerk email (**Assign by email**) or pick an existing company member. They must already have a Clerk login. After assign, they sign in, select the org, open the project, and continue planning chat. Requires an active Clerk organization on the company (`clerkOrgId`).
 
 **Link an existing GitHub repo as a Koda project:** Prerequisites — GitHub App installed on the org that owns the repo (Admin → Install / manage GitHub App), and the App granted access to that repository. Then Admin → **Projects & repositories** → **Add existing GitHub repo** (owner + repo + installation id) → **Create project from repo** → **Assign by email** with the Clerk user's email. The user signs in → **Your workspaces** (or `/projects/<id>`) → **Start chat on this repo**. Chat uses the linked codebase, not the empty shared planning repo. To attach a repo to an existing empty project, use **Connect** under that project instead.
@@ -234,7 +236,7 @@ Do **not** enable demo auth on production while using open access.
 
 1. Apply Terraform per [infra/aws/README.md](../infra/aws/README.md); populate Secrets Manager
 2. Enable GitHub Actions deploy (`AWS_DEPLOY_ENABLED=true`, `AWS_DEPLOY_ROLE_ARN`, Clerk publishable key secret)
-3. Configure Clerk Organizations + roles (`org:employee`, `org:developer`, `org:admin`)
+3. Configure Clerk Organizations + roles (`org:employee`, `org:developer`, `org:admin`). Disable **Allow users to create organizations** (admins create orgs in the Clerk Dashboard only).
 4. Clerk **Production** keys (`pk_live_` / `sk_live_`) on `clerk.advancedautomations.net` — see [deploy.md](./deploy.md#clerk-keys-development-vs-production)
 5. Clerk webhook → `https://koda.advancedautomations.net/api/webhooks/clerk`
 6. `OPEN_ACCESS=0` / `NEXT_PUBLIC_OPEN_ACCESS=0` in secret + web image build-args

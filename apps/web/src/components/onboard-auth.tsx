@@ -23,7 +23,6 @@ export function OnboardAuth() {
       <SignedIn>
         <OrganizationSwitcher
           hidePersonal
-          afterCreateOrganizationUrl="/projects"
           afterSelectOrganizationUrl="/projects"
           appearance={{
             elements: {
@@ -35,6 +34,9 @@ export function OnboardAuth() {
                 borderRadius: "10px",
                 padding: "0.35rem 0.55rem",
                 maxWidth: "11rem",
+              },
+              organizationSwitcherPopoverActionButton__createOrganization: {
+                display: "none",
               },
             },
           }}

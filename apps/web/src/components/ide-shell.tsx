@@ -148,12 +148,13 @@ export function IdeSidebar({
               <SignedIn>
                 <OrganizationSwitcher
                   hidePersonal
-                  afterCreateOrganizationUrl="/projects"
                   afterSelectOrganizationUrl="/projects"
                   appearance={{
                     elements: {
                       rootBox: { flexShrink: 0, maxWidth: "7.5rem" },
                       organizationSwitcherTrigger: { maxWidth: "7.5rem" },
+                      organizationSwitcherPopoverActionButton__createOrganization:
+                        { display: "none" },
                     },
                   }}
                 />

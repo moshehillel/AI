@@ -1,10 +1,47 @@
 import { db, MembershipRole, ensureCustomerOnboardingProject } from "@automation-studio/db";
-import { slugify } from "@automation-studio/domain";
+import {
+  elevateRole,
+  membershipRoleFromClerk,
+  slugify,
+  type CompanyAccessRole,
+} from "@automation-studio/domain";
 
 function mapClerkRole(role: string | null | undefined): MembershipRole {
-  if (role === "org:admin") return "ADMIN";
-  if (role === "org:developer") return "DEVELOPER";
-  return "EMPLOYEE";
+  return membershipRoleFromClerk(role);
+}
+
+/**
+ * Create the shared customer-onboarding workspace and add this member to it.
+ * Safe to call on every authenticated request — company membership is enough.
+ */
+export async function ensurePlanningMembership(companyId: string, userId: string) {
+  const onboarding = await ensureCustomerOnboardingProject(db, companyId);
+  await db.projectMember.upsert({
+    where: {
+      projectId_userId: { projectId: onboarding.id, userId },
+    },
+    update: {},
+    create: { projectId: onboarding.id, userId },
+  });
+  return onboarding;
+}
+
+/** Promote from the live Clerk session when it outranks the stored role. */
+export async function upgradeMembershipFromSession(input: {
+  companyId: string;
+  userId: string;
+  currentRole: CompanyAccessRole;
+  sessionRole?: string | null;
+}) {
+  const next = elevateRole(input.currentRole, input.sessionRole);
+  if (next === input.currentRole) return input.currentRole;
+  await db.companyMembership.update({
+    where: {
+      companyId_userId: { companyId: input.companyId, userId: input.userId },
+    },
+    data: { role: next },
+  });
+  return next;
 }
 
 /**
@@ -95,14 +132,7 @@ export async function syncClerkOrgMembership(input: {
   });
 
   // Shared planning workspace only — admin assigns other projects for iterate flows.
-  const onboarding = await ensureCustomerOnboardingProject(db, company.id);
-  await db.projectMember.upsert({
-    where: {
-      projectId_userId: { projectId: onboarding.id, userId: user.id },
-    },
-    update: {},
-    create: { projectId: onboarding.id, userId: user.id },
-  });
+  await ensurePlanningMembership(company.id, user.id);
 
   return { user, company, role };
 }

@@ -1,7 +1,11 @@
-import { AuthError, resolveAuthContext } from "@automation-studio/auth";
+import { AuthError, resolveAuthContext, type AuthContext } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
 import { isDemoAuthEnabled, isOpenAccess } from "@/lib/access-mode";
-import { syncClerkOrgMembership } from "@/lib/clerk-sync";
+import {
+  ensurePlanningMembership,
+  syncClerkOrgMembership,
+  upgradeMembershipFromSession,
+} from "@/lib/clerk-sync";
 import {
   clerkUserIdForStaffRole,
   readStaffRoleCookie,
@@ -27,6 +31,30 @@ async function seededAuthContext(clerkUserId: string) {
     company,
     membership,
     role: membership.role,
+  };
+}
+
+/**
+ * Existing company members skip JIT sync. Still create the shared planning
+ * workspace and grant this user, and promote them when the Clerk session is
+ * an admin or developer role.
+ */
+async function grantPlanningWorkspace(
+  ctx: AuthContext,
+  sessionRole: string | null | undefined,
+) {
+  const role = await upgradeMembershipFromSession({
+    companyId: ctx.company.id,
+    userId: ctx.user.id,
+    currentRole: ctx.role,
+    sessionRole,
+  });
+  await ensurePlanningMembership(ctx.company.id, ctx.user.id);
+  if (role === ctx.role) return ctx;
+  return {
+    ...ctx,
+    role,
+    membership: { ...ctx.membership, role },
   };
 }
 
@@ -78,10 +106,11 @@ export async function getRequestAuth() {
   }
 
   try {
-    return await resolveAuthContext({
+    const ctx = await resolveAuthContext({
       clerkUserId: session.userId,
       clerkOrgId: session.orgId,
     });
+    return await grantPlanningWorkspace(ctx, session.orgRole);
   } catch (error) {
     if (!(error instanceof AuthError)) {
       throw error;
@@ -93,10 +122,11 @@ export async function getRequestAuth() {
         clerkOrgId: session.orgId,
         orgRole: session.orgRole,
       });
-      return await resolveAuthContext({
+      const ctx = await resolveAuthContext({
         clerkUserId: session.userId,
         clerkOrgId: session.orgId,
       });
+      return await grantPlanningWorkspace(ctx, session.orgRole);
     } catch (syncError) {
       console.error(
         "[auth] clerk org sync failed",

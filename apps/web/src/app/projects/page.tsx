@@ -4,6 +4,7 @@ import { db, ensureCustomerOnboardingProject } from "@automation-studio/db";
 import { CUSTOMER_ONBOARDING_SLUG, STATUS_LABELS } from "@automation-studio/domain";
 import Link from "next/link";
 import { Space_Grotesk, Manrope } from "next/font/google";
+import { AccountSignOut } from "@/components/account-sign-out";
 import { OnboardAuth } from "@/components/onboard-auth";
 import { NewProgramForm } from "./[projectId]/new-program-form";
 
@@ -87,15 +88,18 @@ export default async function ProjectsPage() {
           </picture>
           <span className="onboard-top-name">Advanced Automations</span>
         </div>
-        <nav className="onboard-top-nav">
-          {isStaff ? (
-            <>
-              <Link href="/admin">Admin</Link>
-              <Link href="/staff">Staff</Link>
-            </>
-          ) : null}
-          <OnboardAuth />
-        </nav>
+        <div className="onboard-top-actions">
+          <AccountSignOut />
+          <nav className="onboard-top-nav">
+            {isStaff ? (
+              <>
+                <Link href="/admin">Admin</Link>
+                <Link href="/staff">Staff</Link>
+              </>
+            ) : null}
+            <OnboardAuth />
+          </nav>
+        </div>
       </header>
 
       <section className="onboard-hero">

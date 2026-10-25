@@ -5,7 +5,6 @@ import {
   OrganizationSwitcher,
   SignedIn,
   SignedOut,
-  SignOutButton,
   UserButton,
 } from "@clerk/nextjs";
 
@@ -42,7 +41,7 @@ export function OnboardAuth() {
           }}
         />
         <UserButton
-          afterSignOutUrl="/"
+          afterSignOutUrl="/sign-in"
           appearance={{
             elements: {
               rootBox: { flexShrink: 0 },
@@ -55,11 +54,6 @@ export function OnboardAuth() {
             },
           }}
         />
-        <SignOutButton>
-          <button type="button" className="onboard-signout">
-            Sign out
-          </button>
-        </SignOutButton>
       </SignedIn>
       <SignedOut>
         <Link className="onboard-btn onboard-btn-compact" href="/sign-in">

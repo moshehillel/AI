@@ -6,6 +6,7 @@ import {
   SignedOut,
   UserButton,
 } from "@clerk/nextjs";
+import { AccountSignOut } from "@/components/account-sign-out";
 
 const clerkEnabled = Boolean(
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
@@ -159,7 +160,7 @@ export function IdeSidebar({
                   }}
                 />
                 <UserButton
-                  afterSignOutUrl="/"
+                  afterSignOutUrl="/sign-in"
                   appearance={{
                     elements: {
                       rootBox: { flexShrink: 0 },
@@ -199,7 +200,12 @@ export function IdeShell({
       className={right ? "ide-shell ide-shell-with-right" : "ide-shell"}
     >
       {sidebar}
-      <div className="ide-main">{children}</div>
+      <div className="ide-main">
+        <div className="ide-signout-bar">
+          <AccountSignOut className="chrome-signout" />
+        </div>
+        {children}
+      </div>
       {right ? (
         <aside className="ide-right" aria-label="Plan and context">
           {right}

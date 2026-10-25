@@ -7,6 +7,7 @@ import {
   SignedOut,
   UserButton,
 } from "@clerk/nextjs";
+import { AccountSignOut } from "@/components/account-sign-out";
 
 const clerkEnabled = Boolean(
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
@@ -19,7 +20,7 @@ export function AppHeader({ role }: { role?: string | null }) {
 
   return (
     <header
-      className="mb-6 flex flex-wrap items-center justify-between gap-3 border-b pb-3"
+      className="app-chrome-header mb-6 flex flex-wrap items-center justify-between gap-3 border-b pb-3"
       style={{ borderColor: "var(--ide-line)" }}
     >
       <div className="flex items-center gap-5">
@@ -35,6 +36,7 @@ export function AppHeader({ role }: { role?: string | null }) {
       </div>
       <div className="flex items-center gap-3">
         {isStaff ? <span className="status-pill">Developer mode</span> : null}
+        <AccountSignOut className="chrome-signout" />
         {hideAuthChrome || !clerkEnabled ? null : (
           <>
             <SignedIn>
@@ -49,7 +51,7 @@ export function AppHeader({ role }: { role?: string | null }) {
                   },
                 }}
               />
-              <UserButton afterSignOutUrl="/" />
+              <UserButton afterSignOutUrl="/sign-in" />
             </SignedIn>
             <SignedOut>
               <Link className="btn btn-ghost" href="/sign-in">

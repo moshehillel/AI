@@ -5,6 +5,7 @@ import { isOpenAccess } from "@/lib/access-mode";
 import { db } from "@automation-studio/db";
 import { parseCompanySettings } from "@automation-studio/domain";
 import { ConnectRepoForm } from "./connect-repo-form";
+import { CreatePlanningProjectForm } from "./create-planning-project-form";
 import { CreateProjectFromRepoForm } from "./create-project-from-repo-form";
 import { InviteNote } from "./invite-note";
 import { ProjectMembersForm } from "./project-members-form";
@@ -191,17 +192,25 @@ export default async function AdminPage({
           </ul>
         </div>
 
-        <div className="panel p-5">
+        <div className="panel p-5" id="open-project">
           <h2 className="text-xl">Projects & repositories</h2>
           <p className="muted mt-2 text-sm">
-            Link an existing GitHub repository as a Koda project, then assign a
-            Clerk user so they can open it and chat against that codebase.
+            {ctx.role === "ADMIN"
+              ? "Open a project and its chat, then assign a person. They work inside that project. They cannot create a project or start a program."
+              : "Only an admin can open a project or assign a user."}
           </p>
-          <div className="mt-4 rounded-xl border border-[var(--line)] p-4">
-            <CreateProjectFromRepoForm
-              defaultInstallationId={installations[0]?.installationId}
-            />
-          </div>
+          {ctx.role === "ADMIN" ? (
+            <div className="mt-4 space-y-4">
+              <div className="rounded-xl border border-[var(--line)] p-4">
+                <CreatePlanningProjectForm />
+              </div>
+              <div className="rounded-xl border border-[var(--line)] p-4">
+                <CreateProjectFromRepoForm
+                  defaultInstallationId={installations[0]?.installationId}
+                />
+              </div>
+            </div>
+          ) : null}
           <div className="mt-4 space-y-4">
             {projects.map((project) => (
               <div
@@ -232,7 +241,7 @@ export default async function AdminPage({
                     />
                   </div>
                 ) : null}
-                {ctx.role === "ADMIN" || ctx.role === "DEVELOPER" ? (
+                {ctx.role === "ADMIN" ? (
                   <div className="mt-4">
                     <ProjectMembersForm
                       projectId={project.id}

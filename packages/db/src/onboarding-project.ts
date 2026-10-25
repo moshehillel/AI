@@ -5,8 +5,8 @@ import { ProjectStatus } from "@prisma/client";
 const CUSTOMER_ONBOARDING_SLUG = "customer-onboarding";
 
 /**
- * Ensure the shared planning workspace exists for a company.
- * Employees use this to start greenfield programs without per-project assignment.
+ * Ensure the legacy customer-onboarding project row exists.
+ * Membership is not granted here. Only an admin assignment allows chat.
  */
 export async function ensureCustomerOnboardingProject(
   db: PrismaClient,

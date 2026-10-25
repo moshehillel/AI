@@ -94,6 +94,8 @@ async function main() {
     });
 
     for (const userId of [admin.id, employee.id, developer.id]) {
+      // The shared onboarding project is not a self-serve workspace.
+      if (p.slug === "customer-onboarding" && userId !== admin.id) continue;
       await prisma.projectMember.upsert({
         where: { projectId_userId: { projectId: project.id, userId } },
         update: {},

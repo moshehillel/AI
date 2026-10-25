@@ -1,7 +1,7 @@
 import { requirePageAuth } from "@/lib/page-auth";
 import { requireProjectAccess } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
-import { STATUS_LABELS } from "@automation-studio/domain";
+import { canStartProgram, STATUS_LABELS } from "@automation-studio/domain";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { NewChangeForm } from "./new-change-form";
@@ -23,6 +23,7 @@ export default async function ProjectDetailPage({
   }
 
   const isStaff = ctx.role === "DEVELOPER" || ctx.role === "ADMIN";
+  const canStart = canStartProgram(ctx.role);
 
   const project = await db.project.findFirstOrThrow({
     where: { id: projectId, companyId: ctx.company.id },
@@ -94,7 +95,7 @@ export default async function ProjectDetailPage({
             ) : null}
 
             <div className="mt-6">
-              {project.repository ? (
+              {canStart && project.repository ? (
                 <>
                   <h2 className="text-[13px] font-medium">
                     Chat on this codebase
@@ -112,7 +113,8 @@ export default async function ProjectDetailPage({
                     />
                   </div>
                 </>
-              ) : (
+              ) : null}
+              {canStart && !project.repository ? (
                 <>
                   <h2 className="text-[13px] font-medium">New program</h2>
                   <p className="muted mt-1 text-[12px] leading-relaxed">
@@ -123,10 +125,16 @@ export default async function ProjectDetailPage({
                     <NewProgramForm projectId={project.id} />
                   </div>
                 </>
-              )}
+              ) : null}
+              {!canStart ? (
+                <p className="muted text-[12px] leading-relaxed">
+                  This is the project an admin opened for you. Open a chat
+                  below to change it. You cannot create another project.
+                </p>
+              ) : null}
             </div>
 
-            {isStaff ? (
+            {isStaff && canStart ? (
               <div className="mt-6">
                 <h2 className="text-[13px] font-medium">
                   Request a small change
@@ -165,7 +173,11 @@ export default async function ProjectDetailPage({
                 </li>
               ))}
               {visibleWork.length === 0 ? (
-                <li className="muted py-3 text-[13px]">No programs yet.</li>
+                <li className="muted py-3 text-[13px]">
+                  {canStart
+                    ? "No chats yet."
+                    : "No chat yet. An admin has to open the chat in this project."}
+                </li>
               ) : null}
             </ul>
             {cancelledArchive.length > 0 ? (

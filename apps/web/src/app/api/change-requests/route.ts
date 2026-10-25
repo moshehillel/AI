@@ -9,6 +9,7 @@ import {
 } from "@automation-studio/auth";
 import { db, ensurePlanningRepository } from "@automation-studio/db";
 import {
+  canStartProgram,
   shortTitleFromPrompt,
   slugify,
   buildOpeningPlanningMessage,
@@ -56,6 +57,13 @@ export async function POST(request: Request) {
 
     const body = bodySchema.parse(await request.json());
     await requireProjectAccess(ctx, body.projectId);
+
+    if (!canStartProgram(ctx.role)) {
+      throw new AuthError(
+        "Only an admin can start a program. You can chat inside a project an admin already opened for you.",
+        403,
+      );
+    }
 
     if (body.kind === "CHANGE" && ctx.role === "EMPLOYEE") {
       return NextResponse.json(

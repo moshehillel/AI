@@ -1,12 +1,11 @@
 export const dynamic = "force-dynamic";
 import { requirePageAuth } from "@/lib/page-auth";
-import { db, ensureCustomerOnboardingProject } from "@automation-studio/db";
-import { CUSTOMER_ONBOARDING_SLUG, STATUS_LABELS } from "@automation-studio/domain";
+import { db } from "@automation-studio/db";
+import { STATUS_LABELS } from "@automation-studio/domain";
 import Link from "next/link";
 import { Space_Grotesk, Manrope } from "next/font/google";
 import { AccountSignOut } from "@/components/account-sign-out";
 import { OnboardAuth } from "@/components/onboard-auth";
-import { NewProgramForm } from "./[projectId]/new-program-form";
 
 const display = Space_Grotesk({
   subsets: ["latin"],
@@ -22,24 +21,15 @@ const body = Manrope({
 
 export default async function ProjectsPage() {
   const ctx = await requirePageAuth();
+  const isAdmin = ctx.role === "ADMIN";
   const isStaff = ctx.role === "DEVELOPER" || ctx.role === "ADMIN";
   const isEmployee = ctx.role === "EMPLOYEE";
 
-  // Shared planning workspace — always available to company members (no assignment needed).
-  const onboardingProject = await ensureCustomerOnboardingProject(
-    db,
-    ctx.company.id,
-  );
-
-  // Assigned workspaces (iterate on linked repos) — employees only see projects they're on.
   const assignedProjects = await db.project.findMany({
     where: {
       companyId: ctx.company.id,
       status: "ACTIVE",
-      slug: { not: CUSTOMER_ONBOARDING_SLUG },
-      ...(isEmployee
-        ? { members: { some: { userId: ctx.user.id } } }
-        : {}),
+      members: { some: { userId: ctx.user.id } },
     },
     include: { repository: true },
     orderBy: { name: "asc" },
@@ -53,14 +43,17 @@ export default async function ProjectsPage() {
       })
     : [];
 
+  const visibleProjects = isEmployee ? assignedProjects : staffProjects;
+  const waitingForAssignment = isEmployee && assignedProjects.length === 0;
+
   const activePrograms = await db.changeRequest.findMany({
     where: {
       companyId: ctx.company.id,
-      projectId: onboardingProject.id,
       kind: "PROGRAM",
       status: { not: "CANCELLED" },
-      ...(isEmployee ? { createdById: ctx.user.id } : {}),
+      projectId: { in: visibleProjects.map((project) => project.id) },
     },
+    include: { project: { select: { id: true, name: true } } },
     orderBy: { updatedAt: "desc" },
     take: 20,
   });
@@ -125,16 +118,27 @@ export default async function ProjectsPage() {
             className="onboard-headline rise"
             style={{ animationDelay: "160ms" }}
           >
-            Plan your next automation with Advanced Automations.
+            {isAdmin
+              ? "Open a project, then assign who builds it."
+              : waitingForAssignment
+                ? "A project has not been opened for you yet."
+                : "Your projects"}
           </h1>
           <p className="onboard-lead rise" style={{ animationDelay: "220ms" }}>
-            Tell Koda what to build. Answer a few questions, refine the plan,
-            then ship with developer approval.
+            {isAdmin
+              ? "Only an admin can open a project and assign a user. They chat with Koda there to plan and build it."
+              : waitingForAssignment
+                ? "Ask an admin to open a project for you. After you are assigned, you can chat there to plan and build it."
+                : "Open a project below and chat there to change it. You stay in the project an admin opened for you."}
           </p>
 
-          <div className="onboard-cta rise" style={{ animationDelay: "280ms" }}>
-            <NewProgramForm projectId={onboardingProject.id} variant="hero" />
-          </div>
+          {isAdmin ? (
+            <div className="onboard-cta rise" style={{ animationDelay: "280ms" }}>
+              <Link className="onboard-btn" href="/admin#open-project">
+                Open a project and assign a user
+              </Link>
+            </div>
+          ) : null}
           <p className="onboard-teaser rise" style={{ animationDelay: "320ms" }}>
             <span className="onboard-teaser-label">Coming soon</span>
             — a full version of Koda: build your own advanced automations without
@@ -155,6 +159,7 @@ export default async function ProjectsPage() {
                 >
                   <span>
                     #{cr.number} {cr.title}
+                    {cr.project?.name ? ` · ${cr.project.name}` : ""}
                   </span>
                   <span className="onboard-program-status">
                     {STATUS_LABELS[cr.status]}
@@ -164,7 +169,9 @@ export default async function ProjectsPage() {
             ))}
             {activePrograms.length === 0 ? (
               <li className="onboard-empty">
-                No programs yet. Start one above to open the planning chat.
+                {waitingForAssignment
+                  ? "Ask an admin to open a project for you."
+                  : "No chats yet. An admin has to open the chat inside your project."}
               </li>
             ) : null}
           </ul>
@@ -173,8 +180,7 @@ export default async function ProjectsPage() {
             <div className="onboard-staff">
               <h2 className="onboard-below-title">Your workspaces</h2>
               <p className="onboard-empty" style={{ marginBottom: "0.75rem" }}>
-                Projects an admin linked for you — open one to chat against its
-                GitHub repository.
+                Projects an admin opened for you. Open one and use its chat to change it.
               </p>
               <div className="onboard-staff-list">
                 {assignedProjects.map((project) => (
@@ -187,7 +193,7 @@ export default async function ProjectsPage() {
                     <span className="onboard-program-status">
                       {project.repository
                         ? `${project.repository.githubOwner}/${project.repository.githubRepo}`
-                        : "No repo"}
+                        : "Planning"}
                     </span>
                   </Link>
                 ))}
@@ -195,10 +201,10 @@ export default async function ProjectsPage() {
             </div>
           ) : null}
 
-          {isEmployee && assignedProjects.length === 0 ? (
+          {waitingForAssignment ? (
             <p className="onboard-empty" style={{ marginTop: "1.5rem" }}>
-              Need to improve an existing automation? Ask an admin to assign you
-              to that workspace. You can always start a new program above.
+              Ask an admin to open a project for you. You will see it here, and
+              then you can chat there to plan and build it.
             </p>
           ) : null}
 

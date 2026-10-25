@@ -3,12 +3,12 @@ import { z } from "zod";
 import { getRequestAuth } from "@/lib/request-auth";
 import { ensureExistingClerkUserOnCompany } from "@/lib/clerk-sync";
 import {
-  requirePermission,
   requireProjectAccess,
   writeAuditEvent,
   AuthError,
 } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
+import { canAssignProjectMember } from "@automation-studio/domain";
 
 const bodySchema = z
   .object({
@@ -29,7 +29,9 @@ const bodySchema = z
 export async function POST(request: Request) {
   try {
     const ctx = await getRequestAuth();
-    await requirePermission(ctx, "members:manage");
+    if (!canAssignProjectMember(ctx.role)) {
+      throw new AuthError("Only an admin can assign a user to a project", 403);
+    }
 
     const body = bodySchema.parse(await request.json());
     await requireProjectAccess(ctx, body.projectId);

@@ -24,7 +24,6 @@ export type Permission =
 const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
   EMPLOYEE: [
     "project:read",
-    "change_request:create",
     "change_request:chat",
     "change_request:submit_review",
     "change_request:approve_plan",
@@ -32,7 +31,6 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
   ],
   DEVELOPER: [
     "project:read",
-    "change_request:create",
     "change_request:chat",
     "change_request:submit_review",
     "change_request:approve_plan",
@@ -46,7 +44,6 @@ const ROLE_PERMISSIONS: Record<MembershipRole, Permission[]> = {
     "program:grant_test_improve",
     "program:final_approve",
     "program:reveal_secrets",
-    "members:manage",
     "inbox:read",
   ],
   ADMIN: [

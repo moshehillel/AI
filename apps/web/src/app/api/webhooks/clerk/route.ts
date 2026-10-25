@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import { Webhook } from "svix";
-import { db, ensureCustomerOnboardingProject } from "@automation-studio/db";
+import { db } from "@automation-studio/db";
 import { membershipRoleFromClerk, slugify } from "@automation-studio/domain";
-import { ensurePlanningMembership } from "@/lib/clerk-sync";
 
 export async function POST(request: Request) {
   const secret = process.env.CLERK_WEBHOOK_SECRET;
@@ -37,7 +36,7 @@ export async function POST(request: Request) {
     case "organization.created": {
       const orgId = String(event.data.id);
       const name = String(event.data.name ?? "Company");
-      const company = await db.company.upsert({
+      await db.company.upsert({
         where: { clerkOrgId: orgId },
         update: { name },
         create: {
@@ -46,7 +45,6 @@ export async function POST(request: Request) {
           slug: slugify(name),
         },
       });
-      await ensureCustomerOnboardingProject(db, company.id);
       break;
     }
     case "user.created":
@@ -84,8 +82,6 @@ export async function POST(request: Request) {
 
       const company = await db.company.findUnique({ where: { clerkOrgId: orgId } });
       if (!company) break;
-      // Workspace exists even if the user webhook has not landed yet.
-      await ensureCustomerOnboardingProject(db, company.id);
 
       const user = await db.user.findUnique({ where: { clerkUserId: userId } });
       if (!user) break;
@@ -97,9 +93,6 @@ export async function POST(request: Request) {
         update: { role },
         create: { companyId: company.id, userId: user.id, role },
       });
-
-      // Members can always plan — grant shared onboarding workspace (not iterate projects).
-      await ensurePlanningMembership(company.id, user.id);
       break;
     }
     default:

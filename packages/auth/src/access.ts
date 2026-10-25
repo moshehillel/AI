@@ -7,7 +7,6 @@ import {
   type Prisma,
 } from "@automation-studio/db";
 import {
-  CUSTOMER_ONBOARDING_SLUG,
   roleHasPermission,
   type Permission,
 } from "@automation-studio/domain";
@@ -83,13 +82,9 @@ export async function requireProjectAccess(
     throw new AuthError("Project not found", 404);
   }
 
+  // Admins can open any workspace. Developers are staff and can help on
+  // existing work, but they still cannot create projects or assign users.
   if (ctx.role === "ADMIN" || ctx.role === "DEVELOPER") {
-    return;
-  }
-
-  // Shared planning workspace: any company member may start / continue programs.
-  // Admin assignment is only required for other projects (iterate on existing repos).
-  if (project.slug === CUSTOMER_ONBOARDING_SLUG) {
     return;
   }
 
@@ -100,7 +95,7 @@ export async function requireProjectAccess(
   });
   if (!membership) {
     throw new AuthError(
-      "You don't have access to this workspace. Ask an admin to assign you, or start a new program from the home page.",
+      "You don't have access to this workspace. Ask an admin to open a project for you.",
       403,
     );
   }

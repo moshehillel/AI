@@ -2,7 +2,6 @@ import { AuthError, resolveAuthContext, type AuthContext } from "@automation-stu
 import { db } from "@automation-studio/db";
 import { isDemoAuthEnabled, isOpenAccess } from "@/lib/access-mode";
 import {
-  ensurePlanningMembership,
   syncClerkOrgMembership,
   upgradeMembershipFromSession,
 } from "@/lib/clerk-sync";
@@ -35,11 +34,10 @@ async function seededAuthContext(clerkUserId: string) {
 }
 
 /**
- * Existing company members skip JIT sync. Still create the shared planning
- * workspace and grant this user, and promote them when the Clerk session is
- * an admin or developer role.
+ * Existing company members skip JIT sync. Promote them when the Clerk session
+ * is a higher role. Signing in does not open a project or grant a workspace.
  */
-async function grantPlanningWorkspace(
+async function applySessionRole(
   ctx: AuthContext,
   sessionRole: string | null | undefined,
 ) {
@@ -49,7 +47,6 @@ async function grantPlanningWorkspace(
     currentRole: ctx.role,
     sessionRole,
   });
-  await ensurePlanningMembership(ctx.company.id, ctx.user.id);
   if (role === ctx.role) return ctx;
   return {
     ...ctx,
@@ -110,7 +107,7 @@ export async function getRequestAuth() {
       clerkUserId: session.userId,
       clerkOrgId: session.orgId,
     });
-    return await grantPlanningWorkspace(ctx, session.orgRole);
+    return await applySessionRole(ctx, session.orgRole);
   } catch (error) {
     if (!(error instanceof AuthError)) {
       throw error;
@@ -126,7 +123,7 @@ export async function getRequestAuth() {
         clerkUserId: session.userId,
         clerkOrgId: session.orgId,
       });
-      return await grantPlanningWorkspace(ctx, session.orgRole);
+      return await applySessionRole(ctx, session.orgRole);
     } catch (syncError) {
       console.error(
         "[auth] clerk org sync failed",

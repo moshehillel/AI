@@ -1,4 +1,4 @@
-import { db, MembershipRole, ensureCustomerOnboardingProject } from "@automation-studio/db";
+import { db, MembershipRole } from "@automation-studio/db";
 import {
   elevateRole,
   membershipRoleFromClerk,
@@ -8,22 +8,6 @@ import {
 
 function mapClerkRole(role: string | null | undefined): MembershipRole {
   return membershipRoleFromClerk(role);
-}
-
-/**
- * Create the shared customer-onboarding workspace and add this member to it.
- * Safe to call on every authenticated request — company membership is enough.
- */
-export async function ensurePlanningMembership(companyId: string, userId: string) {
-  const onboarding = await ensureCustomerOnboardingProject(db, companyId);
-  await db.projectMember.upsert({
-    where: {
-      projectId_userId: { projectId: onboarding.id, userId },
-    },
-    update: {},
-    create: { projectId: onboarding.id, userId },
-  });
-  return onboarding;
 }
 
 /** Promote from the live Clerk session when it outranks the stored role. */
@@ -131,9 +115,7 @@ export async function syncClerkOrgMembership(input: {
     create: { companyId: company.id, userId: user.id, role },
   });
 
-  // Shared planning workspace only — admin assigns other projects for iterate flows.
-  await ensurePlanningMembership(company.id, user.id);
-
+  // Company membership does not open a project. An admin assigns that separately.
   return { user, company, role };
 }
 

@@ -2,7 +2,6 @@ import { requirePageAuth } from "@/lib/page-auth";
 import { requireChangeRequestAccess } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
 import {
-  CUSTOMER_ONBOARDING_SLUG,
   STATUS_LABELS,
   parseBuildSetup,
   isCredentialSecretKey,
@@ -83,11 +82,9 @@ export default async function ChangeRequestPage({
       companyId: ctx.company.id,
       kind: "PROGRAM",
       status: { not: "CANCELLED" },
-      ...(isEmployee ? { createdById: ctx.user.id } : {}),
-      // Prefer same project; fall back to onboarding workspace programs
-      project: {
-        OR: [{ id: full.projectId }, { slug: CUSTOMER_ONBOARDING_SLUG }],
-      },
+      ...(isEmployee
+        ? { project: { members: { some: { userId: ctx.user.id } } } }
+        : { projectId: full.projectId }),
     },
     orderBy: { updatedAt: "desc" },
     take: 30,

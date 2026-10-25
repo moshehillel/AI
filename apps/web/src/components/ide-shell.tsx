@@ -93,10 +93,12 @@ export function IdeSidebar({
   return (
     <aside className="ide-sidebar" aria-label="Programs">
       <div className="ide-sidebar-top">
-        <Link href={newHref} className="ide-nav-item">
-          <IconPlus />
-          New program
-        </Link>
+        {role === "ADMIN" ? (
+          <Link href={newHref} className="ide-nav-item">
+            <IconPlus />
+            New program
+          </Link>
+        ) : null}
         <Link href="/projects" className="ide-nav-item">
           <IconSearch />
           Search

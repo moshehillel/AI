@@ -6,17 +6,37 @@ import {
   AuthError,
 } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
-import { slugify } from "@automation-studio/domain";
+import { canCreateProject, slugify } from "@automation-studio/domain";
 import { verifyBranchProtection } from "@automation-studio/github";
+import { openInitialProjectChat } from "@/lib/open-project-chat";
 
-const bodySchema = z.object({
-  name: z.string().min(2).max(120).optional(),
-  description: z.string().max(2000).optional(),
-  githubOwner: z.string().min(1),
-  githubRepo: z.string().min(1),
-  installationId: z.string().min(1).nullable().optional(),
-  defaultBranch: z.string().min(1).max(200).optional(),
-});
+const bodySchema = z
+  .object({
+    name: z.string().min(2).max(120).optional(),
+    description: z.string().max(2000).optional(),
+    githubOwner: z.string().min(1).optional(),
+    githubRepo: z.string().min(1).optional(),
+    installationId: z.string().min(1).nullable().optional(),
+    defaultBranch: z.string().min(1).max(200).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const owner = value.githubOwner?.trim() ?? "";
+    const repo = value.githubRepo?.trim() ?? "";
+    if ((owner && !repo) || (!owner && repo)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Provide both GitHub owner and repo, or neither for a new planning project",
+        path: ["githubRepo"],
+      });
+    }
+    if (!owner && !repo && !value.name?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Project name is required",
+        path: ["name"],
+      });
+    }
+  });
 
 async function uniqueProjectSlug(companyId: string, base: string) {
   const root = slugify(base, 48) || "project";
@@ -32,22 +52,23 @@ async function uniqueProjectSlug(companyId: string, base: string) {
 }
 
 /**
- * Create a Koda project from an existing GitHub repository (already accessible
- * via the company GitHub App installation), then connect that repo.
+ * Admin opens a project: a fresh planning workspace, or one linked to an
+ * existing GitHub repository the company GitHub App can already access.
  */
 export async function POST(request: Request) {
   try {
     const ctx = await getRequestAuth();
-    if (ctx.role !== "ADMIN" && ctx.role !== "DEVELOPER") {
-      throw new AuthError("Forbidden", 403);
+    if (!canCreateProject(ctx.role)) {
+      throw new AuthError("Only an admin can open a project", 403);
     }
 
     const body = bodySchema.parse(await request.json());
-    const githubOwner = body.githubOwner.trim();
-    const githubRepo = body.githubRepo.trim();
+    const githubOwner = body.githubOwner?.trim() ?? "";
+    const githubRepo = body.githubRepo?.trim() ?? "";
+    const linkedRepo = Boolean(githubOwner && githubRepo);
     const name =
       body.name?.trim() ||
-      `${githubOwner}/${githubRepo}`.slice(0, 120);
+      (linkedRepo ? `${githubOwner}/${githubRepo}`.slice(0, 120) : "");
     const slug = await uniqueProjectSlug(ctx.company.id, name);
 
     const installationId =
@@ -68,15 +89,21 @@ export async function POST(request: Request) {
         slug,
         description:
           body.description?.trim() ||
-          `Linked from GitHub ${githubOwner}/${githubRepo}`,
-        repository: {
-          create: {
-            githubOwner,
-            githubRepo,
-            installationId,
-            defaultBranch: body.defaultBranch?.trim() || "main",
-          },
-        },
+          (linkedRepo
+            ? `Linked from GitHub ${githubOwner}/${githubRepo}`
+            : "Planning project opened by an admin"),
+        ...(linkedRepo
+          ? {
+              repository: {
+                create: {
+                  githubOwner,
+                  githubRepo,
+                  installationId,
+                  defaultBranch: body.defaultBranch?.trim() || "main",
+                },
+              },
+            }
+          : {}),
       },
       include: { repository: true },
     });
@@ -107,10 +134,29 @@ export async function POST(request: Request) {
       }
     }
 
+    let chatId: string | null = null;
+    try {
+      const chat = await openInitialProjectChat({
+        companyId: ctx.company.id,
+        projectId: project.id,
+        actorId: ctx.user.id,
+        projectName: project.name,
+        repository: project.repository
+          ? {
+              githubOwner: project.repository.githubOwner,
+              githubRepo: project.repository.githubRepo,
+            }
+          : null,
+      });
+      chatId = chat.id;
+    } catch (chatError) {
+      console.error(chatError);
+    }
+
     await writeAuditEvent({
       companyId: ctx.company.id,
       actorId: ctx.user.id,
-      action: "project.created_from_repo",
+      action: linkedRepo ? "project.created_from_repo" : "project.created",
       entityType: "project",
       entityId: project.id,
       metadata: {
@@ -131,6 +177,7 @@ export async function POST(request: Request) {
         repository: project.repository,
       },
       protection,
+      chatId,
     });
   } catch (error) {
     if (error instanceof AuthError) {

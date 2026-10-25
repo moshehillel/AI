@@ -110,7 +110,7 @@ export function NewProgramForm({
         {pending
           ? "Starting…"
           : buttonLabel ??
-            (iterate ? "Start chat on this repo" : "Start planning with Koda")}
+            (iterate ? "Start chat on this repo" : "Start chat")}
       </button>
     </form>
   );

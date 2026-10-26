@@ -58,7 +58,7 @@ describe("status machine", () => {
 
   it("defines program lifecycle chat phases", () => {
     assert.equal(isProgramPlanning("PLANNING"), true);
-    assert.equal(isProgramPlanOnly("PLANNING"), true);
+    assert.equal(isProgramPlanOnly("PLANNING"), false);
     assert.equal(isProgramPlanOnly("AWAITING_DEV_BUILD"), false);
     assert.equal(isProgramBuildLocked("AWAITING_DEV_BUILD"), true);
     assert.equal(isProgramBuildLocked("BUILDING"), true);

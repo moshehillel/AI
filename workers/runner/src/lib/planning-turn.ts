@@ -1,6 +1,9 @@
 import { db } from "@automation-studio/db";
 import type { AgentRunResult } from "@automation-studio/cursor-adapter";
-import type { PlanningMeta } from "@automation-studio/domain";
+import {
+  cursorFailureChatMessage,
+  type PlanningMeta,
+} from "@automation-studio/domain";
 import {
   classifyEmptyReplyRecovery,
   type EmptyReplyRecoveryPath,
@@ -56,7 +59,7 @@ export function planningTurnErrorMessage(
     isTimeout?: boolean;
   },
 ): string {
-  const detail = reason.trim().replace(/\.$/, "");
+  const headline = cursorFailureChatMessage(reason);
   let retryHint: string;
   if (opts?.isMetaQuestion) {
     retryHint =
@@ -78,13 +81,7 @@ export function planningTurnErrorMessage(
       "Try **Retry last message** below. If it is very long, split it into two shorter messages.";
   }
 
-  return [
-    "Sorry — I couldn't finish that reply.",
-    detail ? `${detail}.` : "",
-    retryHint,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  return [headline, retryHint].filter(Boolean).join(" ");
 }
 
 const META_STOP_QUESTION_RE =
@@ -133,7 +130,11 @@ export async function failPlanningTurn(opts: {
   if (opts.agentRunId) {
     await db.agentRun.updateMany({
       where: { id: opts.agentRunId, status: "RUNNING" },
-      data: { status: "FAILED", finishedAt: new Date() },
+      data: {
+        status: "FAILED",
+        finishedAt: new Date(),
+        error: opts.reason.slice(0, 4000),
+      },
     });
   }
   await clearLiveProgress(opts.changeRequestId, opts.priorMeta);

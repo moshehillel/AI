@@ -107,10 +107,7 @@ export default async function ProjectDetailPage({
                     push, that change is its own commit.
                   </p>
                   <div className="mt-3">
-                    <NewProgramForm
-                      projectId={project.id}
-                      intent="iterate"
-                    />
+                    <NewProgramForm projectId={project.id} />
                   </div>
                 </>
               ) : null}

@@ -158,7 +158,7 @@ export async function flushQueuedFollowUp(changeRequestId: string, companyId: st
       changeRequestId,
       companyId,
       prompt: queued.prompt,
-      mode: queued.mode ?? "plan",
+      mode: queued.mode === "plan" ? "agent" : (queued.mode ?? "agent"),
       pushRequest: queued.pushRequest,
       attachmentRefs: queued.attachmentRefs,
       userMessageId: queued.userMessageId,

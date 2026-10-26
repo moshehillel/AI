@@ -314,7 +314,7 @@ export async function POST(
           await enqueueJob("cursor.follow-up", {
             changeRequestId: cr.id,
             companyId: ctx.company.id,
-            mode: "plan",
+            mode: "agent",
             prompt: reviewPrompt,
           });
         } else {
@@ -328,7 +328,7 @@ export async function POST(
           await enqueueJob("cursor.start-agent", {
             changeRequestId: cr.id,
             companyId: ctx.company.id,
-            mode: "plan",
+            mode: "agent",
             prompt: reviewPrompt,
           });
         }
@@ -356,7 +356,7 @@ export async function POST(
             ok: true,
             pending: true,
             message:
-              "Starting Cursor plan session — click Open in Cursor again in a few seconds.",
+              "Starting the agent session — click Open in Cursor again in a few seconds.",
           });
         }
 
@@ -1018,10 +1018,7 @@ export async function POST(
           await enqueueJob("cursor.start-agent", {
             changeRequestId: cr.id,
             companyId: ctx.company.id,
-            mode:
-              cr.classification === "COMPLEX" || cr.classification === "HIGH_RISK"
-                ? "plan"
-                : "agent",
+            mode: "agent",
             prompt: `${cr.title}\n\n${cr.description}`.trim(),
           });
         } else {

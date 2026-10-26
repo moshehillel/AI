@@ -112,7 +112,7 @@ export function buildOpeningIterateMessage(opts: {
       "",
       repoLine,
       "",
-      "I've got your starting notes. Tell me what to change or add; I'll keep a living plan in the Plan panel and ask when I need details.",
+      "I've got your starting notes. Tell me what to change, including a restructure. I will edit the connected repo. Say **push** when that change should be its own commit.",
       "",
       "Use **+** to attach docs or files. For passwords and API keys, choose **Add secrets / credentials** so values stay private.",
     ].join("\n");

@@ -1,17 +1,15 @@
-import { db, ensurePlanningRepository } from "@automation-studio/db";
+import { db } from "@automation-studio/db";
 import {
   buildBranchName,
-  buildPlanningStartPrompt,
   connectedRepoStartPrompt,
-  getDefaultGithubRepoConfig,
-  isProgramVerifyPhase,
+  cursorFailureChatMessage,
+  shouldRunConnectedRepoAgent,
   slugify,
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { createBranchFromDefault } from "@automation-studio/github";
 import { enqueueJob, type EnsureBranchJobData } from "@automation-studio/jobs";
 import { writeAuditEvent } from "@automation-studio/auth";
-import { transitionChangeRequest } from "../lib/transition.js";
 
 export async function handleEnsureBranch(data: EnsureBranchJobData) {
   const cr = await db.changeRequest.findFirstOrThrow({
@@ -23,22 +21,18 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     },
   });
 
-  let repo = cr.project.repository;
+  const repo = cr.project.repository;
   if (!repo) {
-    repo = await ensurePlanningRepository(db, {
-      projectId: cr.projectId,
-      companyId: data.companyId,
-      defaults: getDefaultGithubRepoConfig(),
+    await db.changeRequestMessage.create({
+      data: {
+        changeRequestId: cr.id,
+        role: "ASSISTANT",
+        content: cursorFailureChatMessage(
+          "this project has no connected GitHub repo. An admin has to connect one before the agent can edit it",
+        ),
+      },
     });
-  }
-  if (!repo) {
-    await transitionChangeRequest({
-      changeRequestId: cr.id,
-      companyId: data.companyId,
-      toStatus: "FAILED",
-      reason: "Project has no connected repository",
-    });
-    throw new Error("No repository connected");
+    return { ok: false, reason: "no_repository" };
   }
 
   const shortDescription = cr.shortDescription ?? slugify(cr.title);
@@ -72,45 +66,36 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     metadata: { branchName, sha: result.sha },
   });
 
-  const needsPlan =
-    cr.kind === "PROGRAM" ||
-    cr.classification === "COMPLEX" ||
-    cr.classification === "HIGH_RISK";
-  const planningMeta = (cr.planningMeta ?? {}) as PlanningMeta;
-  const connectedRepo = Boolean(planningMeta.iterateExisting && repo);
+  let planningMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+  const connectedRepo = shouldRunConnectedRepoAgent({
+    kind: cr.kind,
+    status: cr.status,
+    hasRepository: true,
+    iterateExisting: planningMeta.iterateExisting,
+  });
+  if (connectedRepo && !planningMeta.iterateExisting) {
+    planningMeta = {
+      ...planningMeta,
+      iterateExisting: true,
+      linkedRepoLabel: `${repo.githubOwner}/${repo.githubRepo}`,
+    };
+    await db.changeRequest.update({
+      where: { id: cr.id },
+      data: { planningMeta: planningMeta as object, updatedAt: new Date() },
+    });
+  }
 
-  // A connected client repo stays in agent mode so the user can restructure it.
-  // Other programs stay in plan until a developer starts a build.
-  const mode: "plan" | "agent" =
-    data.mode ??
-    (connectedRepo
-      ? "agent"
-      : isProgramVerifyPhase(cr.status)
-        ? "agent"
-        : cr.kind === "PROGRAM" && cr.status !== "BUILDING"
-          ? "plan"
-          : needsPlan
-            ? "plan"
-            : "agent");
+  // Agent mode only. Plan-only sessions are not started.
+  const mode: "plan" | "agent" = "agent";
 
   const prompt =
     data.prompt?.trim() ||
-    (connectedRepo && repo
+    (connectedRepo
       ? connectedRepoStartPrompt({
           title: cr.title,
           repoLabel: `${repo.githubOwner}/${repo.githubRepo}`,
         })
-      : mode === "plan"
-        ? buildPlanningStartPrompt({
-            title: cr.title,
-            description: cr.description,
-            messages: cr.messages.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
-            planningMeta,
-          })
-        : `${cr.title}\n\n${cr.description}`.trim());
+      : `${cr.title}\n\n${cr.description}`.trim());
 
   await enqueueJob(
     "cursor.start-agent",

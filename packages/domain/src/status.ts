@@ -139,8 +139,8 @@ export function allowedNextStatuses(
 export const STATUS_LABELS: Record<ChangeRequestStatus, string> = {
   DRAFT: "Draft",
   ANALYZING: "Analyzing…",
-  PLANNING: "Planning with Koda",
-  AWAITING_PLAN_APPROVAL: "Waiting for your plan approval",
+  PLANNING: "Agent",
+  AWAITING_PLAN_APPROVAL: "Agent",
   AWAITING_HIGH_RISK_APPROVAL: "Waiting for developer approval",
   AWAITING_DEV_BUILD: "Submitted — your developer is building. Planning is closed.",
   BUILDING: "Building your program…",
@@ -169,17 +169,18 @@ export const PROGRAM_PLANNING_STATUSES: ChangeRequestStatus[] = [
   "AWAITING_PLAN_APPROVAL",
 ];
 
-/** Statuses where Programs must stay in plan-only AI mode (no code edits). */
-export const PROGRAM_PLAN_ONLY_STATUSES: ChangeRequestStatus[] = [
-  ...PROGRAM_PLANNING_STATUSES,
-];
+/**
+ * Kept so older callers compile. Plan-only mode is removed: these statuses
+ * open as agent chat and do not block repo edits.
+ */
+export const PROGRAM_PLAN_ONLY_STATUSES: ChangeRequestStatus[] = [];
 
 export function isProgramPlanning(status: ChangeRequestStatus): boolean {
   return PROGRAM_PLANNING_STATUSES.includes(status);
 }
 
-export function isProgramPlanOnly(status: ChangeRequestStatus): boolean {
-  return PROGRAM_PLAN_ONLY_STATUSES.includes(status);
+export function isProgramPlanOnly(_status: ChangeRequestStatus): boolean {
+  return false;
 }
 
 /** After submit — customer cannot chat until developer opens verification. */

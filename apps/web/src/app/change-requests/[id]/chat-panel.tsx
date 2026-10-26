@@ -10,7 +10,6 @@ import {
   validatePlanningFileSize,
 } from "@automation-studio/domain/planning-files";
 import { MarkdownBody } from "@/components/markdown-body";
-import { PlanSubmitModal } from "@/components/plan-submit-modal";
 
 type Message = {
   id: string;
@@ -50,20 +49,34 @@ const WORKING_STATUSES = [
   "DEPLOYING",
 ] as const;
 
-/** Show a recoverable error if Koda never posts a reply. */
-const REPLY_TIMEOUT_MS = 4 * 60 * 1000;
+/** Hard stop if Cursor never reports back. */
+const TURN_HARD_TIMEOUT_MS = 8 * 60 * 1000;
+/** Give up sooner when no job is running and the worker has gone quiet. */
+const TURN_SILENT_TIMEOUT_MS = 45 * 1000;
+const CURSOR_NO_RESPONSE_MESSAGE =
+  "Koda didn't respond. The agent call timed out before a reply arrived.";
 
 type AgentRunSnapshot = {
   id: string;
   status: string;
   startedAt: string;
   finishedAt: string | null;
+  error?: string | null;
 };
 
 function isRecoverableTurnError(content: string): boolean {
-  return /couldn't finish that reply|finished without a reply|taking longer than expected/i.test(
+  return /couldn't finish that reply|didn't respond|finished without a reply|taking longer than expected/i.test(
     content,
   );
+}
+
+function cursorFailureFromRun(error: string | null | undefined): string {
+  const detail = error?.replace(/\s+/g, " ").trim().replace(/\.$/, "") ?? "";
+  if (!detail || /timed out/i.test(detail)) return CURSOR_NO_RESPONSE_MESSAGE;
+  if (/without a reply|no reply|empty reply/i.test(detail)) {
+    return "Koda didn't respond. The agent finished without a reply.";
+  }
+  return `Koda couldn't finish that reply: ${detail}.`;
 }
 
 function isAwaitingAssistantReply(messages: Message[]): boolean {
@@ -104,7 +117,7 @@ function thinkingLabel(opts: {
 }): string {
   if (opts.liveLink === "reconnecting") return "Reconnecting live updates…";
   if (opts.liveLink === "connecting") return "Connecting live updates…";
-  if (opts.connectingSession) return "Connecting planning session…";
+  if (opts.connectingSession) return "Connecting…";
   if (opts.working) {
     if (opts.status === "BUILDING" || opts.status === "IMPLEMENTING") {
       return "Working on your request…";
@@ -243,7 +256,6 @@ function secondsBetween(a: string, b: string): number {
 export function ChatPanel({
   changeRequestId,
   initialMessages,
-  initialPlanContent = "",
   status: initialStatus,
   kind,
   title,
@@ -251,7 +263,6 @@ export function ChatPanel({
 }: {
   changeRequestId: string;
   initialMessages: Message[];
-  initialPlanContent?: string;
   status: string;
   kind: string;
   title?: string;
@@ -280,10 +291,8 @@ export function ChatPanel({
   ]);
   const [savingSecrets, setSavingSecrets] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [planContent, setPlanContent] = useState(initialPlanContent);
-  const [confirmSubmit, setConfirmSubmit] = useState(false);
-  const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [turnError, setTurnError] = useState<string | null>(null);
   const [thoughtSeconds, setThoughtSeconds] = useState(0);
   const [liveProgress, setLiveProgress] = useState<string | null>(null);
   const [liveDraft, setLiveDraft] = useState<string | null>(null);
@@ -300,6 +309,12 @@ export function ChatPanel({
   const scrollerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const flushQueuedRef = useRef(false);
+  const gaveUpRef = useRef(false);
+  const turnStartedRef = useRef<number | null>(null);
+  const heartbeatAtRef = useRef<number | null>(null);
+  const agentRunStatusRef = useRef<string | null>(null);
+  const serverQueuedRef = useRef(false);
+  const highDemandRef = useRef(false);
   const isProgram = kind === "PROGRAM";
   const isPlanning =
     isProgram &&
@@ -379,9 +394,22 @@ export function ChatPanel({
           serverQueued?: boolean;
           highDemandMessage?: string | null;
           workerHeartbeatAt?: string | null;
+          message?: string;
           plan?: { content?: string } | null;
           latestAgentRun?: AgentRunSnapshot | null;
         };
+        if (data.type === "error") {
+          if (data.message && !gaveUpRef.current) {
+            gaveUpRef.current = true;
+            setTurnError(cursorFailureFromRun(data.message));
+            setReplyTimedOut(true);
+            setAwaitingReply(false);
+            setLiveProgress(null);
+            setLiveDraft(null);
+            setProgressSteps([]);
+          }
+          return;
+        }
         if (data.type === "connected" || data.type === "heartbeat") {
           if (reconnectTimer) clearTimeout(reconnectTimer);
           reconnectTimer = null;
@@ -408,13 +436,19 @@ export function ChatPanel({
             setLiveDraft(data.liveDraft);
           }
           if (typeof data.serverQueued === "boolean") {
+            serverQueuedRef.current = data.serverQueued;
             setServerQueued(data.serverQueued);
           }
           if (typeof data.highDemandMessage !== "undefined") {
+            highDemandRef.current = Boolean(data.highDemandMessage);
             setHighDemandMessage(data.highDemandMessage);
           }
-          if (data.plan?.content) {
-            setPlanContent(data.plan.content);
+          if (data.workerHeartbeatAt) {
+            const beat = Date.parse(data.workerHeartbeatAt);
+            if (!Number.isNaN(beat)) heartbeatAtRef.current = beat;
+          }
+          if (data.latestAgentRun) {
+            agentRunStatusRef.current = data.latestAgentRun.status;
           }
           if (data.messages) {
             setMessages(data.messages);
@@ -423,32 +457,55 @@ export function ChatPanel({
             const wasUserInterrupted =
               lastMsg?.role === "SYSTEM" &&
               lastMsg.content.startsWith("Interrupted — stopped");
-            setAwaitingReply(stillAwaiting);
+            const run = data.latestAgentRun;
+            const runFailed =
+              run?.status === "FAILED" && Boolean(run.error?.trim());
+            const runEmpty = run?.status === "SUCCEEDED";
+            const runCancelled = run?.status === "CANCELLED";
             if (!stillAwaiting) {
+              gaveUpRef.current = false;
+              turnStartedRef.current = null;
+              setTurnError(null);
               setTurnInterrupted(false);
               setReplyTimedOut(false);
+              setAwaitingReply(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else if (gaveUpRef.current) {
+              setAwaitingReply(false);
               setLiveProgress(null);
               setLiveDraft(null);
               setProgressSteps([]);
             } else if (wasUserInterrupted) {
               setTurnInterrupted(true);
               setReplyTimedOut(false);
-              setLiveProgress(null);
-              setLiveDraft(null);
-              setProgressSteps([]);
-            } else if (
-              data.latestAgentRun &&
-              (data.latestAgentRun.status === "FAILED" ||
-                data.latestAgentRun.status === "SUCCEEDED" ||
-                data.latestAgentRun.status === "CANCELLED")
-            ) {
-              // Agent finished but no assistant message landed — surface recovery UI.
-              setReplyTimedOut(data.latestAgentRun.status !== "CANCELLED");
-              setTurnInterrupted(data.latestAgentRun.status === "CANCELLED");
               setAwaitingReply(false);
               setLiveProgress(null);
               setLiveDraft(null);
               setProgressSteps([]);
+            } else if ((runFailed || runEmpty) && run) {
+              gaveUpRef.current = true;
+              setTurnError(
+                cursorFailureFromRun(
+                  run.error || "the agent finished without a reply",
+                ),
+              );
+              setReplyTimedOut(true);
+              setAwaitingReply(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else if (runCancelled) {
+              setTurnInterrupted(true);
+              setReplyTimedOut(false);
+              setAwaitingReply(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else {
+              if (!turnStartedRef.current) turnStartedRef.current = Date.now();
+              setAwaitingReply(true);
             }
           }
         }
@@ -496,19 +553,33 @@ export function ChatPanel({
   }, [showThinking]);
 
   useEffect(() => {
-    if (!waitingOnReply || turnInterrupted) {
-      setReplyTimedOut(false);
-      return;
-    }
-    const timer = setTimeout(() => {
+    const id = setInterval(() => {
+      if (gaveUpRef.current || turnInterrupted) return;
+      const started = turnStartedRef.current;
+      if (!started) return;
+      const elapsed = Date.now() - started;
+      const heartbeatAge = heartbeatAtRef.current
+        ? Date.now() - heartbeatAtRef.current
+        : elapsed;
+      const runStatus = agentRunStatusRef.current;
+      const queuedOrBusy = serverQueuedRef.current || highDemandRef.current;
+      const silent =
+        !queuedOrBusy &&
+        runStatus !== "RUNNING" &&
+        elapsed >= TURN_SILENT_TIMEOUT_MS &&
+        heartbeatAge >= TURN_SILENT_TIMEOUT_MS;
+      const hung = elapsed >= TURN_HARD_TIMEOUT_MS;
+      if (!silent && !hung) return;
+      gaveUpRef.current = true;
+      setTurnError(CURSOR_NO_RESPONSE_MESSAGE);
       setReplyTimedOut(true);
       setAwaitingReply(false);
       setLiveProgress(null);
       setLiveDraft(null);
       setProgressSteps([]);
-    }, REPLY_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [waitingOnReply, turnInterrupted, changeRequestId]);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [turnInterrupted, changeRequestId]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -586,7 +657,7 @@ export function ChatPanel({
             title: `Thought ${secs}s`,
             summary: isVerifyPhase
               ? "Reviewed your note and updated the build."
-              : "Reviewed your note and updated the living plan.",
+              : "Reviewed your note and updated the repository.",
           });
         }
       }
@@ -596,11 +667,9 @@ export function ChatPanel({
   }, [messages, isVerifyPhase]);
 
   const placeholder = isProgram
-    ? isPlanning
-      ? "Plan, search, build anything"
-      : isVerifyPhase
-        ? "Ask how your app works, or describe a change…"
-        : "Send a message…"
+    ? isPlanning || isVerifyPhase
+      ? "Describe a change. Say push when it should be its own commit."
+      : "Send a message…"
     : "Ask for another change or clarification…";
 
   function sendMessage(opts?: {
@@ -649,6 +718,11 @@ export function ChatPanel({
 
     setAttachError(null);
     setTurnInterrupted(false);
+    gaveUpRef.current = false;
+    turnStartedRef.current = Date.now();
+    heartbeatAtRef.current = null;
+    agentRunStatusRef.current = null;
+    setTurnError(null);
     setReplyTimedOut(false);
     setAwaitingReply(true);
     setLastSentContent(content);
@@ -931,15 +1005,9 @@ export function ChatPanel({
     }
   }
 
-  function postProgramAction(
-    action: "submit_to_dev" | "submit_final_review",
-    extra?: Record<string, unknown>,
-  ) {
+  function postProgramAction(action: "submit_final_review") {
     setActionError(null);
-    const isSubmit = action === "submit_to_dev";
-    const isFinal = action === "submit_final_review";
-    if (isSubmit) setSubmitting(true);
-    if (isFinal) setSubmitting(true);
+    setSubmitting(true);
     startTransition(async () => {
       try {
         const response = await fetch(
@@ -947,7 +1015,7 @@ export function ChatPanel({
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action, ...extra }),
+            body: JSON.stringify({ action }),
           },
         );
         if (!response.ok) {
@@ -957,32 +1025,22 @@ export function ChatPanel({
           setActionError(data.error ?? "Action failed — try again.");
           return;
         }
-        if (isSubmit) {
-          setShowSubmitModal(false);
-          setConfirmSubmit(false);
-        }
         router.refresh();
       } finally {
-        if (isSubmit || isFinal) setSubmitting(false);
+        setSubmitting(false);
       }
     });
   }
 
-  const planningStatus = isPlanning
+  const planningStatus = isPlanning || isVerifyPhase
     ? showThinking
-      ? "Planning"
+      ? "Agent"
       : "Ready"
     : isBuildLocked
       ? "Submitted — building"
-      : isVerifyPhase
-        ? "Ask about your app"
-        : status.replaceAll("_", " ");
+      : status.replaceAll("_", " ");
 
-  const chatTitle = isVerifyPhase
-    ? "Ask about your app"
-    : isPlanning
-      ? "Planning"
-      : (title ?? "Chat");
+  const chatTitle = title ?? "Chat";
   return (
     <div className="agent-chat">
       <div className="ide-main-header">
@@ -1091,7 +1149,7 @@ export function ChatPanel({
             <p className="agent-msg-body" style={{ margin: 0 }}>
               {turnInterrupted
                 ? "That response was stopped. Send your message again when you are ready."
-                : "This is taking longer than expected and no reply arrived. Use Retry last message below, or Interrupt and send again. If you attached files, try one at a time or a smaller PDF."}
+                : (turnError ?? CURSOR_NO_RESPONSE_MESSAGE)}
             </p>
             {!turnInterrupted ? (
               <button
@@ -1142,11 +1200,9 @@ export function ChatPanel({
             }}
           >
             <p className="agent-msg-body" style={{ margin: 0 }}>
-              <strong>Submitted — your developer is building.</strong> Planning
-              is closed. You cannot change the plan or chat here until they mark
-              the build ready for testing. A new Ask about your app chat
-              will open when the preview is ready — you can ask how things work
-              and request code changes.
+              <strong>Submitted — your developer is building.</strong> Chat
+              is closed until they mark the build ready for testing. You can
+              ask how things work and request code changes when that opens.
             </p>
           </div>
         ) : null}
@@ -1165,7 +1221,7 @@ export function ChatPanel({
               <strong>{showThinking ? "1 Working" : "Stalled"}</strong>
             </span>
             <span>
-              Plan updates{" "}
+              Updates{" "}
               <span className="stat-add">live</span>
             </span>
             <button
@@ -1443,16 +1499,12 @@ export function ChatPanel({
           >
             <IconPlus />
           </button>
-          {isPlanning ? (
-            <span className="pill-mode" title="Plan mode stays on until you submit to a developer">
-              Plan
-            </span>
-          ) : isVerifyPhase ? (
+          {isPlanning || isVerifyPhase || connectedRepo ? (
             <span
               className="pill-mode"
-              title="Ask how the app works or request edits — planning stays closed"
+              title="Agent mode edits the connected repository. Say push when that change should be its own commit."
             >
-              App
+              Agent
             </span>
           ) : null}
           <textarea
@@ -1461,7 +1513,7 @@ export function ChatPanel({
             rows={1}
             placeholder={
               chatLocked
-                ? "Planning is closed while your developer builds…"
+                ? "Chat is closed while your developer builds…"
                 : pending
                   ? "Sending…"
                   : waitingOnReply
@@ -1539,13 +1591,11 @@ export function ChatPanel({
                 : "Connecting…"}
             {connectedRepo
               ? " · Connected repo · say push for its own commit"
-              : isPlanning
-                ? " · Planning with Koda"
-                : isVerifyPhase
-                  ? " · Ask about your app"
-                  : isBuildLocked
-                    ? " · Planning closed"
-                    : ""}
+              : isPlanning || isVerifyPhase
+                ? " · Agent"
+                : isBuildLocked
+                  ? " · Waiting on your developer"
+                  : ""}
           </span>
           <span className="composer-foot-branch">{showThinking ? "Working" : "Ready"}</span>
         </div>
@@ -1567,71 +1617,10 @@ export function ChatPanel({
           </div>
         ) : null}
 
-        {isPlanning ? (
-          <div className="composer-submit mx-auto mt-3">
-            {!confirmSubmit ? (
-              <button
-                type="button"
-                className="btn btn-ghost w-full"
-                disabled={inputBusy || submitting}
-                onClick={() => {
-                  setActionError(null);
-                  setConfirmSubmit(true);
-                }}
-              >
-                Ready to submit to a developer?
-              </button>
-            ) : (
-              <div className="composer-submit-confirm space-y-2">
-                <p className="text-sm">
-                  After submit you <strong>cannot change the plan</strong>. Your
-                  developer builds from this version. Chat and attach never
-                  submit on their own.
-                </p>
-                <button
-                  type="button"
-                  className="btn btn-primary w-full"
-                  disabled={inputBusy || submitting}
-                  onClick={() => {
-                    setActionError(null);
-                    setShowSubmitModal(true);
-                  }}
-                >
-                  Yes, review plan &amp; submit
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost w-full"
-                  disabled={inputBusy || submitting}
-                  onClick={() => setConfirmSubmit(false)}
-                >
-                  Keep planning
-                </button>
-              </div>
-            )}
-          </div>
-        ) : null}
-
         {actionError ? (
           <p className="composer-action-error text-sm">{actionError}</p>
         ) : null}
       </div>
-
-      <PlanSubmitModal
-        open={showSubmitModal}
-        planMarkdown={planContent}
-        pending={submitting}
-        onConfirm={() =>
-          postProgramAction("submit_to_dev", {
-            confirmSubmit: true,
-            confirmNoPlanChange: true,
-          })
-        }
-        onCancel={() => {
-          if (submitting) return;
-          setShowSubmitModal(false);
-        }}
-      />
     </div>
   );
 }

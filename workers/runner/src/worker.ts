@@ -10,11 +10,8 @@ import {
 } from "@automation-studio/jobs";
 import { Worker, type Job } from "bullmq";
 import { db } from "@automation-studio/db";
-import {
-  failPlanningTurn,
-  planningTurnErrorMessage,
-  postTurnMessage,
-} from "./lib/planning-turn.js";
+import { clearLiveProgress } from "./lib/planning-persist.js";
+import { failPlanningTurn } from "./lib/planning-turn.js";
 import type { PlanningMeta } from "@automation-studio/domain";
 import { handleClassify } from "./handlers/classify.js";
 import { handleEnsureBranch } from "./handlers/ensure-branch.js";
@@ -113,7 +110,8 @@ export function attachWorkerLifecycle(worker: Worker): void {
       if (!data.changeRequestId) return;
       if (
         job.name !== "cursor.follow-up" &&
-        job.name !== "cursor.start-agent"
+        job.name !== "cursor.start-agent" &&
+        job.name !== "github.ensure-branch"
       ) {
         return;
       }
@@ -123,32 +121,42 @@ export function attachWorkerLifecycle(worker: Worker): void {
       });
       if (!cr) return;
 
-      const recentAssistant = await db.changeRequestMessage.findFirst({
-        where: {
-          changeRequestId: cr.id,
-          role: "ASSISTANT",
-          createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
-        },
-        orderBy: { createdAt: "desc" },
-      });
-      if (recentAssistant) return;
-
       const reason =
         error instanceof Error ? error.message : "Something went wrong";
+      await db.agentRun.updateMany({
+        where: { changeRequestId: cr.id, status: "RUNNING" },
+        data: {
+          status: "FAILED",
+          finishedAt: new Date(),
+          error: reason.slice(0, 4000),
+        },
+      });
+
+      const lastUser = await db.changeRequestMessage.findFirst({
+        where: { changeRequestId: cr.id, role: "USER" },
+        orderBy: { createdAt: "desc" },
+      });
+      const assistantAfterUser = lastUser
+        ? await db.changeRequestMessage.findFirst({
+            where: {
+              changeRequestId: cr.id,
+              role: "ASSISTANT",
+              createdAt: { gt: lastUser.createdAt },
+            },
+          })
+        : null;
       const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
-      if (cr.kind === "PROGRAM" && cr.status === "PLANNING") {
-        await failPlanningTurn({
-          changeRequestId: cr.id,
-          priorMeta,
-          reason,
-        });
+      if (assistantAfterUser) {
+        await clearLiveProgress(cr.id, priorMeta);
         return;
       }
-      await postTurnMessage(
-        cr.id,
-        planningTurnErrorMessage(reason),
-        "ASSISTANT",
-      );
+      await failPlanningTurn({
+        changeRequestId: cr.id,
+        priorMeta,
+        reason,
+        userMessageId: lastUser?.id,
+        isTimeout: /timed out/i.test(reason),
+      });
     })().catch((postError) => {
       console.error("[worker] failed to post turn error message", postError);
     });

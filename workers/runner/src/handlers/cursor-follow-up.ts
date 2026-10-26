@@ -2,10 +2,10 @@ import { db } from "@automation-studio/db";
 import { resumeAndSend } from "@automation-studio/cursor-adapter";
 import { enqueueJob, type CursorFollowUpJobData } from "@automation-studio/jobs";
 import {
-  isProgramPlanOnly,
   isProgramVerifyPhase,
   nextStatusAfterProgramAgentTurn,
   planningAgentInstructions,
+  shouldRunConnectedRepoAgent,
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { finishConnectedRepoAgentTurn } from "../lib/connected-repo-push.js";
@@ -49,7 +49,8 @@ function normalizeAttachmentRefs(data: {
   return [...new Set(refs)];
 }
 
-export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
+export async function handleCursorFollowUp(input: CursorFollowUpJobData) {
+  const data: CursorFollowUpJobData = { ...input, mode: "agent" };
   let cr = await db.changeRequest.findFirstOrThrow({
     where: { id: data.changeRequestId, companyId: data.companyId },
     include: { project: { include: { repository: true } } },
@@ -73,24 +74,29 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     throw new Error("No AI build session associated with this program");
   }
 
-  const connectedRepo = Boolean(
-    ((cr.planningMeta ?? {}) as PlanningMeta).iterateExisting &&
-      cr.project.repository,
-  );
-  const forcePlan =
-    cr.kind === "PROGRAM" &&
-    isProgramPlanOnly(cr.status) &&
-    !connectedRepo &&
-    !data.pushRequest;
-  const mode = data.pushRequest || connectedRepo
-    ? "agent"
-    : forcePlan
-      ? "plan"
-      : (data.mode ?? "agent");
-  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+  const repoForMode = cr.project.repository;
+  let priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+  const connectedRepo = shouldRunConnectedRepoAgent({
+    kind: cr.kind,
+    status: cr.status,
+    hasRepository: Boolean(repoForMode),
+    iterateExisting: priorMeta.iterateExisting,
+  });
+  if (connectedRepo && repoForMode && !priorMeta.iterateExisting) {
+    priorMeta = {
+      ...priorMeta,
+      iterateExisting: true,
+      linkedRepoLabel: `${repoForMode.githubOwner}/${repoForMode.githubRepo}`,
+    };
+    await db.changeRequest.update({
+      where: { id: cr.id },
+      data: { planningMeta: priorMeta as object, updatedAt: new Date() },
+    });
+  }
+  const mode: "plan" | "agent" = "agent";
 
   let prompt =
-    mode === "plan"
+    false
       ? `${planningAgentInstructions()}\n\nClient message:\n${data.prompt}`
       : data.prompt;
   let images: Array<{ data: string; mimeType: string }> | undefined;
@@ -99,7 +105,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
   const repo = cr.project.repository;
   const branchName = cr.branchName;
   if (attachmentRefs.length) {
-    if (mode === "plan") {
+    if (false) {
       await writeLiveProgress(
         cr.id,
         priorMeta,
@@ -120,7 +126,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
             }
           : null,
       onProgress:
-        mode === "plan"
+        false
           ? (label) => writeLiveProgress(cr.id, priorMeta, label)
           : undefined,
     });
@@ -129,11 +135,11 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       attached.fileNames.length,
     );
     if (attachError) {
-      if (mode === "plan") {
+      if (false) {
         await failPlanningTurn({
           changeRequestId: cr.id,
           priorMeta,
-          reason: attachError,
+          reason: attachError ?? "Could not read that attachment",
           hadAttachments: true,
         });
         return { ok: false, reason: attachError };
@@ -194,7 +200,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     data: {
       changeRequestId: cr.id,
       cursorAgentId: cr.cursorAgentId,
-      mode: mode === "plan" ? "PLAN" : "AGENT",
+      mode: false ? "PLAN" : "AGENT",
       status: "RUNNING",
       startedAt: agentRunStartedAt,
     },
@@ -204,7 +210,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
   let stopHeartbeat: (() => void) | undefined;
 
   try {
-    if (mode === "plan") {
+    if (false) {
       await markTurnInFlight(cr.id, priorMeta, "Starting…");
     }
 
@@ -247,7 +253,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       });
     }
 
-    if (mode === "plan") {
+    if (false) {
       await writeLiveProgress(cr.id, priorMeta, "Starting…", null);
       stopHeartbeat = startPlanningHeartbeat({
         changeRequestId: cr.id,
@@ -260,7 +266,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     try {
       const [waitResult, mirrored] = await Promise.all([
         withTimeout(waitFn(), AGENT_TURN_TIMEOUT_MS, "AI reply"),
-        mode === "plan"
+        false
           ? mirrorPlanningStream({
               changeRequestId: cr.id,
               priorMeta,
@@ -275,7 +281,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       const current = await db.agentRun.findUnique({ where: { id: agentRun.id } });
       if (current?.status === "CANCELLED") {
         console.info(`[cursor-follow-up] cancelled mid-wait cr=${cr.id}`);
-        if (mode === "plan") await clearLiveProgress(cr.id, priorMeta);
+        if (false) await clearLiveProgress(cr.id, priorMeta);
         return { cancelled: true };
       }
       await db.agentRun.update({
@@ -285,7 +291,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
       const reason =
         error instanceof Error ? error.message : "Something went wrong";
       const isTimeout = /timed out/i.test(reason);
-      if (mode === "plan") {
+      if (false) {
         await failPlanningTurn({
           changeRequestId: cr.id,
           priorMeta,
@@ -298,12 +304,17 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
         });
         return { ok: false, reason };
       }
-      await postTurnMessage(
-        cr.id,
-        planningTurnErrorMessage(reason),
-        "ASSISTANT",
-      );
-      throw error;
+      await failPlanningTurn({
+        changeRequestId: cr.id,
+        priorMeta,
+        reason,
+        agentRunId: agentRun.id,
+        hadAttachments: attachmentRefs.length > 0,
+        wasLongMessage: Boolean(data.wasLongMessage),
+        isTimeout,
+        userMessageId: data.userMessageId,
+      });
+      return { ok: false, reason };
     }
 
     stopHeartbeat?.();
@@ -311,7 +322,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     const afterWait = await db.agentRun.findUnique({ where: { id: agentRun.id } });
     if (afterWait?.status === "CANCELLED") {
       console.info(`[cursor-follow-up] cancelled after wait cr=${cr.id}`);
-      if (mode === "plan") await clearLiveProgress(cr.id, priorMeta);
+      if (false) await clearLiveProgress(cr.id, priorMeta);
       return { cancelled: true };
     }
 
@@ -431,28 +442,26 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
   } catch (error) {
     const reason = error instanceof Error ? error.message : "Something went wrong";
     console.error(`[cursor-follow-up] failed cr=${cr.id}`, error);
-    if (mode === "plan") {
-      const alreadyPosted = await db.changeRequestMessage.findFirst({
-        where: {
-          changeRequestId: cr.id,
-          role: "ASSISTANT",
-          createdAt: { gte: agentRunStartedAt },
-        },
-        orderBy: { createdAt: "desc" },
+    const alreadyPosted = await db.changeRequestMessage.findFirst({
+      where: {
+        changeRequestId: cr.id,
+        role: "ASSISTANT",
+        createdAt: { gte: agentRunStartedAt },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!alreadyPosted) {
+      await failPlanningTurn({
+        changeRequestId: cr.id,
+        priorMeta,
+        reason,
+        agentRunId: agentRun.id,
+        hadAttachments: attachmentRefs.length > 0,
+        wasLongMessage: Boolean(data.wasLongMessage),
+        isTimeout: /timed out/i.test(reason),
+        userMessageId: data.userMessageId,
       });
-      if (!alreadyPosted) {
-        await failPlanningTurn({
-          changeRequestId: cr.id,
-          priorMeta,
-          reason,
-          agentRunId: agentRun.id,
-          hadAttachments: attachmentRefs.length > 0,
-          wasLongMessage: Boolean(data.wasLongMessage),
-          userMessageId: data.userMessageId,
-        });
-      }
-      return { ok: false, reason };
     }
-    throw error;
+    return { ok: false, reason };
   }
 }

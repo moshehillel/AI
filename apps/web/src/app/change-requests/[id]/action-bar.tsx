@@ -97,7 +97,7 @@ export function ActionBar({
               disabled={pending}
               onClick={() => setConfirmSubmit(false)}
             >
-              Keep planning
+              Keep this chat open
             </button>
           </div>
         )
@@ -109,7 +109,7 @@ export function ActionBar({
           disabled={pending}
           onClick={() => postAction("reopen_planning")}
         >
-          Reopen planning (staff)
+          Reopen chat (staff)
         </button>
       ) : null}
 

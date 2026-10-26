@@ -99,6 +99,7 @@ export async function GET(
             agentRunId: latestAgentRun?.id ?? null,
             agentRunStatus: latestAgentRun?.status ?? null,
             agentRunFinished: latestAgentRun?.finishedAt?.toISOString() ?? null,
+            agentRunError: latestAgentRun?.error ?? null,
             secretKeys: credentialSecrets.map((s) => s.keyName),
             liveProgress: meta.liveProgress ?? null,
             liveDraft: meta.liveDraft ?? null,
@@ -138,6 +139,7 @@ export async function GET(
                       latestAgentRun.createdAt?.toISOString() ??
                       new Date(0).toISOString(),
                     finishedAt: latestAgentRun.finishedAt?.toISOString() ?? null,
+                    error: latestAgentRun.error ?? null,
                   }
                 : null,
               liveProgress: meta.liveProgress ?? null,

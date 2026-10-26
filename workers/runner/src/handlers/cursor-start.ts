@@ -1,13 +1,13 @@
-import { db, ensurePlanningRepository } from "@automation-studio/db";
+import { db } from "@automation-studio/db";
 import { createTaskAgent } from "@automation-studio/cursor-adapter";
 import { enqueueJob, type CursorStartJobData } from "@automation-studio/jobs";
 import { writeAuditEvent } from "@automation-studio/auth";
 import {
   assertUnderUsageSoftCap,
-  getDefaultGithubRepoConfig,
   isProgramVerifyPhase,
   nextStatusAfterProgramAgentTurn,
   planningAgentInstructions,
+  shouldRunConnectedRepoAgent,
   type PlanningMeta,
 } from "@automation-studio/domain";
 import { finishConnectedRepoAgentTurn } from "../lib/connected-repo-push.js";
@@ -44,7 +44,8 @@ function normalizeAttachmentRefs(data: {
   return [...new Set(refs)];
 }
 
-export async function handleCursorStart(data: CursorStartJobData) {
+export async function handleCursorStart(input: CursorStartJobData) {
+  const data: CursorStartJobData = { ...input, mode: "agent" };
   const cr = await db.changeRequest.findFirstOrThrow({
     where: { id: data.changeRequestId, companyId: data.companyId },
     include: { project: { include: { repository: true } } },
@@ -86,27 +87,28 @@ export async function handleCursorStart(data: CursorStartJobData) {
     return { blocked: true, reason: cap.reason };
   }
 
-  let repo = cr.project.repository;
+  const repo = cr.project.repository;
   if (!repo) {
-    repo = await ensurePlanningRepository(db, {
-      projectId: cr.projectId,
-      companyId: data.companyId,
-      defaults: getDefaultGithubRepoConfig(),
-    });
+    await postTurnMessage(
+      cr.id,
+      planningTurnErrorMessage(
+        "this project has no connected GitHub repo. An admin has to connect one before the agent can edit it",
+      ),
+      "ASSISTANT",
+    );
+    return { ok: false, reason: "no_repository" };
   }
 
-  // Plan mode can start on the default branch when no feature branch exists yet.
-  let branchName = cr.branchName;
-  if (!branchName && data.mode === "plan" && repo) {
-    branchName = repo.defaultBranch || "main";
-    await db.changeRequest.update({
-      where: { id: cr.id },
-      data: { branchName },
-    });
-  }
-
-  if (!repo || !branchName) {
-    throw new Error("Missing repository or branch");
+  const branchName = cr.branchName;
+  if (!branchName) {
+    await postTurnMessage(
+      cr.id,
+      planningTurnErrorMessage(
+        "the agent branch is not ready yet. Send the message again",
+      ),
+      "ASSISTANT",
+    );
+    return { ok: false, reason: "no_branch" };
   }
 
   // Reuse the existing plan-mode session instead of spawning a second agent.
@@ -127,8 +129,24 @@ export async function handleCursorStart(data: CursorStartJobData) {
   }
 
   const statusBeforeAgent = cr.status;
-  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
-  const connectedRepo = Boolean(priorMeta.iterateExisting && repo);
+  let priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+  const connectedRepo = shouldRunConnectedRepoAgent({
+    kind: cr.kind,
+    status: cr.status,
+    hasRepository: true,
+    iterateExisting: priorMeta.iterateExisting,
+  });
+  if (connectedRepo && !priorMeta.iterateExisting) {
+    priorMeta = {
+      ...priorMeta,
+      iterateExisting: true,
+      linkedRepoLabel: `${repo.githubOwner}/${repo.githubRepo}`,
+    };
+    await db.changeRequest.update({
+      where: { id: cr.id },
+      data: { planningMeta: priorMeta as object, updatedAt: new Date() },
+    });
+  }
   const toStatus =
     data.mode === "plan"
       ? "PLANNING"
@@ -187,7 +205,14 @@ export async function handleCursorStart(data: CursorStartJobData) {
         });
         return { ok: false, reason: attachError };
       }
-      throw new Error(attachError);
+      await failPlanningTurn({
+        changeRequestId: cr.id,
+        priorMeta,
+        reason: attachError,
+        hadAttachments: true,
+        userMessageId: data.userMessageId,
+      });
+      return { ok: false, reason: attachError };
     }
     if (attached.promptSection) {
       prompt = `${prompt}\n\n${attached.promptSection}`;
@@ -199,18 +224,39 @@ export async function handleCursorStart(data: CursorStartJobData) {
     `[cursor-start] LIVE start mode=${data.mode} cr=${cr.id} kind=${cr.kind} attachmentRefs=${attachmentRefs.join(",") || "none"} images=${images?.length ?? 0}`,
   );
 
-  const { agentId, wait, run, runId: immediateRunId } = await createTaskAgent({
-    repoUrl,
-    branch: branchName,
-    prompt,
-    mode: data.mode,
-    images,
-    metadata: {
-      company_id: data.companyId,
-      project_id: cr.projectId,
-      change_request_id: cr.id,
-    },
-  });
+  let agentId: string;
+  let wait: Awaited<ReturnType<typeof createTaskAgent>>["wait"];
+  let run: Awaited<ReturnType<typeof createTaskAgent>>["run"];
+  let immediateRunId: string | undefined;
+  try {
+    const created = await createTaskAgent({
+      repoUrl,
+      branch: branchName,
+      prompt,
+      mode: data.mode,
+      images,
+      metadata: {
+        company_id: data.companyId,
+        project_id: cr.projectId,
+        change_request_id: cr.id,
+      },
+    });
+    agentId = created.agentId;
+    wait = created.wait;
+    run = created.run;
+    immediateRunId = created.runId;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : "Cursor request failed";
+    await failPlanningTurn({
+      changeRequestId: cr.id,
+      priorMeta,
+      reason,
+      hadAttachments: attachmentRefs.length > 0,
+      wasLongMessage: Boolean(data.wasLongMessage),
+      userMessageId: data.userMessageId,
+    });
+    return { ok: false, reason };
+  }
 
   const agentRun = await db.agentRun.create({
     data: {
@@ -295,8 +341,17 @@ export async function handleCursorStart(data: CursorStartJobData) {
       });
       return { ok: false, reason, agentId, mode: data.mode };
     }
-    await postTurnMessage(cr.id, planningTurnErrorMessage(reason), "ASSISTANT");
-    throw error;
+    await failPlanningTurn({
+      changeRequestId: cr.id,
+      priorMeta,
+      reason,
+      agentRunId: agentRun.id,
+      hadAttachments: attachmentRefs.length > 0,
+      wasLongMessage: Boolean(data.wasLongMessage),
+      isTimeout: /timed out/i.test(reason),
+      userMessageId: data.userMessageId,
+    });
+    return { ok: false, reason, agentId, mode: data.mode };
   }
 
   stopHeartbeat?.();

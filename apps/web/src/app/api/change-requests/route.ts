@@ -25,8 +25,6 @@ const bodySchema = z
     title: z.string().min(3).max(200).optional(),
     prompt: z.string().max(8000).optional(),
     kind: z.enum(["CHANGE", "PROGRAM"]).default("CHANGE"),
-    /** Chat against an already-linked GitHub repo (not greenfield planning). */
-    intent: z.enum(["plan", "iterate"]).optional(),
     apiDocsUrl: z.string().url().optional().or(z.literal("")),
     docsText: z.string().max(20000).optional(),
     examples: z.string().max(20000).optional(),

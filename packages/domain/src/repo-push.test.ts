@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   connectedRepoPushResultMessage,
+  CURSOR_NO_RESPONSE_MESSAGE,
+  cursorFailureChatMessage,
   isUserPushRequest,
   readClientAwsDeployTarget,
+  shouldRunConnectedRepoAgent,
 } from "./repo-push.js";
 
 describe("user push requests", () => {
@@ -58,5 +61,33 @@ describe("client aws deploy target", () => {
     assert.match(message, /AWS deploy target/);
     assert.match(message, /not connected/);
     assert.doesNotMatch(message, /sk-|password|secret value/i);
+  });
+
+  it("surfaces a Cursor failure and a hung call in chat", () => {
+    assert.equal(
+      cursorFailureChatMessage("AI reply timed out after 480s"),
+      CURSOR_NO_RESPONSE_MESSAGE,
+    );
+    assert.equal(
+      cursorFailureChatMessage("filter blocked clerk.advancedautomations.net"),
+      "Koda couldn't finish that reply: filter blocked clerk.advancedautomations.net.",
+    );
+    assert.equal(
+      shouldRunConnectedRepoAgent({
+        kind: "PROGRAM",
+        status: "PLANNING",
+        hasRepository: true,
+        iterateExisting: false,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldRunConnectedRepoAgent({
+        kind: "PROGRAM",
+        status: "PLANNING",
+        hasRepository: false,
+      }),
+      false,
+    );
   });
 });

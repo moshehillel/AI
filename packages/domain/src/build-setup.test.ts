@@ -25,7 +25,7 @@ describe("build setup", () => {
     });
     assert.match(prompt, /Invoice sync/);
     assert.match(prompt, /Sync invoices/);
-    assert.match(prompt, /PLAN mode/i);
+    assert.match(prompt, /agent mode/i);
     assert.match(prompt, /QB_TOKEN/);
     assert.match(prompt, /names only/i);
   });

@@ -7,20 +7,16 @@ import {
   AuthError,
   writeAuditEvent,
 } from "@automation-studio/auth";
-import { db, Prisma, ensurePlanningRepository } from "@automation-studio/db";
+import { db, Prisma } from "@automation-studio/db";
 import {
   detectAndRedactSecrets,
   encryptSecret,
-  isProgramPlanOnly,
   canProgramCustomerChat,
   isProgramVerifyPhase,
-  buildPlanningFollowUp,
-  buildPlanningStartPrompt,
-  getDefaultGithubRepoConfig,
-  isLiveCursorConfigured,
+  cursorFailureChatMessage,
   isUserPushRequest,
   connectedRepoFollowUpPrompt,
-  planningAgentInstructions,
+  shouldRunConnectedRepoAgent,
   clientVerifyFollowUpPrompt,
   preparePlanningUserPrompt,
   type PlanningMeta,
@@ -95,13 +91,13 @@ function normalizeAttachments(body: z.infer<typeof bodySchema>): AttachmentItem[
   return out.slice(0, 5);
 }
 
-function buildPlanFollowUpPrompt(userContent: string): {
+function buildAgentFollowUpPrompt(userContent: string): {
   prompt: string;
   wasLong: boolean;
 } {
   const prepared = preparePlanningUserPrompt(userContent);
   return {
-    prompt: `${planningAgentInstructions()}\n\nClient message:\n${prepared.prompt}`,
+    prompt: prepared.prompt,
     wasLong: prepared.wasLong,
   };
 }
@@ -206,7 +202,7 @@ async function enqueueOrQueuePlanningTurn(opts: {
         changeRequestId: opts.changeRequestId,
         companyId: opts.companyId,
         prompt: opts.followUpPrompt,
-        mode: opts.mode ?? "plan",
+        mode: "agent",
         pushRequest: opts.pushRequest,
         attachmentRefs: opts.attachmentRefs.length
           ? opts.attachmentRefs
@@ -223,7 +219,7 @@ async function enqueueOrQueuePlanningTurn(opts: {
       {
         changeRequestId: opts.changeRequestId,
         companyId: opts.companyId,
-        mode: opts.mode ?? "plan",
+        mode: "agent",
         pushRequest: opts.pushRequest,
         prompt: opts.startPrompt,
         attachmentRefs: opts.attachmentRefs.length
@@ -445,11 +441,32 @@ export async function POST(
     }
 
     const planningMetaNow = (cr.planningMeta ?? {}) as PlanningMeta;
-    const connectedRepo = Boolean(planningMetaNow.iterateExisting);
+    let connectedRepo = Boolean(planningMetaNow.iterateExisting);
+    if (!connectedRepo && cr.kind === "PROGRAM") {
+      const linked = await db.changeRequest.findFirst({
+        where: { id: cr.id },
+        include: { project: { include: { repository: true } } },
+      });
+      const repository = linked?.project.repository ?? null;
+      if (
+        repository &&
+        shouldRunConnectedRepoAgent({
+          kind: cr.kind,
+          status: cr.status,
+          hasRepository: true,
+          iterateExisting: planningMetaNow.iterateExisting,
+        })
+      ) {
+        planningMetaNow.iterateExisting = true;
+        planningMetaNow.linkedRepoLabel = `${repository.githubOwner}/${repository.githubRepo}`;
+        connectedRepo = true;
+        await db.changeRequest.update({
+          where: { id: cr.id },
+          data: { planningMeta: planningMetaNow as Prisma.InputJsonValue },
+        });
+      }
+    }
     const pushRequest = connectedRepo && isUserPushRequest(redacted);
-
-    const forcePlan =
-      cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status) && !connectedRepo;
 
     const fullForVerify =
       cr.kind === "PROGRAM" && isProgramVerifyPhase(cr.status)
@@ -471,7 +488,7 @@ export async function POST(
     } | null = null;
     let turnQueued = false;
 
-    const planFollowUp = buildPlanFollowUpPrompt(redacted);
+    const agentFollowUp = buildAgentFollowUpPrompt(redacted);
 
     if (connectedRepo && cr.cursorAgentId) {
       const prepared = preparePlanningUserPrompt(redacted);
@@ -596,10 +613,10 @@ export async function POST(
           changeRequestId: cr.id,
           companyId: ctx.company.id,
           userMessageId: message.id,
-          followUpPrompt: planFollowUp.prompt,
-          wasLongMessage: planFollowUp.wasLong,
+          followUpPrompt: agentFollowUp.prompt,
+          wasLongMessage: agentFollowUp.wasLong,
           attachmentRefs: fileAttachmentRefs,
-          mode: forcePlan ? "plan" : "agent",
+          mode: "agent",
         });
         turnQueued = queued;
       }
@@ -659,201 +676,25 @@ export async function POST(
         content: created.content,
         createdAt: created.createdAt.toISOString(),
       };
-    } else if (cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status)) {
-      const full = await db.changeRequest.findFirstOrThrow({
-        where: { id: cr.id },
-        include: { project: { include: { repository: true } } },
-      });
-
-      const currentMeta = mergePlanningAttachments(
-        (cr.planningMeta ?? {}) as PlanningMeta,
-        attachments,
-      );
-
-      // Auto-link a planning repo (sibling project or DEFAULT_GITHUB_*) so we
-      // can start live Cursor plan mode instead of the local template fallback.
-      let repository = full.project.repository;
-      if (!repository) {
-        repository = await ensurePlanningRepository(db, {
-          projectId: cr.projectId,
-          companyId: ctx.company.id,
-          defaults: getDefaultGithubRepoConfig(),
-        });
-      }
-
-      const canStartLive = Boolean(repository) && isLiveCursorConfigured();
-
-      if (canStartLive) {
-        // Prefer live Cursor plan mode — kick off (or continue) agent startup.
-        await db.changeRequest.update({
-          where: { id: cr.id },
-          data: {
-            planningMeta: currentMeta as Prisma.InputJsonValue,
-            updatedAt: new Date(),
-          },
-        });
-
-        if (full.branchName) {
-          const history = await db.changeRequestMessage.findMany({
-            where: { changeRequestId: cr.id },
-            orderBy: { createdAt: "asc" },
-            take: 40,
-          });
-          const bootstrapping = await db.agentRun.count({
-            where: { changeRequestId: cr.id, status: "RUNNING" },
-          });
-          const startPrompt = buildPlanningStartPrompt({
-            title: cr.title,
-            description: cr.description,
-            messages: history.map((m) => ({
-              role: m.role,
-              content: m.content,
-            })),
-            planningMeta: currentMeta,
-          });
-
-          if (full.cursorAgentId || bootstrapping > 0) {
-            const { queued } = await enqueueOrQueuePlanningTurn({
-              changeRequestId: cr.id,
-              companyId: ctx.company.id,
-              userMessageId: message.id,
-              followUpPrompt: full.cursorAgentId ? planFollowUp.prompt : undefined,
-              startPrompt: full.cursorAgentId ? undefined : startPrompt,
-              wasLongMessage: planFollowUp.wasLong,
-              attachmentRefs: fileAttachmentRefs,
-              delayMs: bootstrapping > 0 && !full.cursorAgentId ? 12000 : undefined,
-            });
-            turnQueued = queued;
-          } else {
-            const { queued } = await enqueueOrQueuePlanningTurn({
-              changeRequestId: cr.id,
-              companyId: ctx.company.id,
-              userMessageId: message.id,
-              startPrompt,
-              wasLongMessage: planFollowUp.wasLong,
-              attachmentRefs: fileAttachmentRefs,
-            });
-            turnQueued = queued;
-          }
-        } else {
-          // Single bootstrap path: branch first, then cursor.start-agent from worker.
-          await enqueueJob(
-            "github.ensure-branch",
-            {
-              changeRequestId: cr.id,
-              companyId: ctx.company.id,
-            },
-            { jobId: `plan-branch-${cr.id}` },
-          );
-          if (planFollowUp.wasLong) {
-            await db.changeRequest.update({
-              where: { id: cr.id },
-              data: {
-                planningMeta: {
-                  ...currentMeta,
-                  liveProgress: "Processing your long note…",
-                } as Prisma.InputJsonValue,
-                updatedAt: new Date(),
-              },
-            });
-          }
-        }
-
-        if (!turnQueued) {
-          const created = await db.changeRequestMessage.create({
-            data: {
-              changeRequestId: cr.id,
-              role: "SYSTEM",
-              content:
-                "Koda is connecting your live planning session… replies will appear here in a moment.",
-              metadata: { planningSessionStarting: true },
-            },
-          });
-          assistantMessage = {
-            id: created.id,
-            role: created.role,
-            content: created.content,
-            createdAt: created.createdAt.toISOString(),
-          };
-        } else {
-          const created = await db.changeRequestMessage.create({
-            data: {
-              changeRequestId: cr.id,
-              role: "SYSTEM",
-              content: planFollowUp.wasLong
-                ? "Processing your long note — it will send when the current reply finishes."
-                : "Your message is queued — it will send when the current reply finishes.",
-              metadata: { planningTurnQueued: true },
-            },
-          });
-          assistantMessage = {
-            id: created.id,
-            role: created.role,
-            content: created.content,
-            createdAt: created.createdAt.toISOString(),
-          };
-        }
-      } else {
-        // No live Cursor path available — keyword-aware local planning.
-        const { content, nextMeta, planMarkdown } = buildPlanningFollowUp({
-          meta: currentMeta,
-          latestUserContent: redacted,
-          attachmentKind: primaryAttachment?.kind ?? null,
-          title: cr.title,
-        });
-
-        await db.changeRequest.update({
-          where: { id: cr.id },
-          data: {
-            planningMeta: nextMeta as Prisma.InputJsonValue,
-            updatedAt: new Date(),
-          },
-        });
-
-        await db.plan.create({
-          data: {
-            changeRequestId: cr.id,
-            content: planMarkdown,
-          },
-        });
-
-        const created = await db.changeRequestMessage.create({
-          data: {
-            changeRequestId: cr.id,
-            role: "ASSISTANT",
-            content,
-            metadata: {
-              planningFollowUp: true,
-              localPlanFallback: true,
-              reason: !repository
-                ? "no_repository"
-                : "cursor_not_configured",
-            },
-          },
-        });
-        assistantMessage = {
-          id: created.id,
-          role: created.role,
-          content: created.content,
-          createdAt: created.createdAt.toISOString(),
-        };
-      }
     } else if (
       cr.kind === "PROGRAM" &&
-      attachments.length &&
-      isProgramPlanOnly(cr.status)
+      (cr.status === "PLANNING" || cr.status === "AWAITING_PLAN_APPROVAL")
     ) {
-      const currentMeta = (cr.planningMeta ?? {}) as PlanningMeta;
-      await db.changeRequest.update({
-        where: { id: cr.id },
+      const created = await db.changeRequestMessage.create({
         data: {
-          planningMeta: mergePlanningAttachments(
-            currentMeta,
-            attachments,
-          ) as Prisma.InputJsonValue,
-          updatedAt: new Date(),
+          changeRequestId: cr.id,
+          role: "ASSISTANT",
+          content: cursorFailureChatMessage(
+            "this chat has no connected GitHub repo. An admin has to connect one before Koda can edit it",
+          ),
         },
       });
+      assistantMessage = {
+        id: created.id,
+        role: created.role,
+        content: created.content,
+        createdAt: created.createdAt.toISOString(),
+      };
     }
 
     return NextResponse.json({

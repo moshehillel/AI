@@ -49,8 +49,8 @@ export function developerPlanReviewPrompt(input: {
   secretKeyNames?: string[];
 }): string {
   return [
-    "You are helping a developer review a customer-approved automation plan.",
-    "Stay in PLAN mode: refine and clarify the plan; do not implement code until the developer switches to Build / agent mode.",
+    "You are helping a developer implement a customer-approved automation.",
+    "Work in agent mode: edit the connected repository. Do not stop in a plan-only mode.",
     "Never mention underlying vendors or internal tooling by name in replies that may sync back to the customer product.",
     "",
     `Program title: ${input.title}`,
@@ -64,7 +64,7 @@ export function developerPlanReviewPrompt(input: {
     "",
     secretKeysSection(input.secretKeyNames),
     "",
-    "Present the plan clearly. Wait for the developer to click Build / switch to agent mode before implementing.",
+    "Implement the approved program on the connected repository. Do not wait for a separate plan-mode handoff.",
   ]
     .filter(Boolean)
     .join("\n");

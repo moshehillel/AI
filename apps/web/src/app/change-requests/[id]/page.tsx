@@ -58,7 +58,30 @@ export default async function ChangeRequestPage({
     apiDocsUrl?: string | null;
     docsText?: string | null;
     examples?: string | null;
+    iterateExisting?: boolean | null;
+    linkedRepoLabel?: string | null;
   };
+  let connectedExisting = Boolean(
+    planningMeta.iterateExisting && full.project.repository,
+  );
+  if (
+    !connectedExisting &&
+    full.project.repository &&
+    full.kind === "PROGRAM" &&
+    (full.status === "PLANNING" || full.status === "AWAITING_PLAN_APPROVAL")
+  ) {
+    const repo = full.project.repository;
+    const nextMeta = {
+      ...(full.planningMeta as Record<string, unknown> | null),
+      iterateExisting: true,
+      linkedRepoLabel: `${repo.githubOwner}/${repo.githubRepo}`,
+    };
+    await db.changeRequest.update({
+      where: { id: full.id },
+      data: { planningMeta: nextMeta },
+    });
+    connectedExisting = true;
+  }
   const buildSetup = parseBuildSetup(full.buildSetup);
   const credentialSecrets = full.secretRefs.filter((s) =>
     isCredentialSecretKey(s.keyName),
@@ -92,7 +115,7 @@ export default async function ChangeRequestPage({
 
   const rightPanel = (
     <>
-      {(isProgram || plan) && (
+      {isStaff && (isProgram || plan) ? (
         <LivePlanPanel
           changeRequestId={full.id}
           initialPlan={
@@ -107,7 +130,7 @@ export default async function ChangeRequestPage({
           }
           compact
         />
-      )}
+      ) : null}
 
       <div className="ide-right-section">
         <p className="ide-right-label">Progress</p>
@@ -230,14 +253,10 @@ export default async function ChangeRequestPage({
           content: m.content,
           createdAt: m.createdAt.toISOString(),
         }))}
-        initialPlanContent={plan?.content ?? ""}
         status={full.status}
         kind={full.kind}
         title={`#${full.number} ${full.title}`}
-        connectedRepo={Boolean(
-          (full.planningMeta as { iterateExisting?: boolean } | null)
-            ?.iterateExisting && full.project.repository,
-        )}
+        connectedRepo={connectedExisting}
       />
     </IdeShell>
   );

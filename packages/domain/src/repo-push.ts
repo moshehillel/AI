@@ -12,6 +12,44 @@ export type QueuedAgentTurn = {
   pushRequest?: boolean;
 };
 
+/** Shown when Cursor never returns a reply. */
+export const CURSOR_NO_RESPONSE_MESSAGE =
+  "Koda didn't respond. The agent call timed out before a reply arrived.";
+
+/** Shown when Cursor finishes with no text. */
+export const CURSOR_EMPTY_RESPONSE_MESSAGE =
+  "Koda didn't respond. The agent finished without a reply.";
+
+/**
+ * Chat text for a failed Cursor turn. Includes the real failure when there is one.
+ */
+export function cursorFailureChatMessage(reason: string): string {
+  const detail = reason.replace(/\s+/g, " ").trim().replace(/\.$/, "");
+  if (!detail || /timed out/i.test(detail)) return CURSOR_NO_RESPONSE_MESSAGE;
+  if (/without a reply|no reply|empty reply/i.test(detail)) {
+    return CURSOR_EMPTY_RESPONSE_MESSAGE;
+  }
+  return `Koda couldn't finish that reply: ${detail}.`;
+}
+
+/**
+ * Plan-only mode is gone. A program that still has a plan status, but already
+ * has a GitHub repo, edits that repo in agent mode.
+ */
+export function shouldRunConnectedRepoAgent(input: {
+  kind: string;
+  status: string;
+  hasRepository: boolean;
+  iterateExisting?: boolean | null;
+}): boolean {
+  if (!input.hasRepository) return false;
+  if (input.iterateExisting) return true;
+  return (
+    input.kind === "PROGRAM" &&
+    (input.status === "PLANNING" || input.status === "AWAITING_PLAN_APPROVAL")
+  );
+}
+
 const PUSH_NEGATIVE =
   /\b(?:don'?t|do not|never|without)\s+(?:push|deploy|commit)\b/i;
 

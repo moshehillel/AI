@@ -50,7 +50,10 @@ describe("clerk frontend api proxy", () => {
       "clerk-secret-key": "from-browser",
       connection: "close",
     });
-    const target = new URL("https://clerk.advancedautomations.net/v1/client");
+    const target = clerkFrontendApiTarget(
+      new URL("https://koda.advancedautomations.net/__clerk/v1/client"),
+    );
+    assert.ok(target);
     const headers = buildClerkProxyHeaders(incoming, {
       secretKey: "server-side-secret",
       proxyUrl: "https://koda.advancedautomations.net/__clerk",
@@ -60,7 +63,7 @@ describe("clerk frontend api proxy", () => {
     assert.equal(headers.get("Clerk-Proxy-Url"), "https://koda.advancedautomations.net/__clerk");
     assert.equal(headers.get("Clerk-Secret-Key"), "server-side-secret");
     assert.equal(headers.get("X-Forwarded-For"), "203.0.113.8");
-    assert.equal(headers.get("Host"), "clerk.advancedautomations.net");
+    assert.equal(headers.get("Host"), "frontend-api.clerk.dev");
     assert.equal(headers.get("Origin"), "https://koda.advancedautomations.net");
     assert.equal(headers.get("cookie"), "session=present");
     assert.equal(headers.get("connection"), null);

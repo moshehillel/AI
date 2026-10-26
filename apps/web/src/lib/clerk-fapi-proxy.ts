@@ -5,6 +5,7 @@
 import {
   clerkFrontendApiTarget,
   clerkProxyUrlFromHeaders,
+  CLERK_FAPI_HOSTS,
   CLERK_FAPI_ORIGIN,
   CLERK_PROXY_PATH,
 } from "./clerk-proxy-config";
@@ -118,7 +119,7 @@ function copyResponseHeaders(source: Headers, proxyUrl: string, target: URL): He
   if (location) {
     try {
       const locationUrl = new URL(location, target.origin);
-      if (locationUrl.host === target.host) {
+      if (CLERK_FAPI_HOSTS.has(locationUrl.host)) {
         headers.set(
           "Location",
           `${proxyUrl}${locationUrl.pathname}${locationUrl.search}${locationUrl.hash}`,

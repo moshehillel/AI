@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getAppBaseUrl } from "@/lib/app-url";
 import {
+  clerkProxyUrlFromHeaders,
+  isClerkProxyPath,
+} from "@/lib/clerk-proxy-config";
+import {
   STAFF_COOKIE,
   isStaffProtectedPath,
   parseStaffSessionValue,
@@ -33,6 +37,8 @@ async function getClerkHandler() {
     "/api/staff(.*)",
     "/api/health",
     "/api/ready",
+    "/__clerk(.*)",
+    "/api/clerk-fapi(.*)",
     "/icon(.*)",
     "/favicon.ico",
     "/apple-icon(.*)",
@@ -42,18 +48,29 @@ async function getClerkHandler() {
     publicRoutes.push("/projects(.*)", "/select-org(.*)");
   }
   const isPublicRoute = createRouteMatcher(publicRoutes);
-  const mw = clerkMiddleware(async (auth, request) => {
-    if (isPublicRoute(request)) return;
-    if (skipClerkProtect) return;
-    const session = await auth();
-    if (!session.userId) {
-      const returnBackUrl = new URL(
-        `${request.nextUrl.pathname}${request.nextUrl.search}`,
-        getAppBaseUrl(),
-      ).toString();
-      return session.redirectToSignIn({ returnBackUrl });
-    }
-  });
+  const mw = clerkMiddleware(
+    async (auth, request) => {
+      if (isPublicRoute(request)) return;
+      if (skipClerkProtect) return;
+      const session = await auth();
+      if (!session.userId) {
+        const returnBackUrl = new URL(
+          `${request.nextUrl.pathname}${request.nextUrl.search}`,
+          getAppBaseUrl(),
+        ).toString();
+        return session.redirectToSignIn({ returnBackUrl });
+      }
+    },
+    (request) => {
+      const proxyUrl = clerkProxyUrlFromHeaders({
+        forwardedHost: request.headers.get("x-forwarded-host"),
+        host: request.headers.get("host"),
+        forwardedProto: request.headers.get("x-forwarded-proto"),
+        proto: request.nextUrl.protocol.replace(":", ""),
+      });
+      return proxyUrl ? { proxyUrl } : {};
+    },
+  );
   clerkHandler = mw as unknown as typeof clerkHandler;
   return clerkHandler!;
 }
@@ -79,6 +96,12 @@ async function enforceStaffPasswordGate(request: NextRequest) {
 }
 
 export default async function middleware(request: NextRequest) {
+  // Forward /__clerk before Clerk's handshake so the route can add
+  // Clerk-Proxy-Url, Clerk-Secret-Key, and X-Forwarded-For.
+  if (isClerkProxyPath(request.nextUrl.pathname)) {
+    return NextResponse.next();
+  }
+
   const staffGate = await enforceStaffPasswordGate(request);
   if (staffGate) return staffGate;
 
@@ -94,5 +117,6 @@ export const config = {
   matcher: [
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
+    "/__clerk/(.*)",
   ],
 };

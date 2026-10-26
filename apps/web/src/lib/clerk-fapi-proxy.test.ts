@@ -1,0 +1,100 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { buildClerkProxyHeaders } from "./clerk-fapi-proxy.ts";
+import {
+  CLERK_FAPI_ORIGIN,
+  clerkFrontendApiTarget,
+  clerkProxyUrlFromHeaders,
+  clerkScriptUrl,
+  isClerkProxyPath,
+} from "./clerk-proxy-config.ts";
+
+describe("clerk frontend api proxy", () => {
+  it("sends the browser path to the Clerk host", () => {
+    const target = clerkFrontendApiTarget(
+      new URL(
+        "https://koda.advancedautomations.net/__clerk/v1/client?_clerk_js_version=5.128.0",
+      ),
+    );
+    assert.ok(target);
+    assert.equal(target.origin, CLERK_FAPI_ORIGIN);
+    assert.equal(target.pathname, "/v1/client");
+    assert.equal(target.searchParams.get("_clerk_js_version"), "5.128.0");
+  });
+
+  it("accepts the internal rewrite path", () => {
+    const target = clerkFrontendApiTarget(
+      new URL("https://koda.advancedautomations.net/api/clerk-fapi/v1/me/organization_memberships"),
+    );
+    assert.equal(target?.pathname, "/v1/me/organization_memberships");
+  });
+
+  it("refuses a path that would change hosts", () => {
+    assert.equal(
+      clerkFrontendApiTarget(
+        new URL("https://koda.advancedautomations.net/__clerk//evil.example/v1/client"),
+      ),
+      null,
+    );
+    assert.equal(
+      clerkFrontendApiTarget(new URL("https://koda.advancedautomations.net/v1/client")),
+      null,
+    );
+  });
+
+  it("sets the proxy headers Clerk requires and drops a client-supplied secret", () => {
+    const incoming = new Headers({
+      origin: "https://koda.advancedautomations.net",
+      cookie: "session=present",
+      "x-forwarded-for": "203.0.113.8, 10.0.0.1",
+      "clerk-secret-key": "from-browser",
+      connection: "close",
+    });
+    const target = new URL("https://clerk.advancedautomations.net/v1/client");
+    const headers = buildClerkProxyHeaders(incoming, {
+      secretKey: "server-side-secret",
+      proxyUrl: "https://koda.advancedautomations.net/__clerk",
+      target,
+    });
+
+    assert.equal(headers.get("Clerk-Proxy-Url"), "https://koda.advancedautomations.net/__clerk");
+    assert.equal(headers.get("Clerk-Secret-Key"), "server-side-secret");
+    assert.equal(headers.get("X-Forwarded-For"), "203.0.113.8");
+    assert.equal(headers.get("Host"), "clerk.advancedautomations.net");
+    assert.equal(headers.get("Origin"), "https://koda.advancedautomations.net");
+    assert.equal(headers.get("cookie"), "session=present");
+    assert.equal(headers.get("connection"), null);
+    assert.equal(JSON.stringify(Object.fromEntries(headers)).includes("from-browser"), false);
+  });
+
+  it("uses the Koda host when the public proxy env is unset", () => {
+    const previous = process.env.NEXT_PUBLIC_CLERK_PROXY_URL;
+    delete process.env.NEXT_PUBLIC_CLERK_PROXY_URL;
+    try {
+      assert.equal(
+        clerkProxyUrlFromHeaders({
+          forwardedHost: "koda.advancedautomations.net",
+          forwardedProto: "https",
+        }),
+        "https://koda.advancedautomations.net/__clerk",
+      );
+      assert.equal(
+        clerkProxyUrlFromHeaders({ host: "localhost:3000", proto: "http" }),
+        null,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.NEXT_PUBLIC_CLERK_PROXY_URL;
+      else process.env.NEXT_PUBLIC_CLERK_PROXY_URL = previous;
+    }
+  });
+
+  it("recognizes both proxy paths and builds the script url on Koda", () => {
+    assert.equal(isClerkProxyPath("/__clerk/v1/client"), true);
+    assert.equal(isClerkProxyPath("/api/clerk-fapi/npm/clerk.js"), true);
+    assert.equal(isClerkProxyPath("/api/health"), false);
+    assert.equal(
+      clerkScriptUrl("https://koda.advancedautomations.net/__clerk"),
+      "https://koda.advancedautomations.net/__clerk/npm/@clerk/clerk-js@5/dist/clerk.browser.js",
+    );
+  });
+});

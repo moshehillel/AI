@@ -31,6 +31,18 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "2mb",
     },
   },
+  async rewrites() {
+    return [
+      {
+        source: "/__clerk",
+        destination: "/api/clerk-fapi",
+      },
+      {
+        source: "/__clerk/:path*",
+        destination: "/api/clerk-fapi/:path*",
+      },
+    ];
+  },
 };
 
 export default nextConfig;

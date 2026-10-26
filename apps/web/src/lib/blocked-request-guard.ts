@@ -1,8 +1,12 @@
+import { CLERK_PROXY_PATH } from "./clerk-proxy-config";
+
 /**
  * After sign-in, Clerk's organization switcher polls three endpoints and
  * retries network failures. A local HTTPS filter (the HAR shows
  * net::ERR_FAILED and Server: Livigent) makes those retries continue.
  * Stop them after the first blocked attempt and tell the page.
+ * The same polls through the same-origin /__clerk proxy are covered too,
+ * so a failed proxy does not retry forever.
  */
 
 export const BLOCKED_SIGN_IN_REQUEST_MESSAGE =
@@ -25,8 +29,12 @@ export function clerkOrganizationPollPath(rawUrl: string): string | null {
   } catch {
     return null;
   }
-  if (!url.hostname.toLowerCase().includes("clerk")) return null;
-  const path = url.pathname.replace(/\/+$/, "") || "/";
+  let path = url.pathname.replace(/\/+$/, "") || "/";
+  if (path === CLERK_PROXY_PATH || path.startsWith(`${CLERK_PROXY_PATH}/`)) {
+    path = path.slice(CLERK_PROXY_PATH.length) || "/";
+  } else if (!url.hostname.toLowerCase().includes("clerk")) {
+    return null;
+  }
   return CLERK_ORG_POLLS.has(path) ? path : null;
 }
 

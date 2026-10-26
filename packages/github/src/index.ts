@@ -315,3 +315,23 @@ export async function commitFilesToBranch(input: {
   return { sha: ref.object.sha, paths };
 }
 
+/** Current commit on a branch. Used to tell a push apart from the previous one. */
+export async function readBranchHead(input: {
+  installationId: string;
+  owner: string;
+  repo: string;
+  branch: string;
+}): Promise<{ sha: string }> {
+  if (mockEnabled()) {
+    return { sha: `mock-sha-${input.branch}` };
+  }
+  const octokit = await getInstallationOctokit(input.installationId);
+  if (!octokit) throw new Error("GitHub App not configured");
+  const { data } = await octokit.git.getRef({
+    owner: input.owner,
+    repo: input.repo,
+    ref: `heads/${input.branch}`,
+  });
+  return { sha: data.object.sha };
+}
+

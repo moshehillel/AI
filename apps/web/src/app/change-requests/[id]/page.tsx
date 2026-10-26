@@ -31,7 +31,7 @@ export default async function ChangeRequestPage({
   const full = await db.changeRequest.findFirstOrThrow({
     where: { id: changeRequest.id },
     include: {
-      project: true,
+      project: { include: { repository: true } },
       messages: { orderBy: { createdAt: "asc" } },
       plans: { orderBy: { createdAt: "desc" }, take: 1 },
       previews: { orderBy: { createdAt: "desc" }, take: 1 },
@@ -234,6 +234,10 @@ export default async function ChangeRequestPage({
         status={full.status}
         kind={full.kind}
         title={`#${full.number} ${full.title}`}
+        connectedRepo={Boolean(
+          (full.planningMeta as { iterateExisting?: boolean } | null)
+            ?.iterateExisting && full.project.repository,
+        )}
       />
     </IdeShell>
   );

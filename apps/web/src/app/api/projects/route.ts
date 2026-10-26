@@ -18,22 +18,17 @@ const bodySchema = z
     githubRepo: z.string().min(1).optional(),
     installationId: z.string().min(1).nullable().optional(),
     defaultBranch: z.string().min(1).max(200).optional(),
+    railwayProjectId: z.string().min(1).max(80).nullable().optional(),
   })
   .superRefine((value, ctx) => {
     const owner = value.githubOwner?.trim() ?? "";
     const repo = value.githubRepo?.trim() ?? "";
-    if ((owner && !repo) || (!owner && repo)) {
+    if (!owner || !repo) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Provide both GitHub owner and repo, or neither for a new planning project",
+        message:
+          "Connect an existing GitHub repo. A project without a repo cannot be opened.",
         path: ["githubRepo"],
-      });
-    }
-    if (!owner && !repo && !value.name?.trim()) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Project name is required",
-        path: ["name"],
       });
     }
   });
@@ -100,6 +95,7 @@ export async function POST(request: Request) {
                   githubRepo,
                   installationId,
                   defaultBranch: body.defaultBranch?.trim() || "main",
+                  railwayProjectId: body.railwayProjectId?.trim() || null,
                 },
               },
             }

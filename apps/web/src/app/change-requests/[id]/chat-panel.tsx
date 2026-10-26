@@ -247,6 +247,7 @@ export function ChatPanel({
   status: initialStatus,
   kind,
   title,
+  connectedRepo = false,
 }: {
   changeRequestId: string;
   initialMessages: Message[];
@@ -254,6 +255,8 @@ export function ChatPanel({
   status: string;
   kind: string;
   title?: string;
+  /** Chat is on an admin-connected GitHub repo, not a blank planning project. */
+  connectedRepo?: boolean;
 }) {
   const router = useRouter();
   const [messages, setMessages] = useState(initialMessages);
@@ -1298,9 +1301,12 @@ export function ChatPanel({
         {attachMode === "secrets" ? (
           <div className="attach-panel space-y-3">
             <p className="text-sm" style={{ color: "var(--ide-ink-secondary)" }}>
-              Values are encrypted and never shown in chat or the plan. Use a
-              clear name (e.g. <code>HHA_PASSWORD</code>) so the developer
-              knows what each secret is for.
+              Paste each variable name and value. Values are encrypted in Koda
+              for this project and are not committed to git. The AWS deploy
+              target for this project is not connected yet, so they are not sent
+              to a host. Use a clear name (e.g. <code>HHA_PASSWORD</code>). The
+              app will read <code>process.env.HHA_PASSWORD</code> once that
+              target is connected.
             </p>
             {secretDrafts.map((row, index) => (
               <div key={index} className="flex flex-col gap-2 sm:flex-row">
@@ -1531,13 +1537,15 @@ export function ChatPanel({
               : liveLink === "reconnecting"
                 ? "Reconnecting…"
                 : "Connecting…"}
-            {isPlanning
-              ? " · Planning with Koda"
-              : isVerifyPhase
-                ? " · Ask about your app"
-                : isBuildLocked
-                  ? " · Planning closed"
-                  : ""}
+            {connectedRepo
+              ? " · Connected repo · say push for its own commit"
+              : isPlanning
+                ? " · Planning with Koda"
+                : isVerifyPhase
+                  ? " · Ask about your app"
+                  : isBuildLocked
+                    ? " · Planning closed"
+                    : ""}
           </span>
           <span className="composer-foot-branch">{showThinking ? "Working" : "Ready"}</span>
         </div>

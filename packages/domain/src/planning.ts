@@ -1,3 +1,5 @@
+import type { QueuedAgentTurn } from "./repo-push.js";
+
 export type PlanningTopic =
   | "goals"
   | "systems"
@@ -33,7 +35,13 @@ export type PlanningMeta = {
     prompt: string;
     attachmentRefs?: string[];
     userMessageId?: string;
+    mode?: "plan" | "agent";
+    pushRequest?: boolean;
   } | null;
+  /** Connected-repo turns waiting one at a time. Never joined into one push. */
+  queuedTurns?: QueuedAgentTurn[] | null;
+  /** Branch SHA after the last user-requested push. Not a secret. */
+  lastPushedSha?: string | null;
   /** Last user message id when a turn failed (one-click retry in UI). */
   lastFailedUserMessageId?: string | null;
   /** Worker heartbeat while waiting on Cursor (ISO timestamp). */
@@ -115,7 +123,7 @@ export function buildOpeningIterateMessage(opts: {
     "",
     repoLine,
     "",
-    "Tell me what you want to improve or add in your own words. I'll draft a plan against the linked code, answer in plain English, and ask questions when I need details.",
+    "Tell me what you want to change, including restructuring the whole project. I will edit the connected repo. Say **push** when that change should be its own commit. Each push stays separate so it can be reverted.",
     "",
     "Use **+** to attach docs or files. For passwords and API keys, choose **Add secrets / credentials** so values stay private.",
   ].join("\n");

@@ -18,10 +18,13 @@ import {
   buildPlanningStartPrompt,
   getDefaultGithubRepoConfig,
   isLiveCursorConfigured,
+  isUserPushRequest,
+  connectedRepoFollowUpPrompt,
   planningAgentInstructions,
   clientVerifyFollowUpPrompt,
   preparePlanningUserPrompt,
   type PlanningMeta,
+  type QueuedAgentTurn,
 } from "@automation-studio/domain";
 import { enqueueJob } from "@automation-studio/jobs";
 import { requireRateLimit } from "@/lib/rate-limit";
@@ -113,6 +116,9 @@ async function enqueueOrQueuePlanningTurn(opts: {
   attachmentRefs: string[];
   delayMs?: number;
   mode?: "plan" | "agent";
+  pushRequest?: boolean;
+  /** Keep this turn separate so it is not merged into another push. */
+  separateTurn?: boolean;
 }): Promise<{ queued: boolean }> {
   const runningTurn = await db.agentRun.count({
     where: { changeRequestId: opts.changeRequestId, status: "RUNNING" },
@@ -131,18 +137,38 @@ async function enqueueOrQueuePlanningTurn(opts: {
       : null;
 
   if (turnBusy && opts.followUpPrompt) {
-    await db.changeRequest.update({
-      where: { id: opts.changeRequestId },
-      data: {
-        planningMeta: {
-          ...meta,
-          queuedFollowUp: {
+    const separate: QueuedAgentTurn[] | null = opts.separateTurn
+      ? [
+          ...(meta.queuedTurns ?? []),
+          {
             prompt: opts.followUpPrompt,
             attachmentRefs: opts.attachmentRefs.length
               ? opts.attachmentRefs
               : undefined,
             userMessageId: opts.userMessageId,
+            mode: opts.mode ?? "agent",
+            pushRequest: opts.pushRequest || undefined,
           },
+        ].slice(-8)
+      : null;
+    await db.changeRequest.update({
+      where: { id: opts.changeRequestId },
+      data: {
+        planningMeta: {
+          ...meta,
+          ...(separate
+            ? { queuedTurns: separate }
+            : {
+                queuedFollowUp: {
+                  prompt: opts.followUpPrompt,
+                  attachmentRefs: opts.attachmentRefs.length
+                    ? opts.attachmentRefs
+                    : undefined,
+                  userMessageId: opts.userMessageId,
+                  mode: opts.mode,
+                  pushRequest: opts.pushRequest,
+                },
+              }),
           ...(progressLabel ? { liveProgress: progressLabel } : {}),
         } as Prisma.InputJsonValue,
         updatedAt: new Date(),
@@ -166,9 +192,11 @@ async function enqueueOrQueuePlanningTurn(opts: {
 
   const jobOpts = {
     delay: opts.delayMs,
-    jobId: opts.followUpPrompt
-      ? `cursor-follow-up-${opts.changeRequestId}`
-      : `cursor-start-${opts.changeRequestId}`,
+    jobId: opts.separateTurn
+      ? `cursor-turn-${opts.changeRequestId}-${opts.userMessageId}`
+      : opts.followUpPrompt
+        ? `cursor-follow-up-${opts.changeRequestId}`
+        : `cursor-start-${opts.changeRequestId}`,
   };
 
   if (opts.followUpPrompt && row?.cursorAgentId) {
@@ -179,6 +207,7 @@ async function enqueueOrQueuePlanningTurn(opts: {
         companyId: opts.companyId,
         prompt: opts.followUpPrompt,
         mode: opts.mode ?? "plan",
+        pushRequest: opts.pushRequest,
         attachmentRefs: opts.attachmentRefs.length
           ? opts.attachmentRefs
           : undefined,
@@ -194,7 +223,8 @@ async function enqueueOrQueuePlanningTurn(opts: {
       {
         changeRequestId: opts.changeRequestId,
         companyId: opts.companyId,
-        mode: "plan",
+        mode: opts.mode ?? "plan",
+        pushRequest: opts.pushRequest,
         prompt: opts.startPrompt,
         attachmentRefs: opts.attachmentRefs.length
           ? opts.attachmentRefs
@@ -414,8 +444,12 @@ export async function POST(
       });
     }
 
+    const planningMetaNow = (cr.planningMeta ?? {}) as PlanningMeta;
+    const connectedRepo = Boolean(planningMetaNow.iterateExisting);
+    const pushRequest = connectedRepo && isUserPushRequest(redacted);
+
     const forcePlan =
-      cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status);
+      cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status) && !connectedRepo;
 
     const fullForVerify =
       cr.kind === "PROGRAM" && isProgramVerifyPhase(cr.status)
@@ -439,7 +473,101 @@ export async function POST(
 
     const planFollowUp = buildPlanFollowUpPrompt(redacted);
 
-    if (cr.cursorAgentId) {
+    if (connectedRepo && cr.cursorAgentId) {
+      const prepared = preparePlanningUserPrompt(redacted);
+      const prompt = connectedRepoFollowUpPrompt({
+        customerMessage: prepared.prompt,
+        pushRequest,
+        repoLabel: planningMetaNow.linkedRepoLabel,
+      });
+      const { queued } = await enqueueOrQueuePlanningTurn({
+        changeRequestId: cr.id,
+        companyId: ctx.company.id,
+        userMessageId: message.id,
+        followUpPrompt: prompt,
+        wasLongMessage: prepared.wasLong,
+        attachmentRefs: fileAttachmentRefs,
+        mode: "agent",
+        pushRequest,
+        separateTurn: true,
+      });
+      turnQueued = queued;
+    } else if (connectedRepo) {
+      const full = await db.changeRequest.findFirstOrThrow({
+        where: { id: cr.id },
+        include: { project: { include: { repository: true } } },
+      });
+      const repository = full.project.repository;
+      if (!repository) {
+        throw new AuthError(
+          "No repository linked — an admin must connect the GitHub repo first.",
+          400,
+        );
+      }
+      const prepared = preparePlanningUserPrompt(redacted);
+      const prompt = connectedRepoFollowUpPrompt({
+        customerMessage: prepared.prompt,
+        pushRequest,
+        repoLabel: `${repository.githubOwner}/${repository.githubRepo}`,
+      });
+      if (full.branchName && full.cursorAgentId) {
+        const { queued } = await enqueueOrQueuePlanningTurn({
+          changeRequestId: cr.id,
+          companyId: ctx.company.id,
+          userMessageId: message.id,
+          followUpPrompt: prompt,
+          wasLongMessage: prepared.wasLong,
+          attachmentRefs: fileAttachmentRefs,
+          mode: "agent",
+          pushRequest,
+          separateTurn: true,
+        });
+        turnQueued = queued;
+      } else if (full.branchName) {
+        const { queued } = await enqueueOrQueuePlanningTurn({
+          changeRequestId: cr.id,
+          companyId: ctx.company.id,
+          userMessageId: message.id,
+          startPrompt: prompt,
+          wasLongMessage: prepared.wasLong,
+          attachmentRefs: fileAttachmentRefs,
+          mode: "agent",
+          pushRequest,
+          separateTurn: true,
+        });
+        turnQueued = queued;
+      } else {
+        await enqueueJob("github.ensure-branch", {
+          changeRequestId: cr.id,
+          companyId: ctx.company.id,
+          mode: "agent",
+          prompt,
+          pushRequest,
+          attachmentRef: fileAttachmentRefs[0],
+          attachmentRefs: fileAttachmentRefs.length
+            ? fileAttachmentRefs
+            : undefined,
+        });
+      }
+      if (!turnQueued) {
+        const created = await db.changeRequestMessage.create({
+          data: {
+            changeRequestId: cr.id,
+            role: "SYSTEM",
+            content: pushRequest
+              ? "Koda will commit and push this change on its own."
+              : "Koda is editing the connected repository. Say push when you want that change as its own commit.",
+            metadata: { connectedRepoTurn: true, pushRequest },
+          },
+        });
+        assistantMessage = {
+          id: created.id,
+          role: created.role,
+          content: created.content,
+          createdAt: created.createdAt.toISOString(),
+        };
+      }
+    } else if (cr.cursorAgentId) {
       if (fullForVerify && isProgramVerifyPhase(cr.status)) {
         const verifyPrompt = clientVerifyFollowUpPrompt({
           title: cr.title,

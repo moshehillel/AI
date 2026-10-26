@@ -102,9 +102,9 @@ export default async function ProjectDetailPage({
                   </h2>
                   <p className="muted mt-1 text-[12px] leading-relaxed">
                     Linked repository: {project.repository.githubOwner}/
-                    {project.repository.githubRepo}. Describe what to improve;
-                    Koda plans against that existing code (not an empty planning
-                    repo).
+                    {project.repository.githubRepo}. The assigned user can ask
+                    for any change, including a restructure. Each time they say
+                    push, that change is its own commit.
                   </p>
                   <div className="mt-3">
                     <NewProgramForm
@@ -115,16 +115,10 @@ export default async function ProjectDetailPage({
                 </>
               ) : null}
               {canStart && !project.repository ? (
-                <>
-                  <h2 className="text-[13px] font-medium">New program</h2>
-                  <p className="muted mt-1 text-[12px] leading-relaxed">
-                    Start a back-and-forth with Koda. Attach docs in chat when
-                    ready, then submit to a developer for building.
-                  </p>
-                  <div className="mt-3">
-                    <NewProgramForm projectId={project.id} />
-                  </div>
-                </>
+                <p className="muted text-[12px] leading-relaxed">
+                  This project has no GitHub repo. Connect one in Admin before
+                  anyone can chat or push.
+                </p>
               ) : null}
               {!canStart ? (
                 <p className="muted text-[12px] leading-relaxed">

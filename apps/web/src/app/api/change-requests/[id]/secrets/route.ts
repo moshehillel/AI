@@ -12,7 +12,8 @@ import {
   encryptSecret,
   isCredentialSecretKey,
   normalizeSecretKeyName,
-  secretSavedMessage,
+  readClientAwsDeployTarget,
+  secretStoredForProjectMessage,
   synthesizePlanMarkdown,
   type PlanningMeta,
 } from "@automation-studio/domain";
@@ -72,7 +73,26 @@ export async function POST(
     });
     await requirePermission(ctx, "change_request:chat");
     const cr = await requireChangeRequestAccess(ctx, id);
+    if (ctx.role !== "ADMIN") {
+      const assigned = await db.projectMember.findUnique({
+        where: {
+          projectId_userId: { projectId: cr.projectId, userId: ctx.user.id },
+        },
+        select: { id: true },
+      });
+      if (!assigned) {
+        throw new AuthError(
+          "Only an admin or a user assigned to this project can save secrets.",
+          403,
+        );
+      }
+    }
     const body = postBodySchema.parse(await request.json());
+    const repository = await db.repository.findUnique({
+      where: { projectId: cr.projectId },
+      select: { id: true, railwayProjectId: true },
+    });
+    const awsTargetConnected = Boolean(readClientAwsDeployTarget(repository));
     const savedKeys: string[] = [];
     for (const item of body.secrets) {
       const keyName = normalizeSecretKeyName(item.keyName);
@@ -109,7 +129,7 @@ export async function POST(
           changeRequestId: cr.id,
           authorId: ctx.user.id,
           role: "SYSTEM",
-          content: secretSavedMessage(keyName),
+          content: secretStoredForProjectMessage(keyName, awsTargetConnected),
           metadata: { secretSaved: true, secretRefs: [keyName] },
         },
       });
@@ -143,7 +163,11 @@ export async function POST(
     await db.plan.create({ data: { changeRequestId: cr.id, content: planMarkdown } });
     return NextResponse.json({
       ok: true,
-      saved: savedKeys.map((keyName) => ({ keyName, message: secretSavedMessage(keyName) })),
+      awsTargetConnected,
+      saved: savedKeys.map((keyName) => ({
+        keyName,
+        message: secretStoredForProjectMessage(keyName, awsTargetConnected),
+      })),
     });
   } catch (error) {
     if (error instanceof AuthError) {

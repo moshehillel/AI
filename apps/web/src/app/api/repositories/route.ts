@@ -7,6 +7,7 @@ import {
   AuthError,
 } from "@automation-studio/auth";
 import { db } from "@automation-studio/db";
+import { canCreateProject } from "@automation-studio/domain";
 import { verifyBranchProtection } from "@automation-studio/github";
 
 const bodySchema = z.object({
@@ -21,8 +22,8 @@ const bodySchema = z.object({
 export async function POST(request: Request) {
   try {
     const ctx = await getRequestAuth();
-    if (ctx.role !== "ADMIN" && ctx.role !== "DEVELOPER") {
-      throw new AuthError("Forbidden", 403);
+    if (!canCreateProject(ctx.role)) {
+      throw new AuthError("Only an admin can connect a repository", 403);
     }
 
     const body = bodySchema.parse(await request.json());

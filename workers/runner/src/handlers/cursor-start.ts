@@ -10,6 +10,7 @@ import {
   planningAgentInstructions,
   type PlanningMeta,
 } from "@automation-studio/domain";
+import { finishConnectedRepoAgentTurn } from "../lib/connected-repo-push.js";
 import { transitionChangeRequest } from "../lib/transition.js";
 import { loadPlanningAttachmentsForAgent } from "../lib/planning-attachment.js";
 import { clearLiveProgress } from "../lib/planning-persist.js";
@@ -118,6 +119,7 @@ export async function handleCursorStart(data: CursorStartJobData) {
       companyId: data.companyId,
       prompt: data.prompt,
       mode: "plan",
+      pushRequest: data.pushRequest,
       attachmentRef: data.attachmentRef,
       attachmentRefs: data.attachmentRefs,
     });
@@ -125,14 +127,18 @@ export async function handleCursorStart(data: CursorStartJobData) {
   }
 
   const statusBeforeAgent = cr.status;
+  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+  const connectedRepo = Boolean(priorMeta.iterateExisting && repo);
   const toStatus =
     data.mode === "plan"
       ? "PLANNING"
-      : isProgramVerifyPhase(cr.status)
+      : connectedRepo
         ? null
-        : cr.kind === "PROGRAM"
-          ? "BUILDING"
-          : "IMPLEMENTING";
+        : isProgramVerifyPhase(cr.status)
+          ? null
+          : cr.kind === "PROGRAM"
+            ? "BUILDING"
+            : "IMPLEMENTING";
   if (toStatus) {
     await transitionChangeRequest({
       changeRequestId: cr.id,
@@ -149,7 +155,6 @@ export async function handleCursorStart(data: CursorStartJobData) {
   let images: Array<{ data: string; mimeType: string }> | undefined;
 
   const attachmentRefs = normalizeAttachmentRefs(data);
-  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
   if (attachmentRefs.length) {
     if (data.mode === "plan") {
       await writeLiveProgress(cr.id, priorMeta, "Reading your attached files…");
@@ -385,21 +390,30 @@ export async function handleCursorStart(data: CursorStartJobData) {
         { cursorRunId: result.runId, model: result.model },
       );
     }
-    await transitionChangeRequest({
-      changeRequestId: cr.id,
-      companyId: data.companyId,
-      toStatus:
-        cr.kind === "PROGRAM"
-          ? nextStatusAfterProgramAgentTurn(statusBeforeAgent)
-          : "TESTING",
-      reason: isProgramVerifyPhase(statusBeforeAgent)
-        ? "Verify chat edit applied — preview will refresh on push"
-        : "Agent turn complete — syncing preview",
-    });
-    await enqueueJob("github.ensure-pr", {
-      changeRequestId: cr.id,
-      companyId: data.companyId,
-    });
+    if (connectedRepo) {
+      await finishConnectedRepoAgentTurn({
+        changeRequestId: cr.id,
+        companyId: data.companyId,
+        pushRequest: Boolean(data.pushRequest),
+        statusBefore: statusBeforeAgent,
+      });
+    } else {
+      await transitionChangeRequest({
+        changeRequestId: cr.id,
+        companyId: data.companyId,
+        toStatus:
+          cr.kind === "PROGRAM"
+            ? nextStatusAfterProgramAgentTurn(statusBeforeAgent)
+            : "TESTING",
+        reason: isProgramVerifyPhase(statusBeforeAgent)
+          ? "Verify chat edit applied — preview will refresh on push"
+          : "Agent turn complete — syncing preview",
+      });
+      await enqueueJob("github.ensure-pr", {
+        changeRequestId: cr.id,
+        companyId: data.companyId,
+      });
+    }
   }
 
   await enqueueJob("usage.record", {

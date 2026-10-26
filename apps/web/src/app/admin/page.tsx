@@ -5,7 +5,6 @@ import { isOpenAccess } from "@/lib/access-mode";
 import { db } from "@automation-studio/db";
 import { parseCompanySettings } from "@automation-studio/domain";
 import { ConnectRepoForm } from "./connect-repo-form";
-import { CreatePlanningProjectForm } from "./create-planning-project-form";
 import { CreateProjectFromRepoForm } from "./create-project-from-repo-form";
 import { InviteNote } from "./invite-note";
 import { ProjectMembersForm } from "./project-members-form";
@@ -196,14 +195,11 @@ export default async function AdminPage({
           <h2 className="text-xl">Projects & repositories</h2>
           <p className="muted mt-2 text-sm">
             {ctx.role === "ADMIN"
-              ? "Open a project and its chat, then assign a person. They work inside that project. They cannot create a project or start a program."
-              : "Only an admin can open a project or assign a user."}
+              ? "Connect a GitHub repo you already created, then assign a user. They chat in that repo and say push when a change should be its own commit. They cannot create a project, connect a repo, or start a program."
+              : "Only an admin can connect a repo or assign a user."}
           </p>
           {ctx.role === "ADMIN" ? (
             <div className="mt-4 space-y-4">
-              <div className="rounded-xl border border-[var(--line)] p-4">
-                <CreatePlanningProjectForm />
-              </div>
               <div className="rounded-xl border border-[var(--line)] p-4">
                 <CreateProjectFromRepoForm
                   defaultInstallationId={installations[0]?.installationId}
@@ -233,7 +229,7 @@ export default async function AdminPage({
                     <VerifyProtectionButton projectId={project.id} />
                   ) : null}
                 </div>
-                {!project.repository ? (
+                {!project.repository && ctx.role === "ADMIN" ? (
                   <div className="mt-3">
                     <ConnectRepoForm
                       projectId={project.id}

@@ -80,6 +80,7 @@ export async function GET(
             liveDraft?: string | null;
             inFlightTurnAt?: string | null;
             queuedFollowUp?: { prompt?: string } | null;
+            queuedTurns?: Array<{ prompt?: string }> | null;
             workerHeartbeatAt?: string | null;
           };
 
@@ -102,7 +103,9 @@ export async function GET(
             liveProgress: meta.liveProgress ?? null,
             liveDraft: meta.liveDraft ?? null,
             inFlightTurnAt: meta.inFlightTurnAt ?? null,
-            serverQueued: Boolean(meta.queuedFollowUp?.prompt),
+            serverQueued:
+              Boolean(meta.queuedFollowUp?.prompt) ||
+              Boolean(meta.queuedTurns?.length),
             workerHeartbeatAt: meta.workerHeartbeatAt ?? null,
             queueWaiting: queueStats.waiting,
             queuePosition: queueStats.programQueuePosition ?? null,
@@ -140,7 +143,9 @@ export async function GET(
               liveProgress: meta.liveProgress ?? null,
               liveDraft: meta.liveDraft ?? null,
               inFlightTurnAt: meta.inFlightTurnAt ?? null,
-              serverQueued: Boolean(meta.queuedFollowUp?.prompt),
+              serverQueued:
+              Boolean(meta.queuedFollowUp?.prompt) ||
+              Boolean(meta.queuedTurns?.length),
               workerHeartbeatAt: meta.workerHeartbeatAt ?? null,
               queue: {
                 waiting: queueStats.waiting,

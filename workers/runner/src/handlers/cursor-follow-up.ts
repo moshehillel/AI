@@ -8,6 +8,7 @@ import {
   planningAgentInstructions,
   type PlanningMeta,
 } from "@automation-studio/domain";
+import { finishConnectedRepoAgentTurn } from "../lib/connected-repo-push.js";
 import { transitionChangeRequest } from "../lib/transition.js";
 import { loadPlanningAttachmentsForAgent } from "../lib/planning-attachment.js";
 import { clearLiveProgress } from "../lib/planning-persist.js";
@@ -72,8 +73,20 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
     throw new Error("No AI build session associated with this program");
   }
 
-  const forcePlan = cr.kind === "PROGRAM" && isProgramPlanOnly(cr.status);
-  const mode = forcePlan ? "plan" : (data.mode ?? "agent");
+  const connectedRepo = Boolean(
+    ((cr.planningMeta ?? {}) as PlanningMeta).iterateExisting &&
+      cr.project.repository,
+  );
+  const forcePlan =
+    cr.kind === "PROGRAM" &&
+    isProgramPlanOnly(cr.status) &&
+    !connectedRepo &&
+    !data.pushRequest;
+  const mode = data.pushRequest || connectedRepo
+    ? "agent"
+    : forcePlan
+      ? "plan"
+      : (data.mode ?? "agent");
   const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
 
   let prompt =
@@ -142,6 +155,7 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
   const statusBeforeAgent = cr.status;
   if (
     mode === "agent" &&
+    !connectedRepo &&
     cr.status !== "BUILDING" &&
     cr.status !== "IMPLEMENTING" &&
     cr.status !== "TESTING" &&
@@ -331,23 +345,32 @@ export async function handleCursorFollowUp(data: CursorFollowUpJobData) {
           { cursorRunId: result.runId, model: result.model },
         );
       }
-      const afterStatus =
-        cr.kind === "PROGRAM"
-          ? nextStatusAfterProgramAgentTurn(statusBeforeAgent)
-          : ("TESTING" as const);
-      await transitionChangeRequest({
-        changeRequestId: cr.id,
-        companyId: data.companyId,
-        toStatus: afterStatus,
-        reason:
-          isProgramVerifyPhase(statusBeforeAgent)
-            ? "Verify chat edit applied — preview will refresh on push"
-            : "Agent turn complete — syncing preview",
-      });
-      await enqueueJob("github.ensure-pr", {
-        changeRequestId: cr.id,
-        companyId: data.companyId,
-      });
+      if (connectedRepo) {
+        await finishConnectedRepoAgentTurn({
+          changeRequestId: cr.id,
+          companyId: data.companyId,
+          pushRequest: Boolean(data.pushRequest),
+          statusBefore: statusBeforeAgent,
+        });
+      } else {
+        const afterStatus =
+          cr.kind === "PROGRAM"
+            ? nextStatusAfterProgramAgentTurn(statusBeforeAgent)
+            : ("TESTING" as const);
+        await transitionChangeRequest({
+          changeRequestId: cr.id,
+          companyId: data.companyId,
+          toStatus: afterStatus,
+          reason:
+            isProgramVerifyPhase(statusBeforeAgent)
+              ? "Verify chat edit applied — preview will refresh on push"
+              : "Agent turn complete — syncing preview",
+        });
+        await enqueueJob("github.ensure-pr", {
+          changeRequestId: cr.id,
+          companyId: data.companyId,
+        });
+      }
     } else {
       const freshMeta = ((
         await db.changeRequest.findUnique({

@@ -28,6 +28,8 @@ export type EnsureBranchJobData = {
   prompt?: string;
   attachmentRef?: string;
   attachmentRefs?: string[];
+  /** User explicitly asked to commit and push once the branch exists. */
+  pushRequest?: boolean;
 };
 
 export type CursorStartJobData = {
@@ -45,6 +47,8 @@ export type CursorStartJobData = {
   userMessageId?: string;
   /** Original user paste exceeded agent prompt limit. */
   wasLongMessage?: boolean;
+  /** User explicitly asked to commit and push this turn on its own. */
+  pushRequest?: boolean;
 };
 
 export type CursorFollowUpJobData = {
@@ -62,6 +66,8 @@ export type CursorFollowUpJobData = {
   userMessageId?: string;
   /** Original user paste exceeded agent prompt limit. */
   wasLongMessage?: boolean;
+  /** User explicitly asked to commit and push this turn on its own. */
+  pushRequest?: boolean;
 };
 
 export type CursorCancelJobData = {

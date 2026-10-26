@@ -38,6 +38,21 @@ export function secretSavedMessage(keyName: string): string {
   return `Secret saved: ${normalizeSecretKeyName(keyName)}`;
 }
 
+/**
+ * Form ack. Values stay encrypted in Koda. This build has no per-client AWS
+ * deploy target, so the message must not claim they were sent to a host.
+ */
+export function secretStoredForProjectMessage(
+  keyName: string,
+  awsTargetConnected: boolean,
+): string {
+  const name = normalizeSecretKeyName(keyName);
+  if (awsTargetConnected) {
+    return `Saved ${name} for this project. It will be applied from Koda's encrypted store when that project's AWS deploy runs. It was not committed to git.`;
+  }
+  return `Saved ${name} for this project. The value is encrypted in Koda and was not committed to git. The AWS deploy target for this project is not connected yet, so it was not sent to a host.`;
+}
+
 const PATTERNS: Array<{
   name: string;
   label: string;

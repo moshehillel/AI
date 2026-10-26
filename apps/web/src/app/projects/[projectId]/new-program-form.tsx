@@ -73,7 +73,7 @@ export function NewProgramForm({
       {!hero ? (
         <p className="text-sm muted">
           {iterate
-            ? "Koda plans against the linked repository — describe the change you want."
+            ? "Describe the change. Say push when it should be its own commit."
             : "Koda will ask clarifying questions one at a time — not a long form."}
         </p>
       ) : null}

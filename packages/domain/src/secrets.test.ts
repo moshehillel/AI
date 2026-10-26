@@ -5,6 +5,7 @@ import {
   normalizeSecretKeyName,
   isCredentialSecretKey,
   secretSavedMessage,
+  secretStoredForProjectMessage,
 } from "./secrets.js";
 
 describe("labeled secrets", () => {
@@ -20,6 +21,10 @@ describe("labeled secrets", () => {
 
   it("ack message never includes a value", () => {
     assert.equal(secretSavedMessage("hha password"), "Secret saved: HHA_PASSWORD");
+    const stored = secretStoredForProjectMessage("hha password", false);
+    assert.match(stored, /HHA_PASSWORD/);
+    assert.match(stored, /not connected yet/);
+    assert.doesNotMatch(stored, /super-secret-value/);
   });
 
   it("still redacts openai-style keys in chat", () => {

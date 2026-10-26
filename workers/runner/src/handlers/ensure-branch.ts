@@ -2,6 +2,7 @@ import { db, ensurePlanningRepository } from "@automation-studio/db";
 import {
   buildBranchName,
   buildPlanningStartPrompt,
+  connectedRepoStartPrompt,
   getDefaultGithubRepoConfig,
   isProgramVerifyPhase,
   slugify,
@@ -75,32 +76,41 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     cr.kind === "PROGRAM" ||
     cr.classification === "COMPLEX" ||
     cr.classification === "HIGH_RISK";
+  const planningMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+  const connectedRepo = Boolean(planningMeta.iterateExisting && repo);
 
-  // Explicit job mode wins (verify-phase agent). Otherwise programs stay in plan
-  // until the developer starts a build (BUILDING), except verify which needs agent.
+  // A connected client repo stays in agent mode so the user can restructure it.
+  // Other programs stay in plan until a developer starts a build.
   const mode: "plan" | "agent" =
     data.mode ??
-    (isProgramVerifyPhase(cr.status)
+    (connectedRepo
       ? "agent"
-      : cr.kind === "PROGRAM" && cr.status !== "BUILDING"
-        ? "plan"
-        : needsPlan
+      : isProgramVerifyPhase(cr.status)
+        ? "agent"
+        : cr.kind === "PROGRAM" && cr.status !== "BUILDING"
           ? "plan"
-          : "agent");
+          : needsPlan
+            ? "plan"
+            : "agent");
 
   const prompt =
     data.prompt?.trim() ||
-    (mode === "plan"
-      ? buildPlanningStartPrompt({
+    (connectedRepo && repo
+      ? connectedRepoStartPrompt({
           title: cr.title,
-          description: cr.description,
-          messages: cr.messages.map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
-          planningMeta: (cr.planningMeta ?? {}) as PlanningMeta,
+          repoLabel: `${repo.githubOwner}/${repo.githubRepo}`,
         })
-      : `${cr.title}\n\n${cr.description}`.trim());
+      : mode === "plan"
+        ? buildPlanningStartPrompt({
+            title: cr.title,
+            description: cr.description,
+            messages: cr.messages.map((m) => ({
+              role: m.role,
+              content: m.content,
+            })),
+            planningMeta,
+          })
+        : `${cr.title}\n\n${cr.description}`.trim());
 
   await enqueueJob(
     "cursor.start-agent",
@@ -109,6 +119,7 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
       companyId: data.companyId,
       mode,
       prompt,
+      pushRequest: data.pushRequest,
       attachmentRef:
         data.attachmentRef ??
         ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRef ??

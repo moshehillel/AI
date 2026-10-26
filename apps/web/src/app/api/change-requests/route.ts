@@ -7,14 +7,13 @@ import {
   writeAuditEvent,
   AuthError,
 } from "@automation-studio/auth";
-import { db, ensurePlanningRepository } from "@automation-studio/db";
+import { db } from "@automation-studio/db";
 import {
   canStartProgram,
   shortTitleFromPrompt,
   slugify,
   buildOpeningPlanningMessage,
   buildOpeningIterateMessage,
-  getDefaultGithubRepoConfig,
   isLiveCursorConfigured,
   type PlanningMeta,
 } from "@automation-studio/domain";
@@ -92,20 +91,17 @@ export async function POST(request: Request) {
     const linkedRepoLabel = project?.repository
       ? `${project.repository.githubOwner}/${project.repository.githubRepo}`
       : null;
-    const iterateExisting =
-      isProgram &&
-      (body.intent === "iterate" ||
-        (body.intent !== "plan" && Boolean(project?.repository)));
-
-    if (body.intent === "iterate" && !project?.repository) {
+    if (isProgram && !project?.repository) {
       return NextResponse.json(
         {
           error:
-            "No repository linked — connect the GitHub repo in Admin first, then start chat.",
+            "Connect an existing GitHub repo before starting a program. A project with no repo is not a workspace.",
         },
         { status: 400 },
       );
     }
+
+    const iterateExisting = isProgram && Boolean(project?.repository);
 
     const planningMeta: PlanningMeta = isProgram
       ? {
@@ -206,17 +202,7 @@ export async function POST(request: Request) {
         { jobId: `classify-${changeRequest.id}` },
       );
     } else {
-      // Prefer the project's linked GitHub repo (existing code). Only fall back
-      // to a shared planning repo for greenfield programs without a connection.
-      let repository = project?.repository ?? null;
-      if (!repository && !iterateExisting) {
-        repository = await ensurePlanningRepository(db, {
-          projectId: body.projectId,
-          companyId: ctx.company.id,
-          defaults: getDefaultGithubRepoConfig(),
-        });
-      }
-
+      const repository = project?.repository ?? null;
       if (repository && isLiveCursorConfigured()) {
         await enqueueJob(
           "github.ensure-branch",

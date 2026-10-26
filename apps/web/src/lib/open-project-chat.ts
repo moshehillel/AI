@@ -1,9 +1,8 @@
 import { writeAuditEvent } from "@automation-studio/auth";
-import { db, ensurePlanningRepository } from "@automation-studio/db";
+import { db } from "@automation-studio/db";
 import {
   buildOpeningIterateMessage,
   buildOpeningPlanningMessage,
-  getDefaultGithubRepoConfig,
   isLiveCursorConfigured,
   slugify,
   type PlanningMeta,
@@ -94,16 +93,9 @@ export async function openInitialProjectChat(input: {
     metadata: { number, title, kind: "PROGRAM", withProject: true },
   });
 
-  let repository = input.repository
+  const repository = input.repository
     ? await db.repository.findUnique({ where: { projectId: input.projectId } })
     : null;
-  if (!repository && !iterateExisting) {
-    repository = await ensurePlanningRepository(db, {
-      projectId: input.projectId,
-      companyId: input.companyId,
-      defaults: getDefaultGithubRepoConfig(),
-    });
-  }
   if (repository && isLiveCursorConfigured()) {
     await enqueueJob(
       "github.ensure-branch",

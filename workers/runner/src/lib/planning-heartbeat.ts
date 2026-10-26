@@ -93,10 +93,54 @@ export async function flushQueuedFollowUp(changeRequestId: string, companyId: st
     select: { planningMeta: true },
   });
   const meta = (cr?.planningMeta ?? {}) as PlanningMeta;
+  const turns = meta.queuedTurns ?? [];
+  const { enqueueJob } = await import("@automation-studio/jobs");
+  if (turns.length > 0) {
+    const [next, ...rest] = turns;
+    if (!next?.prompt?.trim()) {
+      await db.changeRequest.update({
+        where: { id: changeRequestId },
+        data: {
+          planningMeta: { ...meta, queuedTurns: rest.length ? rest : null },
+          updatedAt: new Date(),
+        },
+      });
+      return false;
+    }
+    await db.changeRequest.update({
+      where: { id: changeRequestId },
+      data: {
+        planningMeta: {
+          ...meta,
+          queuedTurns: rest.length ? rest : null,
+        },
+        updatedAt: new Date(),
+      },
+    });
+    await enqueueJob(
+      "cursor.follow-up",
+      {
+        changeRequestId,
+        companyId,
+        prompt: next.prompt,
+        mode: next.mode ?? "agent",
+        pushRequest: next.pushRequest,
+        attachmentRefs: next.attachmentRefs,
+        userMessageId: next.userMessageId,
+      },
+      {
+        jobId: `cursor-follow-up-${changeRequestId}-${next.userMessageId ?? "next"}`,
+      },
+    );
+    console.info(
+      `[planning-heartbeat] flushed queued turn cr=${changeRequestId} push=${Boolean(next.pushRequest)}`,
+    );
+    return true;
+  }
+
   const queued = meta.queuedFollowUp;
   if (!queued?.prompt?.trim()) return false;
 
-  const { enqueueJob } = await import("@automation-studio/jobs");
   await db.changeRequest.update({
     where: { id: changeRequestId },
     data: {
@@ -114,7 +158,8 @@ export async function flushQueuedFollowUp(changeRequestId: string, companyId: st
       changeRequestId,
       companyId,
       prompt: queued.prompt,
-      mode: "plan",
+      mode: queued.mode ?? "plan",
+      pushRequest: queued.pushRequest,
       attachmentRefs: queued.attachmentRefs,
       userMessageId: queued.userMessageId,
     },

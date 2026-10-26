@@ -15,6 +15,7 @@ export function CreateProjectFromRepoForm({
   const [installationId, setInstallationId] = useState(
     defaultInstallationId ?? "",
   );
+  const [railwayProjectId, setRailwayProjectId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -33,6 +34,7 @@ export function CreateProjectFromRepoForm({
               githubOwner: owner.trim(),
               githubRepo: repo.trim(),
               installationId: installationId.trim() || null,
+              railwayProjectId: railwayProjectId.trim() || null,
             }),
           });
           const data = (await res.json().catch(() => ({}))) as {
@@ -46,6 +48,7 @@ export function CreateProjectFromRepoForm({
           setName("");
           setOwner("");
           setRepo("");
+          setRailwayProjectId("");
           router.refresh();
         });
       }}
@@ -53,9 +56,10 @@ export function CreateProjectFromRepoForm({
       <div>
         <h3 className="text-base font-medium">Add existing GitHub repo</h3>
         <p className="muted mt-1 text-xs">
-          Creates a Koda project linked to a repository the GitHub App can
-          already access. Then assign a Clerk user below so they can open it and
-          chat against that codebase.
+          Link a GitHub repo you already created (the GitHub App must already
+          have access). Then assign a user. They chat in that repo. Optional
+          Railway project id is only for the existing preview sync, not for
+          client secrets.
         </p>
       </div>
       <div className="grid gap-2 md:grid-cols-2">
@@ -87,6 +91,13 @@ export function CreateProjectFromRepoForm({
           value={repo}
           onChange={(e) => setRepo(e.target.value)}
           required
+          disabled={pending}
+        />
+        <input
+          className="field"
+          placeholder="Railway project id (optional preview)"
+          value={railwayProjectId}
+          onChange={(e) => setRailwayProjectId(e.target.value)}
           disabled={pending}
         />
       </div>

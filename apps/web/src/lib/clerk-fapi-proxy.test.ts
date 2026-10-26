@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildClerkProxyHeaders, rewriteClerkSetCookie } from "./clerk-fapi-proxy.ts";
+import {
+  buildClerkProxyHeaders,
+  CLERK_PROXY_TIMEOUT_MS,
+  clerkNpmCacheKey,
+  rewriteClerkSetCookie,
+  shouldStripProxyResponseHeader,
+} from "./clerk-fapi-proxy.ts";
 import {
   CLERK_FAPI_ORIGIN,
   clerkFrontendApiTarget,
@@ -99,6 +105,40 @@ describe("clerk frontend api proxy", () => {
     assert.equal(rewritten.includes("Domain"), false);
     assert.equal(rewritten.includes("value"), true);
     assert.equal(rewritten.includes("Secure"), true);
+  });
+
+  it("keeps content-length so the proxy can flush before the body ends", () => {
+    const plain = new Headers({
+      "content-type": "application/javascript",
+      "content-length": "120",
+      "cache-control": "public, max-age=31536000, immutable",
+    });
+    assert.equal(shouldStripProxyResponseHeader("content-length", plain), false);
+    assert.equal(shouldStripProxyResponseHeader("content-encoding", plain), true);
+
+    const encoded = new Headers({
+      "content-encoding": "gzip",
+      "content-length": "80",
+    });
+    assert.equal(shouldStripProxyResponseHeader("content-length", encoded), true);
+    assert.equal(shouldStripProxyResponseHeader("set-cookie", plain), true);
+  });
+
+  it("gives the Clerk upstream a short timeout and caches only script assets", () => {
+    assert.equal(CLERK_PROXY_TIMEOUT_MS <= 8_000, true);
+    assert.equal(CLERK_PROXY_TIMEOUT_MS >= 1_000, true);
+    assert.equal(
+      clerkNpmCacheKey(
+        new URL(
+          "https://clerk.advancedautomations.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js",
+        ),
+      ),
+      "/npm/@clerk/clerk-js@5/dist/clerk.browser.js",
+    );
+    assert.equal(
+      clerkNpmCacheKey(new URL("https://clerk.advancedautomations.net/v1/client")),
+      null,
+    );
   });
 
   it("recognizes both proxy paths and builds the script url on Koda", () => {

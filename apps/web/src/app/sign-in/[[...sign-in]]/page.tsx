@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { SignIn } from "@clerk/nextjs";
 import { isDemoAuthEnabled } from "@/lib/access-mode";
+import { SignInGate } from "@/components/sign-in-pending";
 
 const clerkEnabled = Boolean(
   process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim(),
@@ -28,13 +28,7 @@ export default function SignInPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-6 p-6">
       {/* Public sign-up disabled; accounts via Clerk admin/invites only. */}
-      <SignIn
-        appearance={{
-          elements: {
-            footerAction: { display: "none" },
-          },
-        }}
-      />
+      <SignInGate />
     </main>
   );
 }

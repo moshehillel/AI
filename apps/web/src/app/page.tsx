@@ -108,10 +108,27 @@ function Hero({
   );
 }
 
-async function ClerkHome() {
+async function readHomeSession() {
   const { auth } = await import("@clerk/nextjs/server");
-  const session = await auth();
-  if (session.userId) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      auth().catch(() => null),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), 2_000);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function ClerkHome() {
+  // A slow Clerk handshake must not hold the document. After two seconds,
+  // render the public page; a signed-in session still redirects when it
+  // answers in time.
+  const session = await readHomeSession();
+  if (session?.userId) {
     redirect(session.orgId ? "/projects" : "/select-org");
   }
 

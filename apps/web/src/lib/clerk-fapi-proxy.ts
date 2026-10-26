@@ -21,7 +21,22 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-const RESPONSE_HEADERS_TO_STRIP = new Set(["content-encoding", "content-length"]);
+const RESPONSE_HEADERS_TO_STRIP = new Set(["content-encoding"]);
+
+/** Stop a stalled Clerk upstream from holding the browser and this process. */
+export const CLERK_PROXY_TIMEOUT_MS = 5_000;
+
+const NPM_CACHE_MAX_BYTES = 1_500_000;
+const NPM_CACHE_TOTAL_MAX_BYTES = 8_000_000;
+
+type NpmCacheEntry = {
+  body: Uint8Array;
+  status: number;
+  headers: Array<[string, string]>;
+};
+
+const npmCache = new Map<string, NpmCacheEntry>();
+let npmCacheBytes = 0;
 
 function dynamicHopByHop(headers: Headers): Set<string> {
   const connection = headers.get("connection");
@@ -91,17 +106,110 @@ function proxyUrlForRequest(request: Request, requestUrl: URL): string {
   return `${requestUrl.protocol}//${requestUrl.host}${CLERK_PROXY_PATH}`;
 }
 
+export function shouldStripProxyResponseHeader(
+  name: string,
+  responseHeaders: Headers,
+): boolean {
+  const lower = name.toLowerCase();
+  if (lower === "set-cookie") return true;
+  if (HOP_BY_HOP_HEADERS.has(lower) || RESPONSE_HEADERS_TO_STRIP.has(lower)) {
+    return true;
+  }
+  if (lower === "content-length") {
+    const encoding = responseHeaders.get("content-encoding")?.toLowerCase();
+    return Boolean(encoding && encoding !== "identity");
+  }
+  return false;
+}
+
+export function clerkNpmCacheKey(target: URL): string | null {
+  if (!target.pathname.startsWith("/npm/")) return null;
+  return `${target.pathname}${target.search}`;
+}
+
+function rememberNpm(
+  key: string,
+  status: number,
+  sourceHeaders: Headers,
+  body: Uint8Array,
+): void {
+  if (status !== 200) return;
+  if (body.byteLength === 0 || body.byteLength > NPM_CACHE_MAX_BYTES) return;
+  if (sourceHeaders.has("set-cookie")) return;
+
+  const existing = npmCache.get(key);
+  if (existing) {
+    npmCacheBytes -= existing.body.byteLength;
+    npmCache.delete(key);
+  }
+  while (
+    npmCacheBytes + body.byteLength > NPM_CACHE_TOTAL_MAX_BYTES &&
+    npmCache.size > 0
+  ) {
+    const oldest = npmCache.keys().next().value;
+    if (!oldest) break;
+    const entry = npmCache.get(oldest);
+    npmCache.delete(oldest);
+    npmCacheBytes -= entry?.body.byteLength ?? 0;
+  }
+
+  const headers = [...sourceHeaders.entries()].filter(
+    ([name]) => name.toLowerCase() !== "set-cookie",
+  );
+  if (!headers.some(([name]) => name.toLowerCase() === "content-length")) {
+    headers.push(["content-length", String(body.byteLength)]);
+  }
+  npmCache.set(key, { body, status, headers });
+  npmCacheBytes += body.byteLength;
+}
+
+function cachedNpmResponse(key: string): Response | null {
+  const entry = npmCache.get(key);
+  if (!entry) return null;
+  npmCache.delete(key);
+  npmCache.set(key, entry);
+  return new Response(entry.body, {
+    status: entry.status,
+    headers: entry.headers,
+  });
+}
+
+async function collectNpm(
+  key: string,
+  status: number,
+  headers: Headers,
+  body: ReadableStream<Uint8Array>,
+): Promise<void> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > NPM_CACHE_MAX_BYTES) return;
+      chunks.push(value);
+    }
+  } catch {
+    return;
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  rememberNpm(key, status, headers, merged);
+}
+
 function copyResponseHeaders(source: Headers, proxyUrl: string, target: URL): Headers {
   const headers = new Headers();
   const dynamic = dynamicHopByHop(source);
   source.forEach((value, key) => {
     const lower = key.toLowerCase();
-    if (lower === "set-cookie") return;
-    if (
-      HOP_BY_HOP_HEADERS.has(lower) ||
-      RESPONSE_HEADERS_TO_STRIP.has(lower) ||
-      dynamic.has(lower)
-    ) {
+    if (shouldStripProxyResponseHeader(key, source) || dynamic.has(lower)) {
       return;
     }
     headers.set(key, value);
@@ -175,6 +283,13 @@ export async function proxyClerkFrontendApi(request: Request): Promise<Response>
     return proxyError("Request path is outside the Clerk proxy.", 404);
   }
 
+  const cacheKey =
+    request.method === "GET" ? clerkNpmCacheKey(target) : null;
+  if (cacheKey) {
+    const cached = cachedNpmResponse(cacheKey);
+    if (cached) return cached;
+  }
+
   const proxyUrl = proxyUrlForRequest(request, requestUrl);
   const headers = buildClerkProxyHeaders(request.headers, {
     proxyUrl,
@@ -183,10 +298,15 @@ export async function proxyClerkFrontendApi(request: Request): Promise<Response>
 
   const hasBody =
     request.method !== "GET" && request.method !== "HEAD" && request.body !== null;
+  const timeoutSignal = AbortSignal.timeout(CLERK_PROXY_TIMEOUT_MS);
+  const signal = request.signal
+    ? AbortSignal.any([request.signal, timeoutSignal])
+    : timeoutSignal;
   const init: RequestInit & { duplex?: "half" } = {
     method: request.method,
     headers,
     redirect: "manual",
+    signal,
   };
   if (hasBody) {
     init.body = request.body;
@@ -196,12 +316,26 @@ export async function proxyClerkFrontendApi(request: Request): Promise<Response>
   try {
     const response = await fetch(target, init);
     const responseHeaders = copyResponseHeaders(response.headers, proxyUrl, target);
+    if (cacheKey && response.ok && response.body) {
+      const [clientBody, cacheBody] = response.body.tee();
+      void collectNpm(cacheKey, response.status, responseHeaders, cacheBody).catch(
+        () => undefined,
+      );
+      return new Response(clientBody, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: responseHeaders,
+      });
+    }
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
       headers: responseHeaders,
     });
   } catch {
+    if (timeoutSignal.aborted) {
+      return proxyError("The sign-in service took too long to respond.", 504);
+    }
     return proxyError("The sign-in service could not be reached.", 502);
   }
 }

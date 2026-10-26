@@ -63,5 +63,8 @@ describe("blocked clerk organization polls", () => {
     assert.equal(isFilterBlockResponse("text/html", true), true);
     assert.equal(isFilterBlockResponse("application/json", true), false);
     assert.equal(isFilterBlockResponse("application/json", false), false);
+    assert.equal(isFilterBlockResponse("application/json", false, 504), true);
+    assert.equal(isFilterBlockResponse("application/json", false, 502), true);
+    assert.equal(isFilterBlockResponse("application/json", false, 422), false);
   });
 });

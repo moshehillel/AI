@@ -95,9 +95,35 @@ async function enforceStaffPasswordGate(request: NextRequest) {
   return NextResponse.redirect(login);
 }
 
+const CLERK_MIDDLEWARE_TIMEOUT_MS = 3_000;
+
+function clerkMiddlewareTimedOut(request: NextRequest): NextResponse {
+  const { pathname } = request.nextUrl;
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json(
+      { error: "The sign-in service took too long to respond." },
+      { status: 504 },
+    );
+  }
+  if (
+    pathname === "/" ||
+    pathname.startsWith("/sign-in") ||
+    pathname.startsWith("/sign-up") ||
+    pathname.startsWith("/staff")
+  ) {
+    return NextResponse.next();
+  }
+  const signIn = request.nextUrl.clone();
+  const returnPath = `${request.nextUrl.pathname}${request.nextUrl.search}`;
+  signIn.pathname = "/sign-in";
+  signIn.search = `?redirect_url=${encodeURIComponent(returnPath)}`;
+  return NextResponse.redirect(signIn);
+}
+
 export default async function middleware(request: NextRequest) {
-  // Forward /__clerk before Clerk's handshake so the route can add
-  // Clerk-Proxy-Url, Clerk-Secret-Key, and X-Forwarded-For.
+  // The proxy route forwards /__clerk itself. Middleware must not wrap that
+  // response: it buffers the body, so Clerk's scripts delay the first byte
+  // and a stalled upstream holds the HTML request.
   if (isClerkProxyPath(request.nextUrl.pathname)) {
     return NextResponse.next();
   }
@@ -110,13 +136,25 @@ export default async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
   const handler = await getClerkHandler();
-  return handler(request);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      handler(request),
+      new Promise<NextResponse>((resolve) => {
+        timer = setTimeout(
+          () => resolve(clerkMiddlewareTimedOut(request)),
+          CLERK_MIDDLEWARE_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    "/(api|trpc)(.*)",
-    "/__clerk/(.*)",
+    "/((?!_next|__clerk|api/clerk-fapi|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    "/(api(?!/clerk-fapi)|trpc)(.*)",
   ],
 };

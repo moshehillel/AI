@@ -45,11 +45,13 @@ export function requestUrl(input: RequestInfo | URL): string | null {
   return null;
 }
 
-/** HTML or a non-JSON error is the filter block page, not a Clerk payload. */
+/** HTML, a proxy timeout, or a non-JSON error is a failed poll, not a Clerk payload. */
 export function isFilterBlockResponse(
   contentType: string | null,
   ok: boolean,
+  status?: number,
 ): boolean {
+  if (status === 502 || status === 504) return true;
   const type = (contentType ?? "").toLowerCase();
   if (type.includes("text/html")) return true;
   if (!ok && !type.includes("json")) return true;
@@ -105,6 +107,7 @@ export function installBlockedRequestGuard(): void {
         isFilterBlockResponse(
           response.headers.get("content-type"),
           response.ok,
+          response.status,
         )
       ) {
         rememberFailure(path);

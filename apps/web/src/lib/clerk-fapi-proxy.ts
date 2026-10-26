@@ -46,7 +46,7 @@ function clientIp(headers: Headers): string | undefined {
 
 export function buildClerkProxyHeaders(
   requestHeaders: Headers,
-  options: { secretKey: string; proxyUrl: string; target: URL },
+  options: { proxyUrl: string; target: URL },
 ): Headers {
   const headers = new Headers();
   const dynamic = dynamicHopByHop(requestHeaders);
@@ -58,8 +58,9 @@ export function buildClerkProxyHeaders(
     headers.set(key, value);
   });
 
-  headers.set("Clerk-Proxy-Url", options.proxyUrl);
-  headers.set("Clerk-Secret-Key", options.secretKey);
+  // Do not add Clerk-Proxy-Url or Clerk-Secret-Key. This production instance
+  // returns host_invalid for that pair, and Clerk will not accept a proxy_url
+  // on koda.advancedautomations.net. Forward the browser request instead.
   headers.set("Host", options.target.host);
   headers.set("Accept-Encoding", "identity");
 
@@ -108,11 +109,14 @@ function copyResponseHeaders(source: Headers, proxyUrl: string, target: URL): He
 
   const cookies =
     typeof source.getSetCookie === "function" ? source.getSetCookie() : [];
-  if (cookies.length === 0) {
-    const combined = source.get("set-cookie");
-    if (combined) headers.append("set-cookie", combined);
-  } else {
-    for (const cookie of cookies) headers.append("set-cookie", cookie);
+  const rawCookies =
+    cookies.length > 0
+      ? cookies
+      : source.get("set-cookie")
+        ? [source.get("set-cookie") as string]
+        : [];
+  for (const cookie of rawCookies) {
+    headers.append("set-cookie", rewriteClerkSetCookie(cookie));
   }
 
   const location = source.get("location");
@@ -147,12 +151,24 @@ function proxyError(message: string, status: number): Response {
   );
 }
 
-export async function proxyClerkFrontendApi(request: Request): Promise<Response> {
-  const secretKey = process.env.CLERK_SECRET_KEY?.trim();
-  if (!secretKey) {
-    return proxyError("Clerk proxy is not configured.", 500);
-  }
+export function rewriteClerkSetCookie(cookie: string): string {
+  const parts = cookie.split(";").flatMap((part) => {
+    const trimmed = part.trim();
+    const name = trimmed.split("=")[0]?.toLowerCase();
+    if (name !== "domain") return [part];
+    const domain = trimmed.slice(trimmed.indexOf("=") + 1).trim().toLowerCase().replace(/^\./, "");
+    if (
+      domain === "clerk.advancedautomations.net" ||
+      domain === "advancedautomations.net"
+    ) {
+      return [];
+    }
+    return [part];
+  });
+  return parts.join(";").replace(/;\s*;/g, ";").trim();
+}
 
+export async function proxyClerkFrontendApi(request: Request): Promise<Response> {
   const requestUrl = new URL(request.url);
   const target = clerkFrontendApiTarget(requestUrl);
   if (!target || target.origin !== CLERK_FAPI_ORIGIN) {
@@ -161,7 +177,6 @@ export async function proxyClerkFrontendApi(request: Request): Promise<Response>
 
   const proxyUrl = proxyUrlForRequest(request, requestUrl);
   const headers = buildClerkProxyHeaders(request.headers, {
-    secretKey,
     proxyUrl,
     target,
   });

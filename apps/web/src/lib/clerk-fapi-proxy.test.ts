@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildClerkProxyHeaders } from "./clerk-fapi-proxy.ts";
+import { buildClerkProxyHeaders, rewriteClerkSetCookie } from "./clerk-fapi-proxy.ts";
 import {
   CLERK_FAPI_ORIGIN,
   clerkFrontendApiTarget,
@@ -55,15 +55,16 @@ describe("clerk frontend api proxy", () => {
     );
     assert.ok(target);
     const headers = buildClerkProxyHeaders(incoming, {
-      secretKey: "server-side-secret",
       proxyUrl: "https://koda.advancedautomations.net/__clerk",
       target,
     });
 
-    assert.equal(headers.get("Clerk-Proxy-Url"), "https://koda.advancedautomations.net/__clerk");
-    assert.equal(headers.get("Clerk-Secret-Key"), "server-side-secret");
+    assert.equal(headers.get("Clerk-Proxy-Url"), null);
+    assert.equal(headers.get("Clerk-Secret-Key"), null);
     assert.equal(headers.get("X-Forwarded-For"), "203.0.113.8");
-    assert.equal(headers.get("Host"), "frontend-api.clerk.dev");
+    assert.equal(headers.get("X-Forwarded-Host"), "koda.advancedautomations.net");
+    assert.equal(headers.get("X-Forwarded-Proto"), "https");
+    assert.equal(headers.get("Host"), "clerk.advancedautomations.net");
     assert.equal(headers.get("Origin"), "https://koda.advancedautomations.net");
     assert.equal(headers.get("cookie"), "session=present");
     assert.equal(headers.get("connection"), null);
@@ -89,6 +90,15 @@ describe("clerk frontend api proxy", () => {
       if (previous === undefined) delete process.env.NEXT_PUBLIC_CLERK_PROXY_URL;
       else process.env.NEXT_PUBLIC_CLERK_PROXY_URL = previous;
     }
+  });
+
+  it("stores Clerk cookies on Koda instead of the filtered host", () => {
+    const rewritten = rewriteClerkSetCookie(
+      "__client=value; Domain=clerk.advancedautomations.net; Path=/; Secure; HttpOnly",
+    );
+    assert.equal(rewritten.includes("Domain"), false);
+    assert.equal(rewritten.includes("value"), true);
+    assert.equal(rewritten.includes("Secure"), true);
   });
 
   it("recognizes both proxy paths and builds the script url on Koda", () => {

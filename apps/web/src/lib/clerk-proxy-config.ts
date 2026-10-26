@@ -7,15 +7,13 @@ export const CLERK_PROXY_PATH = "/__clerk";
 /** Internal route the /__clerk rewrite targets. The browser does not call this. */
 export const CLERK_PROXY_INTERNAL_PATH = "/api/clerk-fapi";
 /**
- * Clerk's proxy protocol attributes the instance from Clerk-Secret-Key on this
- * host. Forwarding the same calls to the custom domain
- * clerk.advancedautomations.net returns host_invalid.
+ * Production Frontend API for this instance. Clerk's proxy_url setting rejects
+ * koda.advancedautomations.net ("Cannot be on a different domain"), and sending
+ * Clerk-Proxy-Url with Clerk-Secret-Key makes this host return host_invalid.
+ * The browser still stays on Koda; the server fetches this origin directly.
  */
-export const CLERK_FAPI_ORIGIN = "https://frontend-api.clerk.dev";
-export const CLERK_FAPI_HOSTS = new Set([
-  "frontend-api.clerk.dev",
-  "clerk.advancedautomations.net",
-]);
+export const CLERK_FAPI_ORIGIN = "https://clerk.advancedautomations.net";
+export const CLERK_FAPI_HOSTS = new Set(["clerk.advancedautomations.net"]);
 export const KODA_PRODUCTION_HOST = "koda.advancedautomations.net";
 
 const PROXY_PREFIXES = [CLERK_PROXY_PATH, CLERK_PROXY_INTERNAL_PATH];

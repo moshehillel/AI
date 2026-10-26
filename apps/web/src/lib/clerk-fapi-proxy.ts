@@ -168,7 +168,10 @@ function cachedNpmResponse(key: string): Response | null {
   if (!entry) return null;
   npmCache.delete(key);
   npmCache.set(key, entry);
-  return new Response(entry.body, {
+  const bytes = entry.body;
+  const body = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(body).set(bytes);
+  return new Response(body, {
     status: entry.status,
     headers: entry.headers,
   });

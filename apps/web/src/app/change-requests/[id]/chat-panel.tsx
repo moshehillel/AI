@@ -10,6 +10,14 @@ import {
   validatePlanningFileSize,
 } from "@automation-studio/domain/planning-files";
 import { MarkdownBody } from "@/components/markdown-body";
+import { openBoundedEventSource, LIVE_UPDATES_STOPPED_MESSAGE } from "@/lib/bounded-event-source";
+import {
+  BLOCKED_SIGN_IN_REQUEST_MESSAGE,
+  subscribeBlockedSignInRequest,
+} from "@/lib/blocked-request-guard";
+
+const SEND_BLOCKED_MESSAGE =
+  "Koda couldn't send that message because the browser blocked the request. Thinking has stopped.";
 
 type Message = {
   id: string;
@@ -299,6 +307,7 @@ export function ChatPanel({
   const [progressSteps, setProgressSteps] = useState<string[]>([]);
   const [attachMenuOpen, setAttachMenuOpen] = useState(false);
   const [replyTimedOut, setReplyTimedOut] = useState(false);
+  const [signInBlocked, setSignInBlocked] = useState(false);
   const [serverQueued, setServerQueued] = useState(false);
   const [highDemandMessage, setHighDemandMessage] = useState<string | null>(
     null,
@@ -310,6 +319,7 @@ export function ChatPanel({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const flushQueuedRef = useRef(false);
   const gaveUpRef = useRef(false);
+  const signInBlockedRef = useRef(false);
   const turnStartedRef = useRef<number | null>(null);
   const heartbeatAtRef = useRef<number | null>(null);
   const agentRunStatusRef = useRef<string | null>(null);
@@ -340,15 +350,14 @@ export function ChatPanel({
       working ||
       connectingSession ||
       isAwaitingAssistantReply(messages));
-  const showThinking =
-    (waitingOnReply || liveLink === "reconnecting") && !replyTimedOut;
+  const showThinking = waitingOnReply && !replyTimedOut && !signInBlocked;
   const inputBusy = pending || preparingFile || savingSecrets || interrupting;
   const canSend =
     !inputBusy &&
     !chatLocked &&
     (Boolean(prompt.trim()) || stagedFiles.length > 0);
   const label = thinkingLabel({
-    liveLink: waitingOnReply ? "connected" : liveLink,
+    liveLink,
     connectingSession,
     working,
     status,
@@ -371,20 +380,52 @@ export function ChatPanel({
         : "Queued message")
     : null;
 
+  const waitingRef = useRef(waitingOnReply);
+  waitingRef.current = waitingOnReply;
+
+  useEffect(() => {
+    return subscribeBlockedSignInRequest(() => {
+      gaveUpRef.current = true;
+      signInBlockedRef.current = true;
+      setSignInBlocked(true);
+      setTurnError(BLOCKED_SIGN_IN_REQUEST_MESSAGE);
+      setReplyTimedOut(true);
+      setAwaitingReply(false);
+      setLiveProgress(null);
+      setLiveDraft(null);
+      setProgressSteps([]);
+      setLiveLink("connected");
+    });
+  }, []);
+
+  useEffect(() => {
+    if (isAwaitingAssistantReply(initialMessages)) {
+      turnStartedRef.current = Date.now();
+    }
+    // Start the silence clock for a reply already in flight when the page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [changeRequestId]);
+
   useEffect(() => {
     setLiveLink("connecting");
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-    const source = new EventSource(
+    return openBoundedEventSource(
       `/api/change-requests/${changeRequestId}/events`,
-    );
-    source.onopen = () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-      setLiveLink("connected");
-    };
-    source.onmessage = (event) => {
+      {
+        onOpen: () => setLiveLink("connected"),
+        onGiveUp: (message) => {
+          setLiveLink("connected");
+          if (!waitingRef.current || gaveUpRef.current) return;
+          gaveUpRef.current = true;
+          setTurnError(message || LIVE_UPDATES_STOPPED_MESSAGE);
+          setReplyTimedOut(true);
+          setAwaitingReply(false);
+          setLiveProgress(null);
+          setLiveDraft(null);
+          setProgressSteps([]);
+        },
+        onMessage: (raw) => {
       try {
-        const data = JSON.parse(event.data) as {
+        const data = JSON.parse(raw) as {
           type: string;
           status?: string;
           messages?: Message[];
@@ -411,14 +452,10 @@ export function ChatPanel({
           return;
         }
         if (data.type === "connected" || data.type === "heartbeat") {
-          if (reconnectTimer) clearTimeout(reconnectTimer);
-          reconnectTimer = null;
           setLiveLink("connected");
           return;
         }
         if (data.type === "snapshot") {
-          if (reconnectTimer) clearTimeout(reconnectTimer);
-          reconnectTimer = null;
           setLiveLink("connected");
           if (data.status) setStatus(data.status);
           if (typeof data.liveProgress !== "undefined") {
@@ -462,10 +499,16 @@ export function ChatPanel({
               run?.status === "FAILED" && Boolean(run.error?.trim());
             const runEmpty = run?.status === "SUCCEEDED";
             const runCancelled = run?.status === "CANCELLED";
-            if (!stillAwaiting) {
+            if (signInBlockedRef.current) {
+              setAwaitingReply(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else if (!stillAwaiting) {
               gaveUpRef.current = false;
               turnStartedRef.current = null;
               setTurnError(null);
+              setSignInBlocked(false);
               setTurnInterrupted(false);
               setReplyTimedOut(false);
               setAwaitingReply(false);
@@ -512,19 +555,9 @@ export function ChatPanel({
       } catch {
         // ignore malformed events
       }
-    };
-    source.onerror = () => {
-      if (reconnectTimer) return;
-      reconnectTimer = setTimeout(() => {
-        if (source.readyState !== EventSource.OPEN) {
-          setLiveLink("reconnecting");
-        }
-      }, 1200);
-    };
-    return () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      source.close();
-    };
+        },
+      },
+    );
   }, [changeRequestId]);
 
   useEffect(() => {
@@ -722,27 +755,38 @@ export function ChatPanel({
     turnStartedRef.current = Date.now();
     heartbeatAtRef.current = null;
     agentRunStatusRef.current = null;
+    signInBlockedRef.current = false;
+    setSignInBlocked(false);
     setTurnError(null);
     setReplyTimedOut(false);
     setAwaitingReply(true);
     setLastSentContent(content);
     startTransition(async () => {
-      const response = await fetch(
-        `/api/change-requests/${changeRequestId}/messages`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: content || undefined,
-            ...(attachmentsPayload?.length === 1 && !files.length
-              ? { attachment: attachmentsPayload[0] }
-              : {}),
-            ...(attachmentsPayload?.length
-              ? { attachments: attachmentsPayload }
-              : {}),
-          }),
-        },
-      );
+      let response: Response;
+      try {
+        response = await fetch(
+          `/api/change-requests/${changeRequestId}/messages`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: content || undefined,
+              ...(attachmentsPayload?.length === 1 && !files.length
+                ? { attachment: attachmentsPayload[0] }
+                : {}),
+              ...(attachmentsPayload?.length
+                ? { attachments: attachmentsPayload }
+                : {}),
+            }),
+          },
+        );
+      } catch {
+        gaveUpRef.current = true;
+        setAwaitingReply(false);
+        setTurnError(SEND_BLOCKED_MESSAGE);
+        setReplyTimedOut(true);
+        return;
+      }
       if (response.ok) {
         const json = (await response.json()) as {
           message: Message;
@@ -763,7 +807,9 @@ export function ChatPanel({
           !(json.assistantMessage && json.assistantMessage.role === "ASSISTANT"),
         );
       } else {
+        gaveUpRef.current = true;
         setAwaitingReply(false);
+        setReplyTimedOut(true);
         const data = (await response.json().catch(() => ({}))) as {
           error?: string | { formErrors?: string[] };
         };
@@ -773,7 +819,9 @@ export function ChatPanel({
             : Array.isArray(data.error?.formErrors)
               ? data.error.formErrors[0]
               : null;
-        setAttachError(err || "Could not send — try again.");
+        const failure = err || "Could not send — try again.";
+        setTurnError(failure);
+        setAttachError(failure);
       }
     });
   }
@@ -1151,7 +1199,7 @@ export function ChatPanel({
                 ? "That response was stopped. Send your message again when you are ready."
                 : (turnError ?? CURSOR_NO_RESPONSE_MESSAGE)}
             </p>
-            {!turnInterrupted ? (
+            {!turnInterrupted && !signInBlocked ? (
               <button
                 type="button"
                 className="btn btn-primary mt-3"

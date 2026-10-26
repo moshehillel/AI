@@ -1418,6 +1418,18 @@ select {
   color: var(--ide-danger);
 }
 
+.blocked-request-banner {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  padding: 10px 16px;
+  background: color-mix(in oklab, var(--ide-danger) 12%, white);
+  border-bottom: 1px solid color-mix(in oklab, var(--ide-danger) 35%, var(--ide-line));
+  color: var(--ide-danger);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 /* Plan submit diagram modal — customer-facing, Koda branded */
 .plan-submit-overlay {
   position: fixed;

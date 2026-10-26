@@ -1,7 +1,11 @@
 "use client";
 
 import { ClerkProvider } from "@clerk/nextjs";
+import { BlockedRequestNotice } from "@/components/blocked-request-notice";
 import { hideCreateOrganizationAppearance } from "@/lib/clerk-org-ui";
+import { installBlockedRequestGuard } from "@/lib/blocked-request-guard";
+
+installBlockedRequestGuard();
 
 type ProvidersProps = {
   children: React.ReactNode;
@@ -24,6 +28,7 @@ export function Providers({ children, publishableKey }: ProvidersProps) {
       publishableKey={key}
       appearance={hideCreateOrganizationAppearance}
     >
+      <BlockedRequestNotice />
       {children}
     </ClerkProvider>
   );

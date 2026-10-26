@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { MarkdownBody } from "@/components/markdown-body";
+import { openBoundedEventSource } from "@/lib/bounded-event-source";
 
 type Plan = {
   id: string;
@@ -23,36 +24,40 @@ export function LivePlanPanel({
   const [tab, setTab] = useState<"plan" | "context">("plan");
   const [liveProgress, setLiveProgress] = useState<string | null>(null);
   const [justUpdated, setJustUpdated] = useState(false);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const lastPlanId = useRef(initialPlan?.id ?? null);
 
   useEffect(() => {
-    const source = new EventSource(
+    return openBoundedEventSource(
       `/api/change-requests/${changeRequestId}/events`,
-    );
-    source.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as {
-          type: string;
-          plan?: Plan | null;
-          liveProgress?: string | null;
-        };
-        if (data.type !== "snapshot") return;
-        if (typeof data.liveProgress !== "undefined") {
-          setLiveProgress(data.liveProgress);
-        }
-        if (data.plan) {
-          setPlan(data.plan);
-          if (data.plan.id !== lastPlanId.current) {
-            lastPlanId.current = data.plan.id;
-            setJustUpdated(true);
-            window.setTimeout(() => setJustUpdated(false), 1600);
+      {
+        onOpen: () => setLiveError(null),
+        onGiveUp: (message) => setLiveError(message),
+        onMessage: (raw) => {
+          try {
+            const data = JSON.parse(raw) as {
+              type: string;
+              plan?: Plan | null;
+              liveProgress?: string | null;
+            };
+            if (data.type !== "snapshot") return;
+            if (typeof data.liveProgress !== "undefined") {
+              setLiveProgress(data.liveProgress);
+            }
+            if (data.plan) {
+              setPlan(data.plan);
+              if (data.plan.id !== lastPlanId.current) {
+                lastPlanId.current = data.plan.id;
+                setJustUpdated(true);
+                window.setTimeout(() => setJustUpdated(false), 1600);
+              }
+            }
+          } catch {
+            // ignore malformed events
           }
-        }
-      } catch {
-        // ignore malformed events
-      }
-    };
-    return () => source.close();
+        },
+      },
+    );
   }, [changeRequestId]);
 
   return (
@@ -86,13 +91,15 @@ export function LivePlanPanel({
           <div className="flex items-center justify-between gap-2">
             <span>Living plan</span>
             <span className="muted text-[11px]">
-              {liveProgress
-                ? liveProgress
-                : plan
-                  ? justUpdated
-                    ? "Just updated"
-                    : "Updates as you chat"
-                  : "Drafting…"}
+              {liveError
+                ? "Updates stopped"
+                : liveProgress
+                  ? liveProgress
+                  : plan
+                    ? justUpdated
+                      ? "Just updated"
+                      : "Updates as you chat"
+                    : "Drafting…"}
             </span>
           </div>
         </div>
@@ -102,6 +109,11 @@ export function LivePlanPanel({
         className={`ide-right-section flex-1 min-h-0 ${justUpdated ? "plan-panel-flash" : ""}`}
       >
         <p className="ide-right-label">{tab === "plan" ? "Plan" : "Context"}</p>
+        {liveError ? (
+          <p className="text-[12px] leading-relaxed" role="alert" style={{ color: "var(--ide-danger)" }}>
+            {liveError}
+          </p>
+        ) : null}
         {tab === "plan" ? (
           plan ? (
             <div className="plan-doc-scroll">

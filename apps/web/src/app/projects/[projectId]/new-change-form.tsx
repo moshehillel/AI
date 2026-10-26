@@ -19,7 +19,7 @@ export function NewChangeForm({ projectId }: { projectId: string }) {
           const response = await fetch("/api/change-requests", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ projectId, prompt }),
+            body: JSON.stringify({ projectId, kind: "CHANGE", prompt }),
           });
           const json = (await response.json()) as {
             id?: string;
@@ -34,15 +34,15 @@ export function NewChangeForm({ projectId }: { projectId: string }) {
       }}
     >
       <textarea
-        className="field min-h-36"
+        className="field min-h-28"
         placeholder="Example: Add a way to retry invoices that failed because the customer's account was temporarily unavailable."
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         required
       />
       {error ? <p className="text-sm text-[var(--danger)]">{error}</p> : null}
-      <button className="btn btn-primary" disabled={pending || !prompt.trim()}>
-        {pending ? "Starting…" : "Start change request"}
+      <button className="btn btn-ghost" disabled={pending || !prompt.trim()}>
+        {pending ? "Starting…" : "Request a small change"}
       </button>
     </form>
   );

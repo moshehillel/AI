@@ -1,6 +1,9 @@
-# Automation Studio
+# Koda — Advanced Automations AI Builder
 
-Multi-tenant portal where non-developers request software changes in plain English. AI prepares isolated feature-branch changes and temporary previews; developers review and merge to production.
+Multi-tenant portal where teams plan and ship business automations with AI.
+Koda plans programs with clients, developers build and approve production deploys.
+
+> **Koda is AI and can make mistakes.**
 
 ## Safety model
 
@@ -20,7 +23,10 @@ packages/jobs            Queue types + enqueue helpers
 packages/cursor-adapter  Thin @cursor/sdk wrapper (mockable)
 packages/github          GitHub App helpers (mockable)
 packages/railway         Railway GraphQL preview helpers (mockable)
-docs/                    Architecture and security notes
+docs/                    Architecture, security, and deploy notes
+infra/aws/               Koda platform AWS Terraform (separate from Whiteglove)
+.railway/                Railway Infrastructure as Code (railway.ts)
+scripts/                 railway-bootstrap.sh and helpers
 ```
 
 ## Prerequisites
@@ -33,24 +39,61 @@ docs/                    Architecture and security notes
 
 ```bash
 cp .env.example .env
-# Defaults work for local mock mode. Set ALLOW_DEMO_AUTH=1
+# Defaults: OPEN_ACCESS=0 (Clerk auth). For no-login local dev set OPEN_ACCESS=1 in .env.
 
 docker compose up -d
 pnpm install
-pnpm db:generate
+# postinstall builds workspace packages (dist/) and generates Prisma client
 pnpm db:push
 pnpm db:seed
 
 # Terminal 1
-ALLOW_DEMO_AUTH=1 CURSOR_MOCK=1 GITHUB_MOCK=1 RAILWAY_MOCK=1 pnpm dev:web
+pnpm dev:web
 
 # Terminal 2
-ALLOW_DEMO_AUTH=1 CURSOR_MOCK=1 GITHUB_MOCK=1 RAILWAY_MOCK=1 pnpm dev:worker
+pnpm dev:worker
 ```
 
 Open http://localhost:3000
 
-Without Clerk keys, the app uses seeded demo users/company when `ALLOW_DEMO_AUTH=1`.
+**Windows (PowerShell):**
+```powershell
+Copy-Item .env.example .env
+docker compose up -d
+pnpm install
+pnpm db:push
+pnpm db:seed
+pnpm dev:web   # other terminal: pnpm dev:worker
+```
+
+If the worker fails with `Cannot find module .../packages/*/dist/index.js`, rebuild packages:
+
+```bash
+pnpm packages:build
+# or: pnpm -r --filter=./packages/* build
+```
+
+Open http://localhost:3000
+
+Without Clerk keys, set `OPEN_ACCESS=1` in `.env` to open as the seeded employee on `demo-co` — no login.
+
+## Deploy
+
+| Target | Guide | Status |
+| --- | --- | --- |
+| **AWS** (`koda-platform`) | [infra/aws/README.md](infra/aws/README.md) | **Production** |
+| Railway (legacy) | [docs/deploy.md](docs/deploy.md#railway-legacy--decommission-after-aws-cutover) | Decommission after cutover — [aws-migration.md](docs/aws-migration.md) |
+
+### AWS
+
+```bash
+cd infra/aws/terraform && terraform apply
+# Enable GitHub Actions AWS_DEPLOY_ENABLED=true, then Actions → Deploy Koda to AWS
+```
+
+### Railway (legacy)
+
+Host web + worker with managed Postgres and Redis. **Do not bootstrap new Railway production** — migrate to AWS per [docs/aws-migration.md](docs/aws-migration.md).
 
 ## External credentials (production wiring)
 
@@ -59,10 +102,10 @@ Without Clerk keys, the app uses seeded demo users/company when `ALLOW_DEMO_AUTH
 | Clerk | Auth + Organizations (`org:employee`, `org:developer`, `org:admin`) |
 | Cursor | `CURSOR_API_KEY` service account for Cloud Agents |
 | GitHub App | Branch/PR/check access per customer install |
-| Railway | PR Environments inheriting from staging/preview-base |
+| Railway | Legacy hosting + PR preview helpers (decommission after AWS cutover) |
 | Postgres / Redis | App data + job queue |
 
-See [docs/architecture.md](docs/architecture.md) and [docs/security.md](docs/security.md).
+See [docs/architecture.md](docs/architecture.md), [docs/security.md](docs/security.md), and [docs/deploy.md](docs/deploy.md).
 
 ## Scripts
 

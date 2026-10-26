@@ -65,14 +65,14 @@ async function main() {
 
   const projects = [
     {
-      name: "Invoice Automation",
-      slug: "invoice-automation",
-      description: "Process and retry failed invoices",
-    },
-    {
       name: "Customer Onboarding",
       slug: "customer-onboarding",
       description: "New customer provisioning workflows",
+    },
+    {
+      name: "Invoice Automation",
+      slug: "invoice-automation",
+      description: "Process and retry failed invoices",
     },
     {
       name: "Reporting System",
@@ -94,15 +94,40 @@ async function main() {
     });
 
     for (const userId of [admin.id, employee.id, developer.id]) {
+      // The shared onboarding project is not a self-serve workspace.
+      if (p.slug === "customer-onboarding" && userId !== admin.id) continue;
       await prisma.projectMember.upsert({
         where: { projectId_userId: { projectId: project.id, userId } },
         update: {},
         create: { projectId: project.id, userId },
       });
     }
+
+    const owner = process.env.DEFAULT_GITHUB_OWNER?.trim();
+    const repo = process.env.DEFAULT_GITHUB_REPO?.trim();
+    if (owner && repo) {
+      await prisma.repository.upsert({
+        where: { projectId: project.id },
+        update: {
+          githubOwner: owner,
+          githubRepo: repo,
+          installationId:
+            process.env.DEFAULT_GITHUB_INSTALLATION_ID?.trim() || undefined,
+          defaultBranch: process.env.DEFAULT_GITHUB_BRANCH?.trim() || "main",
+        },
+        create: {
+          projectId: project.id,
+          githubOwner: owner,
+          githubRepo: repo,
+          installationId:
+            process.env.DEFAULT_GITHUB_INSTALLATION_ID?.trim() || null,
+          defaultBranch: process.env.DEFAULT_GITHUB_BRANCH?.trim() || "main",
+        },
+      });
+    }
   }
 
-  console.log("Seeded demo company, users, and projects");
+  console.log("Seeded demo company, users, and projects for Koda");
 }
 
 main()

@@ -9,16 +9,23 @@
     "dev": "pnpm --parallel --filter @automation-studio/web --filter @automation-studio/worker dev",
     "dev:web": "pnpm --filter @automation-studio/web dev",
     "dev:worker": "pnpm --filter @automation-studio/worker dev",
-    "build": "pnpm -r --filter=./packages/* build && pnpm --filter @automation-studio/web build && pnpm --filter @automation-studio/worker build",
+    "build": "pnpm packages:build && pnpm --filter @automation-studio/web build && pnpm --filter @automation-studio/worker build",
+    "packages:build": "pnpm -r --filter=./packages/* build",
+    "postinstall": "pnpm db:generate && pnpm packages:build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "db:generate": "pnpm --filter @automation-studio/db generate",
     "db:migrate": "pnpm --filter @automation-studio/db migrate:dev",
+    "db:migrate:deploy": "pnpm --filter @automation-studio/db migrate:deploy",
     "db:push": "pnpm --filter @automation-studio/db push",
-    "db:seed": "pnpm --filter @automation-studio/db seed"
+    "db:seed": "pnpm --filter @automation-studio/db seed",
+    "db:seed:deploy": "pnpm --filter @automation-studio/db seed:deploy",
+    "railway:bootstrap": "bash scripts/railway-bootstrap.sh",
+    "register:github-app": "node scripts/register-github-app.mjs"
   },
   "devDependencies": {
+    "@automation-studio/github": "workspace:*",
     "@types/node": "^22.13.10",
     "typescript": "^5.8.2"
   }

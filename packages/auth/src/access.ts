@@ -82,6 +82,8 @@ export async function requireProjectAccess(
     throw new AuthError("Project not found", 404);
   }
 
+  // Admins can open any workspace. Developers are staff and can help on
+  // existing work, but they still cannot create projects or assign users.
   if (ctx.role === "ADMIN" || ctx.role === "DEVELOPER") {
     return;
   }
@@ -92,7 +94,10 @@ export async function requireProjectAccess(
     },
   });
   if (!membership) {
-    throw new AuthError("Not authorized for this project", 403);
+    throw new AuthError(
+      "You don't have access to this workspace. Ask an admin to open a project for you.",
+      403,
+    );
   }
 }
 

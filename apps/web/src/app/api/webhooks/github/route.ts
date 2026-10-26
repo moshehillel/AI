@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { db } from "@automation-studio/db";
+import { parseBuildSetup } from "@automation-studio/domain";
 import { enqueueJob } from "@automation-studio/jobs";
 
 function verifySignature(payload: string, signature: string | null) {
@@ -14,6 +15,15 @@ function verifySignature(payload: string, signature: string | null) {
     return false;
   }
 }
+
+const PREVIEW_STATUSES = [
+  "BUILDING",
+  "TESTING",
+  "PREVIEW_READY",
+  "CLIENT_VERIFY",
+  "CHANGES_REQUESTED",
+  "DEVELOPER_REVIEW",
+] as const;
 
 export async function POST(request: Request) {
   const payload = await request.text();
@@ -36,7 +46,7 @@ export async function POST(request: Request) {
           project: {
             include: {
               changeRequests: {
-                where: { status: { in: ["TESTING", "PREVIEW_READY", "DEVELOPER_REVIEW"] } },
+                where: { status: { in: [...PREVIEW_STATUSES] } },
                 orderBy: { updatedAt: "desc" },
                 take: 5,
               },
@@ -46,6 +56,43 @@ export async function POST(request: Request) {
       });
       for (const cr of repository?.project.changeRequests ?? []) {
         await enqueueJob("ci.sync-checks", {
+          changeRequestId: cr.id,
+          companyId: cr.companyId,
+        });
+      }
+    }
+  }
+
+  if (event === "push") {
+    const ref = String(body.ref ?? "");
+    const branch = ref.startsWith("refs/heads/")
+      ? ref.slice("refs/heads/".length)
+      : "";
+    const repo = body.repository as
+      | { owner?: { login?: string }; name?: string }
+      | undefined;
+    if (branch && repo?.owner?.login && repo.name) {
+      const changeRequests = await db.changeRequest.findMany({
+        where: {
+          branchName: branch,
+          status: { in: [...PREVIEW_STATUSES] },
+          project: {
+            repository: {
+              githubOwner: repo.owner.login,
+              githubRepo: repo.name,
+            },
+          },
+        },
+        take: 10,
+      });
+      for (const cr of changeRequests) {
+        const setup = parseBuildSetup(cr.buildSetup);
+        if (setup.autoDeploy === false) continue;
+        await enqueueJob("github.ensure-pr", {
+          changeRequestId: cr.id,
+          companyId: cr.companyId,
+        });
+        await enqueueJob("railway.sync-preview", {
           changeRequestId: cr.id,
           companyId: cr.companyId,
         });
@@ -73,12 +120,15 @@ export async function POST(request: Request) {
         include: { changeRequest: true },
       });
       if (pull && (action === "opened" || action === "synchronize" || action === "reopened")) {
-        await enqueueJob("railway.sync-preview", {
-          changeRequestId: pull.changeRequestId,
-          companyId: pull.changeRequest.companyId,
-        });
+        const setup = parseBuildSetup(pull.changeRequest.buildSetup);
+        if (setup.autoDeploy !== false) {
+          await enqueueJob("railway.sync-preview", {
+            changeRequestId: pull.changeRequestId,
+            companyId: pull.changeRequest.companyId,
+          });
+        }
       }
-      if (pull && (action === "closed")) {
+      if (pull && action === "closed") {
         await db.previewEnvironment.updateMany({
           where: { changeRequestId: pull.changeRequestId, status: "READY" },
           data: { status: "DESTROYED", destroyedAt: new Date() },

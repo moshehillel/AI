@@ -1,13 +1,7 @@
 import { NextResponse } from "next/server";
 import { Webhook } from "svix";
-import { db, MembershipRole } from "@automation-studio/db";
-import { slugify } from "@automation-studio/domain";
-
-function mapClerkRole(role: string | undefined): MembershipRole {
-  if (role === "org:admin") return "ADMIN";
-  if (role === "org:developer") return "DEVELOPER";
-  return "EMPLOYEE";
-}
+import { db } from "@automation-studio/db";
+import { membershipRoleFromClerk, slugify } from "@automation-studio/domain";
 
 export async function POST(request: Request) {
   const secret = process.env.CLERK_WEBHOOK_SECRET;
@@ -83,12 +77,14 @@ export async function POST(request: Request) {
         (event.data.public_user_data as { user_id?: string } | undefined)?.user_id ??
           "",
       );
-      const role = mapClerkRole(String(event.data.role ?? "org:member"));
+      const role = membershipRoleFromClerk(String(event.data.role ?? "org:member"));
       if (!orgId || !userId) break;
 
       const company = await db.company.findUnique({ where: { clerkOrgId: orgId } });
+      if (!company) break;
+
       const user = await db.user.findUnique({ where: { clerkUserId: userId } });
-      if (!company || !user) break;
+      if (!user) break;
 
       await db.companyMembership.upsert({
         where: {

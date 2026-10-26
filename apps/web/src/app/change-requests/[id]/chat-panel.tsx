@@ -1,6 +1,23 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import {
+  PLANNING_FILE_ACCEPT,
+  PLANNING_MAX_FILES_PER_MESSAGE,
+  classifyPlanningFile,
+  formatPlanningFileRejection,
+  validatePlanningFileSize,
+} from "@automation-studio/domain/planning-files";
+import { MarkdownBody } from "@/components/markdown-body";
+import { openBoundedEventSource, LIVE_UPDATES_STOPPED_MESSAGE } from "@/lib/bounded-event-source";
+import {
+  BLOCKED_SIGN_IN_REQUEST_MESSAGE,
+  subscribeBlockedSignInRequest,
+} from "@/lib/blocked-request-guard";
+
+const SEND_BLOCKED_MESSAGE =
+  "Koda couldn't send that message because the browser blocked the request. Thinking has stopped.";
 
 type Message = {
   id: string;
@@ -9,111 +26,1649 @@ type Message = {
   createdAt: string;
 };
 
+type AttachMode =
+  | "api_docs_url"
+  | "docs_text"
+  | "examples"
+  | "file"
+  | "secrets"
+  | null;
+
+type SecretDraft = { keyName: string; value: string };
+
+type StagedFile = {
+  id: string;
+  fileName: string;
+  kind: string;
+  excerpt: string;
+  attachmentRef: string;
+};
+
+type QueuedSend = {
+  content: string;
+  stagedFiles: StagedFile[];
+};
+
+const WORKING_STATUSES = [
+  "ANALYZING",
+  "IMPLEMENTING",
+  "TESTING",
+  "BUILDING",
+  "DEPLOYING",
+] as const;
+
+/** Hard stop if Cursor never reports back. */
+const TURN_HARD_TIMEOUT_MS = 8 * 60 * 1000;
+/** Give up sooner when no job is running and the worker has gone quiet. */
+const TURN_SILENT_TIMEOUT_MS = 45 * 1000;
+const CURSOR_NO_RESPONSE_MESSAGE =
+  "Koda didn't respond. The agent call timed out before a reply arrived.";
+
+type AgentRunSnapshot = {
+  id: string;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  error?: string | null;
+};
+
+function isRecoverableTurnError(content: string): boolean {
+  return /couldn't finish that reply|didn't respond|finished without a reply|taking longer than expected/i.test(
+    content,
+  );
+}
+
+function cursorFailureFromRun(error: string | null | undefined): string {
+  const detail = error?.replace(/\s+/g, " ").trim().replace(/\.$/, "") ?? "";
+  if (!detail || /timed out/i.test(detail)) return CURSOR_NO_RESPONSE_MESSAGE;
+  if (/without a reply|no reply|empty reply/i.test(detail)) {
+    return "Koda didn't respond. The agent finished without a reply.";
+  }
+  return `Koda couldn't finish that reply: ${detail}.`;
+}
+
+function isAwaitingAssistantReply(messages: Message[]): boolean {
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === "USER") {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  if (lastUserIdx < 0) return false;
+  return !messages
+    .slice(lastUserIdx + 1)
+    .some((m) => m.role === "ASSISTANT");
+}
+
+function isConnectingSession(messages: Message[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!m) continue;
+    if (m.role === "ASSISTANT") return false;
+    if (m.role === "USER") return false;
+    if (
+      m.role === "SYSTEM" &&
+      /connecting|live planning session|starting/i.test(m.content)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function thinkingLabel(opts: {
+  liveLink: "connected" | "connecting" | "reconnecting";
+  connectingSession: boolean;
+  working: boolean;
+  status: string;
+}): string {
+  if (opts.liveLink === "reconnecting") return "Reconnecting live updates…";
+  if (opts.liveLink === "connecting") return "Connecting live updates…";
+  if (opts.connectingSession) return "Connecting…";
+  if (opts.working) {
+    if (opts.status === "BUILDING" || opts.status === "IMPLEMENTING") {
+      return "Working on your request…";
+    }
+    if (opts.status === "TESTING") return "Running tests…";
+    if (opts.status === "DEPLOYING") return "Preparing preview…";
+    return "Analyzing…";
+  }
+  return "Thinking…";
+}
+
+function IconPlus() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 3v10M3 8h10"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconSend() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 12.5V3.5M8 3.5L4.5 7M8 3.5L11.5 7"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconStop() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect
+        x="4"
+        y="4"
+        width="8"
+        height="8"
+        rx="1.2"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function IconChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 12 12"
+      fill="none"
+      aria-hidden="true"
+      style={{ transform: open ? "rotate(90deg)" : undefined }}
+    >
+      <path
+        d="M4.5 2.5L8 6L4.5 9.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ThoughtBlock({
+  title,
+  summary,
+  steps,
+  openDefault = false,
+  live = false,
+}: {
+  title: string;
+  summary?: string;
+  steps?: string[];
+  openDefault?: boolean;
+  live?: boolean;
+}) {
+  const [open, setOpen] = useState(openDefault || live);
+  useEffect(() => {
+    if (live) setOpen(true);
+  }, [live]);
+  return (
+    <div className={`thought-block ${live ? "is-live" : ""}`}>
+      <button
+        type="button"
+        className="thought-toggle"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+      >
+        <IconChevron open={open} />
+        <span>{title}</span>
+        {live ? (
+          <span className="thinking-dots ml-1" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <div className="thought-body">
+          {summary ? <p className="thought-summary">{summary}</p> : null}
+          {steps && steps.length > 0 ? (
+            <ul className="thought-checklist">
+              {steps.map((step, i) => (
+                <li key={`${step}-${i}`}>
+                  <span
+                    className={`thought-check ${
+                      live && i === steps.length - 1 ? "" : "is-done"
+                    }`}
+                  />
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function secondsBetween(a: string, b: string): number {
+  const ms = new Date(b).getTime() - new Date(a).getTime();
+  return Math.max(1, Math.round(ms / 1000));
+}
+
 export function ChatPanel({
   changeRequestId,
   initialMessages,
   status: initialStatus,
+  kind,
+  title,
+  connectedRepo = false,
 }: {
   changeRequestId: string;
   initialMessages: Message[];
   status: string;
+  kind: string;
+  title?: string;
+  /** Chat is on an admin-connected GitHub repo, not a blank planning project. */
+  connectedRepo?: boolean;
 }) {
+  const router = useRouter();
   const [messages, setMessages] = useState(initialMessages);
   const [status, setStatus] = useState(initialStatus);
   const [prompt, setPrompt] = useState("");
   const [pending, startTransition] = useTransition();
+  const [awaitingReply, setAwaitingReply] = useState(false);
+  const [turnInterrupted, setTurnInterrupted] = useState(false);
+  const [queued, setQueued] = useState<QueuedSend | null>(null);
+  const [interrupting, setInterrupting] = useState(false);
+  const [preparingFile, setPreparingFile] = useState(false);
+  const [stagedFiles, setStagedFiles] = useState<StagedFile[]>([]);
+  const [liveLink, setLiveLink] = useState<
+    "connected" | "connecting" | "reconnecting"
+  >("connecting");
+  const [attachMode, setAttachMode] = useState<AttachMode>(null);
+  const [attachValue, setAttachValue] = useState("");
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const [secretDrafts, setSecretDrafts] = useState<SecretDraft[]>([
+    { keyName: "", value: "" },
+  ]);
+  const [savingSecrets, setSavingSecrets] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [turnError, setTurnError] = useState<string | null>(null);
+  const [thoughtSeconds, setThoughtSeconds] = useState(0);
+  const [liveProgress, setLiveProgress] = useState<string | null>(null);
+  const [liveDraft, setLiveDraft] = useState<string | null>(null);
+  const [progressSteps, setProgressSteps] = useState<string[]>([]);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [replyTimedOut, setReplyTimedOut] = useState(false);
+  const [signInBlocked, setSignInBlocked] = useState(false);
+  const [serverQueued, setServerQueued] = useState(false);
+  const [highDemandMessage, setHighDemandMessage] = useState<string | null>(
+    null,
+  );
+  const [lastSentContent, setLastSentContent] = useState<string | null>(null);
+  const thinkingStarted = useRef<number | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const flushQueuedRef = useRef(false);
+  const gaveUpRef = useRef(false);
+  const signInBlockedRef = useRef(false);
+  const turnStartedRef = useRef<number | null>(null);
+  const heartbeatAtRef = useRef<number | null>(null);
+  const agentRunStatusRef = useRef<string | null>(null);
+  const serverQueuedRef = useRef(false);
+  const highDemandRef = useRef(false);
+  const isProgram = kind === "PROGRAM";
+  const isPlanning =
+    isProgram &&
+    (status === "PLANNING" || status === "AWAITING_PLAN_APPROVAL");
+  const isBuildLocked =
+    isProgram &&
+    (status === "AWAITING_DEV_BUILD" ||
+      status === "BUILDING" ||
+      status === "TESTING" ||
+      status === "IMPLEMENTING");
+  const isVerifyPhase =
+    isProgram &&
+    (status === "CLIENT_VERIFY" ||
+      status === "PREVIEW_READY" ||
+      status === "CHANGES_REQUESTED");
+  const chatLocked = isBuildLocked;
+  const working = (WORKING_STATUSES as readonly string[]).includes(status);
+  const connectingSession = isConnectingSession(messages);
+  const waitingOnReply =
+    status !== "FAILED" &&
+    !turnInterrupted &&
+    (awaitingReply ||
+      working ||
+      connectingSession ||
+      isAwaitingAssistantReply(messages));
+  const showThinking = waitingOnReply && !replyTimedOut && !signInBlocked;
+  const inputBusy = pending || preparingFile || savingSecrets || interrupting;
+  const canSend =
+    !inputBusy &&
+    !chatLocked &&
+    (Boolean(prompt.trim()) || stagedFiles.length > 0);
+  const label = thinkingLabel({
+    liveLink,
+    connectingSession,
+    working,
+    status,
+  });
+  const showRetry =
+    !showThinking &&
+    !chatLocked &&
+    (replyTimedOut ||
+      (messages.length > 0 &&
+        messages[messages.length - 1]?.role === "ASSISTANT" &&
+        isRecoverableTurnError(messages[messages.length - 1]!.content)));
+  const liveThoughtTitle = liveProgress
+    ? liveProgress.replace(/\s*\(\d+s\)$/, "")
+    : `Thought ${thoughtSeconds || 1}s`;
+  const liveThoughtSummary = liveProgress || label;
+  const queuedPreview = queued
+    ? queued.content.trim() ||
+      (queued.stagedFiles.length
+        ? `${queued.stagedFiles.length} file(s)`
+        : "Queued message")
+    : null;
+
+  const waitingRef = useRef(waitingOnReply);
+  waitingRef.current = waitingOnReply;
 
   useEffect(() => {
-    const source = new EventSource(
+    return subscribeBlockedSignInRequest(() => {
+      gaveUpRef.current = true;
+      signInBlockedRef.current = true;
+      setSignInBlocked(true);
+      setTurnError(BLOCKED_SIGN_IN_REQUEST_MESSAGE);
+      setReplyTimedOut(true);
+      setAwaitingReply(false);
+      setLiveProgress(null);
+      setLiveDraft(null);
+      setProgressSteps([]);
+      setLiveLink("connected");
+    });
+  }, []);
+
+  useEffect(() => {
+    if (isAwaitingAssistantReply(initialMessages)) {
+      turnStartedRef.current = Date.now();
+    }
+    // Start the silence clock for a reply already in flight when the page opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [changeRequestId]);
+
+  useEffect(() => {
+    setLiveLink("connecting");
+    return openBoundedEventSource(
       `/api/change-requests/${changeRequestId}/events`,
-    );
-    source.onmessage = (event) => {
+      {
+        onOpen: () => setLiveLink("connected"),
+        onGiveUp: (message) => {
+          setLiveLink("connected");
+          if (!waitingRef.current || gaveUpRef.current) return;
+          gaveUpRef.current = true;
+          setTurnError(message || LIVE_UPDATES_STOPPED_MESSAGE);
+          setReplyTimedOut(true);
+          setAwaitingReply(false);
+          setLiveProgress(null);
+          setLiveDraft(null);
+          setProgressSteps([]);
+        },
+        onMessage: (raw) => {
       try {
-        const data = JSON.parse(event.data) as {
+        const data = JSON.parse(raw) as {
           type: string;
           status?: string;
           messages?: Message[];
+          liveProgress?: string | null;
+          liveDraft?: string | null;
+          inFlightTurnAt?: string | null;
+          serverQueued?: boolean;
+          highDemandMessage?: string | null;
+          workerHeartbeatAt?: string | null;
+          message?: string;
+          plan?: { content?: string } | null;
+          latestAgentRun?: AgentRunSnapshot | null;
         };
+        if (data.type === "error") {
+          if (data.message && !gaveUpRef.current) {
+            gaveUpRef.current = true;
+            setTurnError(cursorFailureFromRun(data.message));
+            setReplyTimedOut(true);
+            setAwaitingReply(false);
+            setLiveProgress(null);
+            setLiveDraft(null);
+            setProgressSteps([]);
+          }
+          return;
+        }
+        if (data.type === "connected" || data.type === "heartbeat") {
+          setLiveLink("connected");
+          return;
+        }
         if (data.type === "snapshot") {
+          setLiveLink("connected");
           if (data.status) setStatus(data.status);
-          if (data.messages) setMessages(data.messages);
+          if (typeof data.liveProgress !== "undefined") {
+            setLiveProgress(data.liveProgress);
+            if (data.liveProgress) {
+              setProgressSteps((prev) => {
+                if (prev[prev.length - 1] === data.liveProgress) return prev;
+                return [...prev.slice(-5), data.liveProgress!];
+              });
+            } else {
+              setProgressSteps([]);
+            }
+          }
+          if (typeof data.liveDraft !== "undefined") {
+            setLiveDraft(data.liveDraft);
+          }
+          if (typeof data.serverQueued === "boolean") {
+            serverQueuedRef.current = data.serverQueued;
+            setServerQueued(data.serverQueued);
+          }
+          if (typeof data.highDemandMessage !== "undefined") {
+            highDemandRef.current = Boolean(data.highDemandMessage);
+            setHighDemandMessage(data.highDemandMessage);
+          }
+          if (data.workerHeartbeatAt) {
+            const beat = Date.parse(data.workerHeartbeatAt);
+            if (!Number.isNaN(beat)) heartbeatAtRef.current = beat;
+          }
+          if (data.latestAgentRun) {
+            agentRunStatusRef.current = data.latestAgentRun.status;
+          }
+          if (data.messages) {
+            setMessages(data.messages);
+            const stillAwaiting = isAwaitingAssistantReply(data.messages);
+            const lastMsg = data.messages[data.messages.length - 1];
+            const wasUserInterrupted =
+              lastMsg?.role === "SYSTEM" &&
+              lastMsg.content.startsWith("Interrupted — stopped");
+            const run = data.latestAgentRun;
+            const runFailed =
+              run?.status === "FAILED" && Boolean(run.error?.trim());
+            const runEmpty = run?.status === "SUCCEEDED";
+            const runCancelled = run?.status === "CANCELLED";
+            if (signInBlockedRef.current) {
+              setAwaitingReply(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else if (!stillAwaiting) {
+              gaveUpRef.current = false;
+              turnStartedRef.current = null;
+              setTurnError(null);
+              setSignInBlocked(false);
+              setTurnInterrupted(false);
+              setReplyTimedOut(false);
+              setAwaitingReply(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else if (gaveUpRef.current) {
+              setAwaitingReply(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else if (wasUserInterrupted) {
+              setTurnInterrupted(true);
+              setReplyTimedOut(false);
+              setAwaitingReply(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else if ((runFailed || runEmpty) && run) {
+              gaveUpRef.current = true;
+              setTurnError(
+                cursorFailureFromRun(
+                  run.error || "the agent finished without a reply",
+                ),
+              );
+              setReplyTimedOut(true);
+              setAwaitingReply(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else if (runCancelled) {
+              setTurnInterrupted(true);
+              setReplyTimedOut(false);
+              setAwaitingReply(false);
+              setLiveProgress(null);
+              setLiveDraft(null);
+              setProgressSteps([]);
+            } else {
+              if (!turnStartedRef.current) turnStartedRef.current = Date.now();
+              setAwaitingReply(true);
+            }
+          }
         }
       } catch {
         // ignore malformed events
       }
-    };
-    source.onerror = () => {
-      // browser will retry EventSource automatically
-    };
-    return () => source.close();
+        },
+      },
+    );
   }, [changeRequestId]);
 
+  useEffect(() => {
+    scrollerRef.current?.scrollTo({
+      top: scrollerRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages, showThinking, label, liveDraft, liveProgress]);
+
+  useEffect(() => {
+    if (showThinking) {
+      if (!thinkingStarted.current) thinkingStarted.current = Date.now();
+      const tick = () => {
+        if (thinkingStarted.current) {
+          setThoughtSeconds(
+            Math.max(1, Math.round((Date.now() - thinkingStarted.current) / 1000)),
+          );
+        }
+      };
+      tick();
+      const id = setInterval(tick, 1000);
+      return () => clearInterval(id);
+    }
+    thinkingStarted.current = null;
+    setThoughtSeconds(0);
+  }, [showThinking]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (gaveUpRef.current || turnInterrupted) return;
+      const started = turnStartedRef.current;
+      if (!started) return;
+      const elapsed = Date.now() - started;
+      const heartbeatAge = heartbeatAtRef.current
+        ? Date.now() - heartbeatAtRef.current
+        : elapsed;
+      const runStatus = agentRunStatusRef.current;
+      const queuedOrBusy = serverQueuedRef.current || highDemandRef.current;
+      const silent =
+        !queuedOrBusy &&
+        runStatus !== "RUNNING" &&
+        elapsed >= TURN_SILENT_TIMEOUT_MS &&
+        heartbeatAge >= TURN_SILENT_TIMEOUT_MS;
+      const hung = elapsed >= TURN_HARD_TIMEOUT_MS;
+      if (!silent && !hung) return;
+      gaveUpRef.current = true;
+      setTurnError(CURSOR_NO_RESPONSE_MESSAGE);
+      setReplyTimedOut(true);
+      setAwaitingReply(false);
+      setLiveProgress(null);
+      setLiveDraft(null);
+      setProgressSteps([]);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [turnInterrupted, changeRequestId]);
+
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(140, el.scrollHeight)}px`;
+  }, [prompt]);
+
+  // When the current turn finishes naturally, flush any queued follow-up.
+  useEffect(() => {
+    if (waitingOnReply || pending || interrupting || !queued) {
+      flushQueuedRef.current = false;
+      return;
+    }
+    if (flushQueuedRef.current) return;
+    flushQueuedRef.current = true;
+    const next = queued;
+    setQueued(null);
+    sendMessage({
+      content: next.content,
+      fileAttachments: next.stagedFiles,
+      force: true,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- flush once when idle
+  }, [waitingOnReply, pending, interrupting, queued]);
+
+  const timeline = useMemo(() => {
+    const items: Array<
+      | { type: "message"; message: Message }
+      | {
+          type: "thought";
+          id: string;
+          title: string;
+          summary?: string;
+        }
+    > = [];
+    for (let i = 0; i < messages.length; i += 1) {
+      const message = messages[i]!;
+      if (message.role === "SYSTEM") {
+        if (
+          message.content.startsWith("— Test & request changes —") ||
+          message.content.startsWith("— Ask about your app —")
+        ) {
+          items.push({
+            type: "thought",
+            id: `verify-break-${message.id}`,
+            title: "Ask about your app",
+            summary: message.content
+              .replace(/^— Test & request changes —\n\n/, "")
+              .replace(/^— Ask about your app —\n\n/, ""),
+          });
+          continue;
+        }
+        items.push({
+          type: "thought",
+          id: `sys-${message.id}`,
+          title: "Worked for a moment",
+          summary: message.content,
+        });
+        continue;
+      }
+      if (message.role === "ASSISTANT") {
+        let prevUser: Message | undefined;
+        for (let j = i - 1; j >= 0; j -= 1) {
+          if (messages[j]?.role === "USER") {
+            prevUser = messages[j];
+            break;
+          }
+        }
+        if (prevUser) {
+          const secs = secondsBetween(prevUser.createdAt, message.createdAt);
+          items.push({
+            type: "thought",
+            id: `thought-${message.id}`,
+            title: `Thought ${secs}s`,
+            summary: isVerifyPhase
+              ? "Reviewed your note and updated the build."
+              : "Reviewed your note and updated the repository.",
+          });
+        }
+      }
+      items.push({ type: "message", message });
+    }
+    return items;
+  }, [messages, isVerifyPhase]);
+
+  const placeholder = isProgram
+    ? isPlanning || isVerifyPhase
+      ? "Describe a change. Say push when it should be its own commit."
+      : "Send a message…"
+    : "Ask for another change or clarification…";
+
+  function sendMessage(opts?: {
+    content?: string;
+    attachment?: {
+      kind: Exclude<AttachMode, null>;
+      value: string;
+      fileName?: string;
+      attachmentRef?: string;
+    };
+    /** When set, these replace stagedFiles for this send (docs/examples path). */
+    fileAttachments?: StagedFile[];
+    /** Skip queueing even while a reply is in flight (used after Interrupt). */
+    force?: boolean;
+  }) {
+    const content = (opts?.content ?? prompt).trim();
+    const files = opts?.fileAttachments ?? stagedFiles;
+    const legacyAttachment = opts?.attachment;
+    const attachmentsPayload =
+      files.length > 0
+        ? files.map((f) => ({
+            kind: "file" as const,
+            value: f.excerpt,
+            fileName: f.fileName,
+            attachmentRef: f.attachmentRef,
+          }))
+        : legacyAttachment
+          ? [legacyAttachment]
+          : undefined;
+
+    if (!content && !attachmentsPayload?.length) return;
+
+    // While Koda is still responding, Send queues the next message instead.
+    if (waitingOnReply && !opts?.force) {
+      setQueued({
+        content,
+        stagedFiles: files.map((f) => ({ ...f })),
+      });
+      setPrompt("");
+      setStagedFiles([]);
+      setAttachMode(null);
+      setAttachValue("");
+      setAttachError(null);
+      return;
+    }
+
+    setAttachError(null);
+    setTurnInterrupted(false);
+    gaveUpRef.current = false;
+    turnStartedRef.current = Date.now();
+    heartbeatAtRef.current = null;
+    agentRunStatusRef.current = null;
+    signInBlockedRef.current = false;
+    setSignInBlocked(false);
+    setTurnError(null);
+    setReplyTimedOut(false);
+    setAwaitingReply(true);
+    setLastSentContent(content);
+    startTransition(async () => {
+      let response: Response;
+      try {
+        response = await fetch(
+          `/api/change-requests/${changeRequestId}/messages`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: content || undefined,
+              ...(attachmentsPayload?.length === 1 && !files.length
+                ? { attachment: attachmentsPayload[0] }
+                : {}),
+              ...(attachmentsPayload?.length
+                ? { attachments: attachmentsPayload }
+                : {}),
+            }),
+          },
+        );
+      } catch {
+        gaveUpRef.current = true;
+        setAwaitingReply(false);
+        setTurnError(SEND_BLOCKED_MESSAGE);
+        setReplyTimedOut(true);
+        return;
+      }
+      if (response.ok) {
+        const json = (await response.json()) as {
+          message: Message;
+          assistantMessage?: Message | null;
+          turnQueued?: boolean;
+        };
+        if (json.turnQueued) setServerQueued(true);
+        setMessages((prev) => {
+          const next = [...prev, json.message];
+          if (json.assistantMessage) next.push(json.assistantMessage);
+          return next;
+        });
+        setPrompt("");
+        setStagedFiles([]);
+        setAttachMode(null);
+        setAttachValue("");
+        setAwaitingReply(
+          !(json.assistantMessage && json.assistantMessage.role === "ASSISTANT"),
+        );
+      } else {
+        gaveUpRef.current = true;
+        setAwaitingReply(false);
+        setReplyTimedOut(true);
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string | { formErrors?: string[] };
+        };
+        const err =
+          typeof data.error === "string"
+            ? data.error
+            : Array.isArray(data.error?.formErrors)
+              ? data.error.formErrors[0]
+              : null;
+        const failure = err || "Could not send — try again.";
+        setTurnError(failure);
+        setAttachError(failure);
+      }
+    });
+  }
+
+  function retryLastMessage() {
+    let content = lastSentContent;
+    if (!content) {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        if (messages[i]?.role === "USER") {
+          content = messages[i]!.content;
+          break;
+        }
+      }
+    }
+    if (!content?.trim()) return;
+    setReplyTimedOut(false);
+    setServerQueued(false);
+    sendMessage({ content, force: true });
+  }
+
+  function editQueued() {
+    if (!queued) return;
+    setPrompt(queued.content);
+    setStagedFiles(queued.stagedFiles);
+    setQueued(null);
+    textareaRef.current?.focus();
+  }
+
+  function cancelQueued() {
+    setQueued(null);
+  }
+
+  async function interruptTurn(andSendQueued: boolean) {
+    if (interrupting) return;
+    setInterrupting(true);
+    setAttachError(null);
+    // Client-side stop waiting immediately (SSE may still deliver a late reply).
+    setTurnInterrupted(true);
+    setAwaitingReply(false);
+    try {
+      const response = await fetch(
+        `/api/change-requests/${changeRequestId}/actions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "interrupt" }),
+        },
+      );
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setAttachError(data.error ?? "Could not interrupt — try again.");
+      }
+    } catch {
+      setAttachError("Could not interrupt — try again.");
+    } finally {
+      setInterrupting(false);
+    }
+
+    if (andSendQueued && queued) {
+      const next = queued;
+      setQueued(null);
+      sendMessage({
+        content: next.content,
+        fileAttachments: next.stagedFiles,
+        force: true,
+      });
+    }
+  }
+
+  function submitAttach() {
+    if (!attachMode) return;
+    if (!attachValue.trim()) {
+      setAttachError("Add something to attach first.");
+      return;
+    }
+    sendMessage({
+      attachment: { kind: attachMode, value: attachValue.trim() },
+    });
+  }
+
+  async function prepareFileAttachment(file: File): Promise<{
+    value: string;
+    fileName: string;
+    kind: string;
+    attachmentRef?: string;
+  } | null> {
+    const sizeError = validatePlanningFileSize(file.size);
+    if (sizeError) {
+      setAttachError(sizeError);
+      return null;
+    }
+
+    const kind = classifyPlanningFile({
+      fileName: file.name,
+      mimeType: file.type,
+    });
+    if (kind === "unsupported") {
+      setAttachError(
+        formatPlanningFileRejection({
+          fileName: file.name,
+          mimeType: file.type,
+        }),
+      );
+      return null;
+    }
+
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(
+      `/api/change-requests/${changeRequestId}/extract-file`,
+      { method: "POST", body: form },
+    );
+    const data = (await res.json().catch(() => ({}))) as {
+      error?: string;
+      excerpt?: string;
+      fileName?: string;
+      kind?: string;
+      attachmentRef?: string;
+    };
+    if (!res.ok || !data.excerpt || !data.attachmentRef) {
+      setAttachError(data.error || "Could not read that file.");
+      return null;
+    }
+    return {
+      value: data.excerpt.slice(0, 20000),
+      fileName: data.fileName || file.name,
+      kind: data.kind || kind,
+      attachmentRef: data.attachmentRef,
+    };
+  }
+
+  /** Stage files in the composer — do not send until Send / Enter. */
+  async function onFilesPicked(list: FileList | File[] | null) {
+    const incoming = list ? Array.from(list) : [];
+    if (!incoming.length) return;
+    setAttachError(null);
+
+    const remaining = PLANNING_MAX_FILES_PER_MESSAGE - stagedFiles.length;
+    if (remaining <= 0) {
+      setAttachError(
+        `You can attach up to ${PLANNING_MAX_FILES_PER_MESSAGE} files per message.`,
+      );
+      return;
+    }
+    const batch = incoming.slice(0, remaining);
+    if (incoming.length > remaining) {
+      setAttachError(
+        `Only ${remaining} more file(s) can be added (max ${PLANNING_MAX_FILES_PER_MESSAGE}).`,
+      );
+    }
+
+    setPreparingFile(true);
+    try {
+      const added: StagedFile[] = [];
+      for (const file of batch) {
+        const prepared = await prepareFileAttachment(file);
+        if (!prepared?.attachmentRef) continue;
+        added.push({
+          id: `${prepared.attachmentRef}-${Date.now()}-${added.length}`,
+          fileName: prepared.fileName,
+          kind: prepared.kind,
+          excerpt: prepared.value,
+          attachmentRef: prepared.attachmentRef,
+        });
+      }
+      if (added.length) {
+        setStagedFiles((prev) =>
+          [...prev, ...added].slice(0, PLANNING_MAX_FILES_PER_MESSAGE),
+        );
+      }
+    } catch {
+      setAttachError("Could not prepare that file.");
+    } finally {
+      setPreparingFile(false);
+    }
+  }
+
+  function removeStagedFile(id: string) {
+    setStagedFiles((prev) => prev.filter((f) => f.id !== id));
+  }
+
+  async function submitSecrets() {
+    const secrets = secretDrafts
+      .map((s) => ({ keyName: s.keyName.trim(), value: s.value }))
+      .filter((s) => s.keyName && s.value);
+    if (secrets.length === 0) {
+      setAttachError("Add at least one name and value.");
+      return;
+    }
+    setAttachError(null);
+    setSavingSecrets(true);
+    try {
+      const response = await fetch(
+        `/api/change-requests/${changeRequestId}/secrets`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ secrets }),
+        },
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        saved?: Array<{ keyName: string; message: string }>;
+      };
+      if (!response.ok) {
+        setAttachError(data.error || "Could not save secrets.");
+        return;
+      }
+      setSecretDrafts([{ keyName: "", value: "" }]);
+      setAttachMode(null);
+      if (data.saved?.length) {
+        setMessages((prev) => [
+          ...prev,
+          ...data.saved!.map((s, i) => ({
+            id: `local-secret-${Date.now()}-${i}`,
+            role: "SYSTEM",
+            content: s.message,
+            createdAt: new Date().toISOString(),
+          })),
+        ]);
+      }
+      router.refresh();
+    } catch {
+      setAttachError("Could not save secrets — try again.");
+    } finally {
+      setSavingSecrets(false);
+    }
+  }
+
+  function postProgramAction(action: "submit_final_review") {
+    setActionError(null);
+    setSubmitting(true);
+    startTransition(async () => {
+      try {
+        const response = await fetch(
+          `/api/change-requests/${changeRequestId}/actions`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action }),
+          },
+        );
+        if (!response.ok) {
+          const data = (await response.json().catch(() => ({}))) as {
+            error?: string;
+          };
+          setActionError(data.error ?? "Action failed — try again.");
+          return;
+        }
+        router.refresh();
+      } finally {
+        setSubmitting(false);
+      }
+    });
+  }
+
+  const planningStatus = isPlanning || isVerifyPhase
+    ? showThinking
+      ? "Agent"
+      : "Ready"
+    : isBuildLocked
+      ? "Submitted — building"
+      : status.replaceAll("_", " ");
+
+  const chatTitle = title ?? "Chat";
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex-1 space-y-3 overflow-y-auto pr-1">
-        {messages.map((message) => (
-          <div
-            key={message.id}
-            className={`rounded-xl border border-[var(--line)] p-3 ${
-              message.role === "USER" ? "bg-white/5" : "bg-black/20"
-            }`}
+    <div className="agent-chat">
+      <div className="ide-main-header">
+        <div className="ide-main-title">
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+            className="opacity-50"
           >
-            <p className="muted mb-1 text-xs uppercase tracking-wide">
-              {message.role === "USER"
-                ? "You"
-                : message.role === "SYSTEM"
-                  ? "System"
-                  : "Assistant"}
+            <path
+              d="M3 10.5c1.5-3 3.5-4.5 5-4.5s3.5 1.5 5 4.5"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+            />
+            <circle cx="8" cy="5" r="1.4" fill="currentColor" opacity="0.55" />
+          </svg>
+          <span>{chatTitle}</span>
+        </div>
+        <span className="status-pill">{planningStatus}</span>
+      </div>
+
+      <div ref={scrollerRef} className="agent-chat-scroll">
+        {timeline.map((item) => {
+          if (item.type === "thought") {
+            return (
+              <ThoughtBlock
+                key={item.id}
+                title={item.title}
+                summary={item.summary}
+              />
+            );
+          }
+          const message = item.message;
+          if (message.role === "USER") {
+            return (
+              <div key={message.id} className="agent-msg agent-msg-user rise">
+                <MarkdownBody
+                  content={message.content}
+                  className="agent-msg-body koda-markdown"
+                />
+              </div>
+            );
+          }
+          return (
+            <div
+              key={message.id}
+              className="agent-msg agent-msg-assistant rise"
+            >
+              <MarkdownBody
+                content={message.content}
+                className="agent-msg-body koda-markdown"
+              />
+              <div className="agent-msg-actions" aria-hidden="true">
+                <button type="button" tabIndex={-1} title="Helpful">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M5.5 14H4a1 1 0 01-1-1V8a1 1 0 011-1h1.5M5.5 7V4.5A1.5 1.5 0 017 3h.2c.6 0 1.1.4 1.3 1L10 8h2.5a1.5 1.5 0 011.5 1.7l-.6 3A1.5 1.5 0 0111.9 14H5.5z"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                <button type="button" tabIndex={-1} title="Not helpful">
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M10.5 2H12a1 1 0 011 1v5a1 1 0 01-1 1h-1.5M10.5 9v2.5A1.5 1.5 0 019 13h-.2c-.6 0-1.1-.4-1.3-1L6 8H3.5A1.5 1.5 0 012 6.3l.6-3A1.5 1.5 0 014.1 2H10.5z"
+                      stroke="currentColor"
+                      strokeWidth="1.2"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        {showThinking ? (
+          <>
+            <ThoughtBlock
+              title={liveThoughtTitle}
+              summary={liveThoughtSummary}
+              steps={progressSteps}
+              openDefault
+              live
+            />
+            {liveDraft ? (
+              <div className="agent-msg agent-msg-assistant agent-msg-streaming rise">
+                <MarkdownBody content={liveDraft} className="agent-msg-body" />
+              </div>
+            ) : null}
+          </>
+        ) : null}
+
+        {replyTimedOut ? (
+          <div
+            className="agent-msg agent-msg-assistant rise"
+            role="alert"
+            style={{ borderColor: "var(--ide-danger)" }}
+          >
+            <p className="agent-msg-body" style={{ margin: 0 }}>
+              {turnInterrupted
+                ? "That response was stopped. Send your message again when you are ready."
+                : (turnError ?? CURSOR_NO_RESPONSE_MESSAGE)}
             </p>
-            <p className="whitespace-pre-wrap text-sm leading-relaxed">
-              {message.content}
+            {!turnInterrupted && !signInBlocked ? (
+              <button
+                type="button"
+                className="btn btn-primary mt-3"
+                disabled={inputBusy}
+                onClick={retryLastMessage}
+              >
+                Retry last message
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {showRetry && !replyTimedOut ? (
+          <div className="composer-submit mx-auto mt-2 px-1">
+            <button
+              type="button"
+              className="btn btn-primary w-full"
+              disabled={inputBusy}
+              onClick={retryLastMessage}
+            >
+              Retry last message
+            </button>
+          </div>
+        ) : null}
+
+        {highDemandMessage && showThinking ? (
+          <p className="text-xs muted text-center mt-2" role="status">
+            {highDemandMessage}
+          </p>
+        ) : null}
+
+        {serverQueued && showThinking ? (
+          <p className="text-xs muted text-center mt-2" role="status">
+            Your note is queued on the server — it will send when the current reply
+            finishes.
+          </p>
+        ) : null}
+
+        {isBuildLocked ? (
+          <div
+            className="agent-msg agent-msg-assistant rise"
+            role="status"
+            style={{
+              borderColor:
+                "color-mix(in oklab, var(--ide-accent) 35%, transparent)",
+            }}
+          >
+            <p className="agent-msg-body" style={{ margin: 0 }}>
+              <strong>Submitted — your developer is building.</strong> Chat
+              is closed until they mark the build ready for testing. You can
+              ask how things work and request code changes when that opens.
             </p>
           </div>
-        ))}
-        {["ANALYZING", "PLANNING", "IMPLEMENTING", "TESTING"].includes(
-          status,
-        ) ? (
-          <p className="muted pulse-soft text-sm">Working on your request…</p>
         ) : null}
+
         {status === "FAILED" ? (
-          <p className="text-sm text-[var(--danger)]">
+          <p className="text-sm" style={{ color: "var(--ide-danger)" }}>
             Something went wrong. Use Retry in the actions panel.
           </p>
         ) : null}
       </div>
 
-      <form
-        className="mt-4 flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!prompt.trim()) return;
-          startTransition(async () => {
-            const response = await fetch(
-              `/api/change-requests/${changeRequestId}/messages`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ content: prompt }),
-              },
-            );
-            if (response.ok) {
-              const json = (await response.json()) as { message: Message };
-              setMessages((prev) => [...prev, json.message]);
-              setPrompt("");
+      <div className="pill-composer-wrap">
+        {showThinking || (replyTimedOut && waitingOnReply === false) ? (
+          <div className="composer-status">
+            <span>
+              <strong>{showThinking ? "1 Working" : "Stalled"}</strong>
+            </span>
+            <span>
+              Updates{" "}
+              <span className="stat-add">live</span>
+            </span>
+            <button
+              type="button"
+              className="composer-interrupt"
+              disabled={interrupting}
+              title="Stop the current response"
+              onClick={() => void interruptTurn(Boolean(queued))}
+            >
+              <IconStop />
+              <span>{interrupting ? "Stopping…" : "Interrupt"}</span>
+            </button>
+          </div>
+        ) : null}
+
+        {queuedPreview ? (
+          <div className="queued-message" aria-live="polite">
+            <span className="queued-message-label">Queued</span>
+            <span className="queued-message-text" title={queuedPreview}>
+              {queuedPreview}
+            </span>
+            {queued?.stagedFiles.length ? (
+              <span className="queued-message-files">
+                {queued.stagedFiles.length} file
+                {queued.stagedFiles.length === 1 ? "" : "s"}
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className="queued-message-action"
+              disabled={inputBusy}
+              onClick={editQueued}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className="queued-message-action"
+              disabled={inputBusy}
+              onClick={cancelQueued}
+            >
+              Cancel
+            </button>
+            {showThinking ? (
+              <button
+                type="button"
+                className="queued-message-action queued-message-send-now"
+                disabled={inputBusy}
+                onClick={() => void interruptTurn(true)}
+              >
+                Send now
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {isPlanning ? (
+          <div className="attach-menu-anchor">
+            {attachMenuOpen ? (
+              <div className="attach-menu" role="menu">
+                {(
+              [
+                ["api_docs_url", "API docs URL"],
+                ["docs_text", "Paste docs"],
+                ["examples", "Paste examples"],
+                ["file", "Upload file"],
+                ["secrets", "Add secrets / credentials"],
+              ] as const
+            ).map(([kind, chipLabel]) => (
+              <button
+                key={kind}
+                type="button"
+                className="attach-menu-item"
+                onClick={() => {
+                  setAttachError(null);
+                  setAttachMenuOpen(false);
+                  if (kind === "file") {
+                    setAttachMode(null);
+                    fileRef.current?.click();
+                    return;
+                  }
+                  setAttachMode((prev) => (prev === kind ? null : kind));
+                  setAttachValue("");
+                  if (kind === "secrets") {
+                    setSecretDrafts([{ keyName: "", value: "" }]);
+                  }
+                }}
+              >
+                {chipLabel}
+              </button>
+            ))}
+              </div>
+            ) : null}
+            <input
+              ref={fileRef}
+              type="file"
+              className="hidden"
+              multiple
+              accept={PLANNING_FILE_ACCEPT}
+              onChange={(e) => {
+                void onFilesPicked(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+        ) : null}
+
+        {stagedFiles.length > 0 || preparingFile ? (
+          <div className="staged-files" aria-live="polite">
+            {stagedFiles.map((f) => (
+              <span key={f.id} className="staged-file-chip" title={f.excerpt.slice(0, 200)}>
+                <span className="staged-file-name">{f.fileName}</span>
+                <span className="staged-file-kind">{f.kind}</span>
+                <button
+                  type="button"
+                  className="staged-file-remove"
+                  aria-label={`Remove ${f.fileName}`}
+                  disabled={inputBusy}
+                  onClick={() => removeStagedFile(f.id)}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {preparingFile ? (
+              <span className="staged-file-chip staged-file-pending">
+                Preparing file…
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
+        {attachMode === "secrets" ? (
+          <div className="attach-panel space-y-3">
+            <p className="text-sm" style={{ color: "var(--ide-ink-secondary)" }}>
+              Paste each variable name and value. Values are encrypted in Koda
+              for this project and are not committed to git. The AWS deploy
+              target for this project is not connected yet, so they are not sent
+              to a host. Use a clear name (e.g. <code>HHA_PASSWORD</code>). The
+              app will read <code>process.env.HHA_PASSWORD</code> once that
+              target is connected.
+            </p>
+            {secretDrafts.map((row, index) => (
+              <div key={index} className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  className="field"
+                  type="text"
+                  autoComplete="off"
+                  placeholder="Name (e.g. HHA_PASSWORD)"
+                  value={row.keyName}
+                  onChange={(e) => {
+                    const next = [...secretDrafts];
+                    next[index] = { ...row, keyName: e.target.value };
+                    setSecretDrafts(next);
+                  }}
+                />
+                <input
+                  className="field"
+                  type="password"
+                  autoComplete="new-password"
+                  placeholder="Secret value"
+                  value={row.value}
+                  onChange={(e) => {
+                    const next = [...secretDrafts];
+                    next[index] = { ...row, value: e.target.value };
+                    setSecretDrafts(next);
+                  }}
+                />
+              </div>
+            ))}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={inputBusy || secretDrafts.length >= 20}
+                onClick={() =>
+                  setSecretDrafts((prev) => [...prev, { keyName: "", value: "" }])
+                }
+              >
+                Add another
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={inputBusy}
+                onClick={() => void submitSecrets()}
+              >
+                {savingSecrets ? "Saving…" : "Save securely"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setAttachMode(null);
+                  setSecretDrafts([{ keyName: "", value: "" }]);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {attachMode && attachMode !== "file" && attachMode !== "secrets" ? (
+          <div className="attach-panel space-y-2">
+            {attachMode === "api_docs_url" ? (
+              <input
+                className="field"
+                type="url"
+                placeholder="https://… API documentation"
+                value={attachValue}
+                onChange={(e) => setAttachValue(e.target.value)}
+              />
+            ) : (
+              <textarea
+                className="field min-h-24"
+                placeholder={
+                  attachMode === "examples"
+                    ? "Paste example requests / responses…"
+                    : "Paste documentation excerpts…"
+                }
+                value={attachValue}
+                onChange={(e) => setAttachValue(e.target.value)}
+              />
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={inputBusy}
+                onClick={submitAttach}
+              >
+                Attach
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => {
+                  setAttachMode(null);
+                  setAttachValue("");
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {attachError ? (
+          <p
+            className="mb-2 text-sm"
+            style={{ color: "var(--ide-danger)", maxWidth: "var(--measure-chat)", marginInline: "auto" }}
+          >
+            {attachError}
+          </p>
+        ) : null}
+
+        <form
+          className="pill-composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (!canSend) return;
+            sendMessage({ content: prompt });
+          }}
+        >
+          <button
+            type="button"
+            className="pill-attach"
+            disabled={!isPlanning || inputBusy}
+            title="Attach"
+            aria-expanded={attachMenuOpen}
+            onClick={() => {
+              if (!isPlanning) return;
+              setAttachMenuOpen((v) => !v);
+            }}
+          >
+            <IconPlus />
+          </button>
+          {isPlanning || isVerifyPhase || connectedRepo ? (
+            <span
+              className="pill-mode"
+              title="Agent mode edits the connected repository. Say push when that change should be its own commit."
+            >
+              Agent
+            </span>
+          ) : null}
+          <textarea
+            ref={textareaRef}
+            className="pill-input"
+            rows={1}
+            placeholder={
+              chatLocked
+                ? "Chat is closed while your developer builds…"
+                : pending
+                  ? "Sending…"
+                  : waitingOnReply
+                    ? queued
+                      ? "Edit queue above, or Interrupt to send now…"
+                      : "Type to queue the next message…"
+                    : preparingFile
+                      ? "File ready when prepared — add a note or press Send…"
+                      : stagedFiles.length
+                        ? "Add a message (optional) and press Send…"
+                        : placeholder
             }
-          });
-        }}
-      >
-        <input
-          className="field"
-          placeholder="Ask for another change or clarification…"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-        />
-        <button className="btn btn-primary" disabled={pending}>
-          Send
-        </button>
-      </form>
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            disabled={
+              chatLocked || pending || savingSecrets || interrupting
+            }
+            aria-busy={inputBusy}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (canSend) {
+                  sendMessage({ content: prompt });
+                }
+              }
+            }}
+          />
+          <div className="pill-right">
+            <span className="pill-model">
+              Auto
+              <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+                <path
+                  d="M2.5 3.5L5 6.5L7.5 3.5"
+                  stroke="currentColor"
+                  strokeWidth="1.3"
+                  fill="none"
+                  strokeLinecap="round"
+                />
+              </svg>
+            </span>
+            {showThinking ? (
+              <button
+                type="button"
+                className="pill-interrupt"
+                disabled={interrupting}
+                aria-label="Interrupt"
+                title={
+                  queued
+                    ? "Interrupt and send queued message"
+                    : "Interrupt current response"
+                }
+                onClick={() => void interruptTurn(Boolean(queued))}
+              >
+                <IconStop />
+              </button>
+            ) : null}
+            <button
+              type="submit"
+              className="pill-send"
+              disabled={!canSend}
+              aria-label={waitingOnReply ? "Queue message" : "Send"}
+              title={waitingOnReply ? "Queue for when Koda finishes" : "Send"}
+            >
+              <IconSend />
+            </button>
+          </div>
+        </form>
+
+        <div className="composer-foot">
+          <span>
+            {liveLink === "connected"
+              ? "Live"
+              : liveLink === "reconnecting"
+                ? "Reconnecting…"
+                : "Connecting…"}
+            {connectedRepo
+              ? " · Connected repo · say push for its own commit"
+              : isPlanning || isVerifyPhase
+                ? " · Agent"
+                : isBuildLocked
+                  ? " · Waiting on your developer"
+                  : ""}
+          </span>
+          <span className="composer-foot-branch">{showThinking ? "Working" : "Ready"}</span>
+        </div>
+
+        {isVerifyPhase ? (
+          <div className="composer-submit mx-auto mt-3 px-1 space-y-2">
+            <button
+              type="button"
+              className="btn btn-primary w-full"
+              disabled={inputBusy || submitting}
+              onClick={() => postProgramAction("submit_final_review")}
+            >
+              Submit for final review
+            </button>
+            <p className="text-xs muted text-center">
+              Edits you request here update the live preview when auto-deploy is
+              on. When you are satisfied, submit for your developer to approve.
+            </p>
+          </div>
+        ) : null}
+
+        {actionError ? (
+          <p className="composer-action-error text-sm">{actionError}</p>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Register Automation Studio GitHub App</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; line-height: 1.5; }
+    .steps { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.5rem 0; }
+    .steps ol { margin: 0.5rem 0 0; padding-left: 1.25rem; }
+    .muted { color: #666; }
+    code { background: #f4f4f4; padding: 0.1rem 0.35rem; border-radius: 4px; }
+    button { font: inherit; font-weight: 600; background: #24292f; color: #fff; border: none; border-radius: 6px; padding: 0.65rem 1.25rem; cursor: pointer; margin-top: 0.5rem; }
+    button:hover { background: #32383f; }
+  </style>
+</head>
+<body>
+  <h1>Register GitHub App</h1>
+  <div class="steps">
+    <strong>How to use this file</strong>
+    <ol>
+      <li>Save this file as <code>register-github-app.html</code> (not <code>.txt</code>).</li>
+      <li>Right-click the file → <strong>Open with</strong> → Chrome or Edge.</li>
+      <li>Click <strong>Continue to GitHub</strong> below (no auto-redirect — you must click).</li>
+      <li>Sign into GitHub as your GitHub account owner if prompted; review the app and click <strong>Create GitHub App</strong>.</li>
+      <li>Copy the one-time <code>code</code> from the redirect URL and paste it to the cloud agent (or run <code>pnpm register:github-app -- --code=…</code>).</li>
+    </ol>
+  </div>
+  <p class="muted">If the button does not work (NetFree blocks form POST), create the app manually — see <code>docs/github-app-setup.md</code> Option D.</p>
+  <form action="https://github.com/settings/apps/new?state=214c5cb8b5a166daabcc87dd1d553326" method="post">
+    <input type="hidden" name="manifest" value="{&quot;name&quot;:&quot;Automation Studio&quot;,&quot;url&quot;:&quot;https://web-production-98ce0.up.railway.app&quot;,&quot;description&quot;:&quot;Automation Studio — AI-assisted change requests with branch/PR workflows.&quot;,&quot;public&quot;:false,&quot;hook_attributes&quot;:{&quot;url&quot;:&quot;https://web-production-98ce0.up.railway.app/api/webhooks/github&quot;,&quot;active&quot;:true},&quot;redirect_url&quot;:&quot;https://github.com/settings/apps&quot;,&quot;callback_urls&quot;:[&quot;https://web-production-98ce0.up.railway.app/api/github/install/callback&quot;],&quot;setup_url&quot;:&quot;https://web-production-98ce0.up.railway.app/api/github/install/callback&quot;,&quot;default_permissions&quot;:{&quot;contents&quot;:&quot;write&quot;,&quot;pull_requests&quot;:&quot;write&quot;,&quot;statuses&quot;:&quot;read&quot;,&quot;checks&quot;:&quot;read&quot;,&quot;administration&quot;:&quot;read&quot;},&quot;default_events&quot;:[&quot;pull_request&quot;,&quot;check_suite&quot;,&quot;check_run&quot;,&quot;status&quot;]}" />
+    <button type="submit">Continue to GitHub</button>
+  </form>
+</body>
+</html>

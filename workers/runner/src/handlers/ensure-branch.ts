@@ -1,9 +1,15 @@
 import { db } from "@automation-studio/db";
-import { buildBranchName, slugify } from "@automation-studio/domain";
+import {
+  buildBranchName,
+  connectedRepoStartPrompt,
+  cursorFailureChatMessage,
+  shouldRunConnectedRepoAgent,
+  slugify,
+  type PlanningMeta,
+} from "@automation-studio/domain";
 import { createBranchFromDefault } from "@automation-studio/github";
 import { enqueueJob, type EnsureBranchJobData } from "@automation-studio/jobs";
 import { writeAuditEvent } from "@automation-studio/auth";
-import { transitionChangeRequest } from "../lib/transition.js";
 
 export async function handleEnsureBranch(data: EnsureBranchJobData) {
   const cr = await db.changeRequest.findFirstOrThrow({
@@ -11,18 +17,22 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     include: {
       createdBy: true,
       project: { include: { repository: true } },
+      messages: { orderBy: { createdAt: "asc" }, take: 40 },
     },
   });
 
   const repo = cr.project.repository;
   if (!repo) {
-    await transitionChangeRequest({
-      changeRequestId: cr.id,
-      companyId: data.companyId,
-      toStatus: "FAILED",
-      reason: "Project has no connected GitHub repository",
+    await db.changeRequestMessage.create({
+      data: {
+        changeRequestId: cr.id,
+        role: "ASSISTANT",
+        content: cursorFailureChatMessage(
+          "this project has no connected GitHub repo. An admin has to connect one before the agent can edit it",
+        ),
+      },
     });
-    throw new Error("No repository connected");
+    return { ok: false, reason: "no_repository" };
   }
 
   const shortDescription = cr.shortDescription ?? slugify(cr.title);
@@ -56,14 +66,72 @@ export async function handleEnsureBranch(data: EnsureBranchJobData) {
     metadata: { branchName, sha: result.sha },
   });
 
-  const needsPlan = cr.classification === "COMPLEX" || cr.classification === "HIGH_RISK";
-
-  await enqueueJob("cursor.start-agent", {
-    changeRequestId: cr.id,
-    companyId: data.companyId,
-    mode: needsPlan ? "plan" : "agent",
-    prompt: `${cr.title}\n\n${cr.description}`.trim(),
+  let planningMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+  const connectedRepo = shouldRunConnectedRepoAgent({
+    kind: cr.kind,
+    status: cr.status,
+    hasRepository: true,
+    iterateExisting: planningMeta.iterateExisting,
   });
+  if (connectedRepo && !planningMeta.iterateExisting) {
+    planningMeta = {
+      ...planningMeta,
+      iterateExisting: true,
+      linkedRepoLabel: `${repo.githubOwner}/${repo.githubRepo}`,
+    };
+    await db.changeRequest.update({
+      where: { id: cr.id },
+      data: { planningMeta: planningMeta as object, updatedAt: new Date() },
+    });
+  }
+
+  // Agent mode only. Plan-only sessions are not started.
+  const mode: "plan" | "agent" = "agent";
+
+  const prompt =
+    data.prompt?.trim() ||
+    (connectedRepo
+      ? connectedRepoStartPrompt({
+          title: cr.title,
+          repoLabel: `${repo.githubOwner}/${repo.githubRepo}`,
+        })
+      : `${cr.title}\n\n${cr.description}`.trim());
+
+  await enqueueJob(
+    "cursor.start-agent",
+    {
+      changeRequestId: cr.id,
+      companyId: data.companyId,
+      mode,
+      prompt,
+      pushRequest: data.pushRequest,
+      attachmentRef:
+        data.attachmentRef ??
+        ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRef ??
+        undefined,
+      attachmentRefs:
+        data.attachmentRefs ??
+        ((cr.planningMeta ?? {}) as PlanningMeta).pendingAttachmentRefs ??
+        undefined,
+    },
+    { jobId: `cursor-start-${cr.id}` },
+  );
+
+  // Clear one-shot pending attachment so it is not re-sent on later starts.
+  const priorMeta = (cr.planningMeta ?? {}) as PlanningMeta;
+  if (priorMeta.pendingAttachmentRef || priorMeta.pendingAttachmentRefs?.length) {
+    await db.changeRequest.update({
+      where: { id: cr.id },
+      data: {
+        planningMeta: {
+          ...priorMeta,
+          pendingAttachmentRef: null,
+          pendingAttachmentRefs: null,
+        } as object,
+        updatedAt: new Date(),
+      },
+    });
+  }
 
   return { branchName };
 }
